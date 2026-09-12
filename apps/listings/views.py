@@ -1,0 +1,1507 @@
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.shortcuts import get_object_or_404
+
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+)
+
+from rest_framework import permissions, status, viewsets
+from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .models import (
+    BusinessDetails,
+    EquipmentDetails,
+    LandDetails,
+    Listing,
+    ListingFee,
+    ListingImage,
+    PropertyDetails,
+    VehicleDetails,
+)
+
+from .permissions import (
+    IsOwnerOrAdmin,
+    IsVerifiedUser,
+)
+
+from .serializers import (
+    AdminPendingListingSerializer,
+    BusinessDetailsSerializer,
+    EquipmentDetailsSerializer,
+    LandDetailsSerializer,
+    ListingDetailSerializer,
+    ListingFeePaymentSerializer,
+    ListingFeeSerializer,
+    ListingImageSerializer,
+    ListingListSerializer,
+    ListingRejectionSerializer,
+    ListingWriteSerializer,
+    PropertyDetailsSerializer,
+    VehicleDetailsSerializer,
+)
+
+from .services.listing_fee import create_listing_fee
+
+from .services.listing_moderation import (
+    approve_listing,
+    reject_listing,
+)
+
+from .services.listing_payment import mark_listing_fee_as_paid
+# ============================================================================
+# CATEGORY NAMES
+# ============================================================================
+
+CATEGORY_NAMES = {
+    "PROPERTY": "Nyumba & Majengo",
+    "LAND": "Viwanja & Mashamba",
+    "VEHICLE": "Magari",
+    "BUSINESS": "Biashara Zinazouzwa",
+    "EQUIPMENT": "Mashine / Heavy Equipment",
+}
+
+
+# ============================================================================
+# LISTING VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Orodha ya matangazo",
+        description="Huonyesha matangazo yanayopatikana.",
+    ),
+    retrieve=extend_schema(
+        summary="Angalia tangazo",
+        description="Huonyesha taarifa kamili za tangazo.",
+    ),
+    create=extend_schema(
+        summary="Weka tangazo",
+        description=(
+            "Mtumiaji aliyethibitishwa anaweza kuunda tangazo. "
+            "Muuzaji anawekwa moja kwa moja kutoka kwenye akaunti."
+        ),
+        examples=[
+            OpenApiExample(
+                "Mfano wa tangazo",
+                value={
+                    "category_id": 1,
+                    "title": "Nyumba nzuri ya vyumba 4 Dar es Salaam",
+                    "description": (
+                        "Nyumba nzuri yenye vyumba vinne, "
+                        "maegesho na huduma muhimu."
+                    ),
+                    "price": "350000000.00",
+                    "location": "Mikocheni, Dar es Salaam",
+                },
+                request_only=True,
+            )
+        ],
+    ),
+    update=extend_schema(
+        summary="Badilisha tangazo",
+    ),
+    partial_update=extend_schema(
+        summary="Badilisha sehemu ya tangazo",
+    ),
+    destroy=extend_schema(
+        summary="Futa/hifadhi tangazo",
+    ),
+)
+class ListingViewSet(viewsets.ModelViewSet):
+
+    queryset = Listing.objects.select_related(
+        "seller",
+        "category",
+    ).prefetch_related(
+        "images",
+        "property_details",
+        "land_details",
+        "vehicle_details",
+        "business_details",
+        "equipment_details",
+    )
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        if not user.is_authenticated:
+            return queryset.filter(
+                status__in=[
+                    Listing.Status.AVAILABLE,
+                    Listing.Status.RESERVED,
+                    Listing.Status.SOLD,
+                ]
+            )
+
+        if user.is_staff:
+            return queryset
+
+        return queryset.filter(
+            status__in=[
+                Listing.Status.AVAILABLE,
+                Listing.Status.RESERVED,
+                Listing.Status.SOLD,
+            ]
+        ) | queryset.filter(
+            seller=user
+        )
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return ListingListSerializer
+
+        if self.action == "retrieve":
+            return ListingDetailSerializer
+
+        return ListingWriteSerializer
+
+    def get_permissions(self):
+        if self.action in [
+            "list",
+            "retrieve",
+        ]:
+            permission_classes = [
+                permissions.AllowAny,
+            ]
+
+        elif self.action == "create":
+            permission_classes = [
+                IsVerifiedUser,
+            ]
+
+        else:
+            permission_classes = [
+                IsOwnerOrAdmin,
+            ]
+
+        return [
+            permission()
+            for permission in permission_classes
+        ]
+
+    def perform_create(self, serializer):
+        serializer.save(
+            seller=self.request.user,
+            status=Listing.Status.DRAFT,
+        )
+
+    def perform_update(self, serializer):
+        instance = self.get_object()
+
+        if self.request.user.is_staff:
+            serializer.save()
+            return
+
+        serializer.save(
+            seller=instance.seller,
+            status=instance.status,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        listing = self.get_object()
+
+        if request.user.is_staff:
+            listing.delete()
+
+            return Response(
+                {
+                    "detail": "Tangazo limefutwa kabisa."
+                },
+                status=status.HTTP_204_NO_CONTENT,
+            )
+
+        listing.status = Listing.Status.ARCHIVED
+
+        listing.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        )
+
+        return Response(
+            {
+                "detail": (
+                    "Tangazo limehifadhiwa "
+                    "kwenye kumbukumbu."
+                )
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================================
+# REUSABLE CATEGORY DETAILS VIEWSET
+# ============================================================================
+
+class CategoryDetailsViewSet(viewsets.ModelViewSet):
+
+    lookup_url_kwarg = "listing_id"
+
+    detail_model = None
+    detail_serializer = None
+    required_category = None
+    already_exists_message = "Maelezo tayari yapo."
+    created_message = "Maelezo yameongezwa."
+    deleted_message = "Maelezo yamefutwa."
+
+    def get_queryset(self):
+        listing = self.get_listing()
+
+        return self.detail_model.objects.filter(
+            listing=listing
+        )
+
+    def get_serializer_class(self):
+        return self.detail_serializer
+
+    def get_permissions(self):
+        if self.action == "retrieve":
+            return [
+                permissions.AllowAny()
+            ]
+
+        return [
+            IsVerifiedUser(),
+            IsOwnerOrAdmin(),
+        ]
+
+    def get_listing(self):
+        return get_object_or_404(
+            Listing.objects.select_related(
+                "seller",
+                "category",
+            ),
+            pk=self.kwargs[
+                self.lookup_url_kwarg
+            ],
+        )
+
+    def check_owner(self, listing):
+        if self.request.user.is_staff:
+            return True
+
+        return listing.seller_id == self.request.user.id
+
+    def validate_listing_category(self, listing):
+        if listing.category.name != self.required_category:
+            return Response(
+                {
+                    "detail": (
+                        f"Tangazo hili si la kundi "
+                        f"{self.required_category}."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return None
+
+    def create(self, request, *args, **kwargs):
+        listing = self.get_listing()
+
+        if not self.check_owner(listing):
+            return Response(
+                {
+                    "detail": (
+                        "Huna ruhusa ya kubadilisha "
+                        "taarifa za tangazo ambalo si lako."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        category_error = self.validate_listing_category(
+            listing
+        )
+
+        if category_error:
+            return category_error
+
+        if self.detail_model.objects.filter(
+            listing=listing
+        ).exists():
+            return Response(
+                {
+                    "detail": self.already_exists_message
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(
+            data=request.data
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        serializer.save(
+            listing=listing
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        listing = self.get_listing()
+
+        # Public can only see public listings
+        if not request.user.is_authenticated:
+            if listing.status not in [
+                Listing.Status.AVAILABLE,
+                Listing.Status.RESERVED,
+                Listing.Status.SOLD,
+            ]:
+                return Response(
+                    {
+                        "detail": "Tangazo halipatikani."
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        # Authenticated users can see their own listings
+        # or public listings.
+        elif not (
+            request.user.is_staff
+            or listing.seller_id == request.user.id
+            or listing.status in [
+                Listing.Status.AVAILABLE,
+                Listing.Status.RESERVED,
+                Listing.Status.SOLD,
+            ]
+        ):
+            return Response(
+                {
+                    "detail": "Tangazo halipatikani."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        obj = get_object_or_404(
+            self.detail_model,
+            listing=listing,
+        )
+
+        serializer = self.get_serializer(obj)
+
+        return Response(
+            serializer.data
+        )
+
+    def update(self, request, *args, **kwargs):
+        return self._update_details(
+            request,
+            partial=False,
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        return self._update_details(
+            request,
+            partial=True,
+        )
+
+    def _update_details(self, request, partial):
+        listing = self.get_listing()
+
+        if not self.check_owner(listing):
+            return Response(
+                {
+                    "detail": (
+                        "Huna ruhusa ya kubadilisha "
+                        "taarifa za tangazo ambalo si lako."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        obj = get_object_or_404(
+            self.detail_model,
+            listing=listing,
+        )
+
+        serializer = self.get_serializer(
+            obj,
+            data=request.data,
+            partial=partial,
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        serializer.save()
+
+        return Response(
+            serializer.data
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        listing = self.get_listing()
+
+        if not self.check_owner(listing):
+            return Response(
+                {
+                    "detail": (
+                        "Huna ruhusa ya kufuta "
+                        "taarifa hizi."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        obj = get_object_or_404(
+            self.detail_model,
+            listing=listing,
+        )
+
+        obj.delete()
+
+        return Response(
+            {
+                "detail": self.deleted_message
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================================
+# PROPERTY
+# ============================================================================
+
+class PropertyDetailsViewSet(CategoryDetailsViewSet):
+
+    detail_model = PropertyDetails
+    detail_serializer = PropertyDetailsSerializer
+    required_category = CATEGORY_NAMES["PROPERTY"]
+
+    already_exists_message = (
+        "Maelezo ya nyumba/jengo tayari "
+        "yameongezwa kwenye tangazo hili."
+    )
+
+    deleted_message = (
+        "Maelezo ya nyumba/jengo yamefutwa."
+    )
+
+
+# ============================================================================
+# LAND
+# ============================================================================
+
+class LandDetailsViewSet(CategoryDetailsViewSet):
+
+    detail_model = LandDetails
+    detail_serializer = LandDetailsSerializer
+    required_category = CATEGORY_NAMES["LAND"]
+
+    already_exists_message = (
+        "Maelezo ya ardhi tayari "
+        "yameongezwa kwenye tangazo hili."
+    )
+
+    deleted_message = (
+        "Maelezo ya ardhi yamefutwa."
+    )
+
+
+# ============================================================================
+# VEHICLE
+# ============================================================================
+
+class VehicleDetailsViewSet(CategoryDetailsViewSet):
+
+    detail_model = VehicleDetails
+    detail_serializer = VehicleDetailsSerializer
+    required_category = CATEGORY_NAMES["VEHICLE"]
+
+    already_exists_message = (
+        "Maelezo ya gari tayari "
+        "yameongezwa kwenye tangazo hili."
+    )
+
+    deleted_message = (
+        "Maelezo ya gari yamefutwa."
+    )
+
+
+# ============================================================================
+# BUSINESS
+# ============================================================================
+
+class BusinessDetailsViewSet(CategoryDetailsViewSet):
+
+    detail_model = BusinessDetails
+    detail_serializer = BusinessDetailsSerializer
+    required_category = CATEGORY_NAMES["BUSINESS"]
+
+    already_exists_message = (
+        "Maelezo ya biashara tayari "
+        "yameongezwa kwenye tangazo hili."
+    )
+
+    deleted_message = (
+        "Maelezo ya biashara yamefutwa."
+    )
+
+
+# ============================================================================
+# EQUIPMENT
+# ============================================================================
+
+class EquipmentDetailsViewSet(CategoryDetailsViewSet):
+
+    detail_model = EquipmentDetails
+    detail_serializer = EquipmentDetailsSerializer
+    required_category = CATEGORY_NAMES["EQUIPMENT"]
+
+    already_exists_message = (
+        "Maelezo ya mashine tayari "
+        "yameongezwa kwenye tangazo hili."
+    )
+
+    deleted_message = (
+        "Maelezo ya mashine yamefutwa."
+    )
+ # ============================================================================
+# LISTING IMAGE VIEWSET
+# ============================================================================
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Orodha ya picha za tangazo",
+        description=(
+            "Huonyesha picha zote za tangazo kwa mpangilio."
+        ),
+    ),
+
+    retrieve=extend_schema(
+        summary="Angalia picha ya tangazo",
+    ),
+
+    create=extend_schema(
+        summary="Ongeza picha kwenye tangazo",
+        description=(
+            "Muuzaji anaweza kuongeza picha kwenye tangazo lake. "
+            "Admin anaweza kuongeza picha kwenye tangazo lolote."
+        ),
+        request={
+            "multipart/form-data": ListingImageSerializer,
+        },
+        responses={
+            201: ListingImageSerializer,
+            400: OpenApiResponse(
+                description="Taarifa za picha si sahihi."
+            ),
+            403: OpenApiResponse(
+                description="Huna ruhusa ya kuongeza picha."
+            ),
+        },
+    ),
+
+    partial_update=extend_schema(
+        summary="Badilisha taarifa za picha",
+        description=(
+            "Badilisha picha kuwa primary au badilisha mpangilio wake."
+        ),
+    ),
+
+    destroy=extend_schema(
+        summary="Futa picha ya tangazo",
+    ),
+)
+class ListingImageViewSet(viewsets.ModelViewSet):
+
+    serializer_class = ListingImageSerializer
+
+    parser_classes = [
+        MultiPartParser,
+        FormParser,
+    ]
+
+    http_method_names = [
+        "get",
+        "post",
+        "patch",
+        "delete",
+        "head",
+        "options",
+    ]
+
+    # ------------------------------------------------------------------------
+    # QUERYSET
+    # ------------------------------------------------------------------------
+
+    def get_queryset(self):
+
+        listing_id = self.kwargs.get(
+            "listing_id"
+        )
+
+        listing = get_object_or_404(
+            Listing,
+            pk=listing_id,
+        )
+
+        user = self.request.user
+
+        # Admin
+        if (
+            user.is_authenticated
+            and user.is_staff
+        ):
+            return (
+                ListingImage.objects
+                .filter(listing=listing)
+                .order_by(
+                    "ordering",
+                    "created_at",
+                )
+            )
+
+        # Listing owner
+        if (
+            user.is_authenticated
+            and listing.seller_id == user.id
+        ):
+            return (
+                ListingImage.objects
+                .filter(listing=listing)
+                .order_by(
+                    "ordering",
+                    "created_at",
+                )
+            )
+
+        # Public listing
+        if listing.status in [
+            Listing.Status.AVAILABLE,
+            Listing.Status.RESERVED,
+            Listing.Status.SOLD,
+        ]:
+            return (
+                ListingImage.objects
+                .filter(listing=listing)
+                .order_by(
+                    "ordering",
+                    "created_at",
+                )
+            )
+
+        return ListingImage.objects.none()
+
+    # ------------------------------------------------------------------------
+    # PERMISSIONS
+    # ------------------------------------------------------------------------
+
+    def get_permissions(self):
+
+        if self.action in [
+            "list",
+            "retrieve",
+        ]:
+            permission_classes = [
+                permissions.AllowAny,
+            ]
+
+        else:
+            permission_classes = [
+                IsVerifiedUser,
+                IsOwnerOrAdmin,
+            ]
+
+        return [
+            permission()
+            for permission in permission_classes
+        ]
+
+    # ------------------------------------------------------------------------
+    # CREATE
+    # ------------------------------------------------------------------------
+
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+
+        listing = get_object_or_404(
+            Listing,
+            pk=kwargs["listing_id"],
+        )
+
+        # Ownership
+        if (
+            not request.user.is_staff
+            and listing.seller_id != request.user.id
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Huna ruhusa ya kuongeza picha "
+                        "kwenye tangazo ambalo si lako."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Image required
+        image = request.FILES.get(
+            "image"
+        )
+
+        if not image:
+            return Response(
+                {
+                    "detail": "Picha inahitajika."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Allowed image types
+        allowed_types = [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+        ]
+
+        if image.content_type not in allowed_types:
+            return Response(
+                {
+                    "detail": (
+                        "Aina ya picha hairuhusiwi. "
+                        "Tumia JPG, PNG au WEBP."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Maximum 5 MB
+        max_size = 5 * 1024 * 1024
+
+        if image.size > max_size:
+            return Response(
+                {
+                    "detail": (
+                        "Picha haiwezi kuzidi "
+                        "ukubwa wa 5 MB."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Primary
+        is_primary = request.data.get(
+            "is_primary",
+            False,
+        )
+
+        if isinstance(
+            is_primary,
+            str,
+        ):
+            is_primary = (
+                is_primary.lower()
+                in [
+                    "true",
+                    "1",
+                    "yes",
+                ]
+            )
+
+        # Ordering
+        try:
+            ordering = int(
+                request.data.get(
+                    "ordering",
+                    0,
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Ordering lazima iwe namba."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if ordering < 0:
+            return Response(
+                {
+                    "detail": (
+                        "Ordering haiwezi kuwa "
+                        "chini ya sifuri."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+
+            # First image automatically becomes primary
+            has_images = (
+                ListingImage.objects
+                .filter(
+                    listing=listing
+                )
+                .exists()
+            )
+
+            if not has_images:
+                is_primary = True
+
+            # Only one primary
+            if is_primary:
+
+                ListingImage.objects.filter(
+                    listing=listing,
+                    is_primary=True,
+                ).update(
+                    is_primary=False
+                )
+
+            image_object = (
+                ListingImage.objects.create(
+                    listing=listing,
+                    image=image,
+                    is_primary=is_primary,
+                    ordering=ordering,
+                )
+            )
+
+        serializer = self.get_serializer(
+            image_object
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ------------------------------------------------------------------------
+    # PARTIAL UPDATE
+    # ------------------------------------------------------------------------
+
+    def partial_update(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+
+        image_object = self.get_object()
+
+        listing = image_object.listing
+
+        # Ownership
+        if (
+            not request.user.is_staff
+            and listing.seller_id != request.user.id
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Huna ruhusa ya kubadilisha "
+                        "picha ambalo si lako."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        is_primary = request.data.get(
+            "is_primary",
+            None,
+        )
+
+        ordering = request.data.get(
+            "ordering",
+            None,
+        )
+
+        # Validate ordering
+        if ordering is not None:
+
+            try:
+                ordering = int(ordering)
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                return Response(
+                    {
+                        "detail": (
+                            "Ordering lazima iwe namba."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if ordering < 0:
+                return Response(
+                    {
+                        "detail": (
+                            "Ordering haiwezi kuwa "
+                            "chini ya sifuri."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        with transaction.atomic():
+
+            if is_primary is not None:
+
+                if isinstance(
+                    is_primary,
+                    str,
+                ):
+                    is_primary = (
+                        is_primary.lower()
+                        in [
+                            "true",
+                            "1",
+                            "yes",
+                        ]
+                    )
+
+                if is_primary:
+
+                    ListingImage.objects.filter(
+                        listing=listing,
+                        is_primary=True,
+                    ).exclude(
+                        pk=image_object.pk
+                    ).update(
+                        is_primary=False
+                    )
+
+                    image_object.is_primary = True
+
+                else:
+
+                    if image_object.is_primary:
+
+                        other_primary_exists = (
+                            ListingImage.objects
+                            .filter(
+                                listing=listing,
+                                is_primary=True,
+                            )
+                            .exclude(
+                                pk=image_object.pk
+                            )
+                            .exists()
+                        )
+
+                        if not other_primary_exists:
+                            return Response(
+                                {
+                                    "detail": (
+                                        "Tangazo lazima liwe na "
+                                        "angalau picha moja kuu."
+                                    )
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        image_object.is_primary = False
+
+            if ordering is not None:
+                image_object.ordering = ordering
+
+            image_object.save()
+
+        serializer = self.get_serializer(
+            image_object
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    # ------------------------------------------------------------------------
+    # DELETE
+    # ------------------------------------------------------------------------
+
+    def destroy(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+
+        image_object = self.get_object()
+
+        listing = image_object.listing
+
+        # Ownership
+        if (
+            not request.user.is_staff
+            and listing.seller_id != request.user.id
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Huna ruhusa ya kufuta "
+                        "picha ambalo si lako."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        was_primary = image_object.is_primary
+
+        with transaction.atomic():
+
+            image_object.delete()
+
+            # Promote another image if primary was deleted
+            if was_primary:
+
+                next_image = (
+                    ListingImage.objects
+                    .filter(
+                        listing=listing
+                    )
+                    .order_by(
+                        "ordering",
+                        "created_at",
+                    )
+                    .first()
+                )
+
+                if next_image:
+
+                    ListingImage.objects.filter(
+                        listing=listing
+                    ).update(
+                        is_primary=False
+                    )
+
+                    next_image.is_primary = True
+
+                    next_image.save(
+                        update_fields=[
+                            "is_primary"
+                        ]
+                    )
+
+        return Response(
+            {
+                "detail": "Picha imefutwa."
+            },
+            status=status.HTTP_200_OK,
+        )
+        
+     # ============================================================================
+# LISTING FEE API
+# ============================================================================
+
+@extend_schema(
+    summary="Angalia ada ya tangazo",
+    description=(
+        "Hupata au huunda ada ya tangazo kulingana na bei ya tangazo "
+        "na kanuni za ada zinazotumika."
+    ),
+    responses={
+        200: ListingFeeSerializer,
+        400: OpenApiResponse(
+            description="Bei ya tangazo si sahihi au hakuna kanuni ya ada."
+        ),
+        403: OpenApiResponse(
+            description="Huna ruhusa ya kuona ada hii."
+        ),
+        404: OpenApiResponse(
+            description="Tangazo halijapatikana."
+        ),
+    },
+)
+class ListingFeeView(APIView):
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get(self, request, listing_id):
+        listing = get_object_or_404(
+            Listing,
+            id=listing_id,
+        )
+
+        # Admin can view any listing fee.
+        # Sellers can view fees for their own listings.
+        if (
+            not request.user.is_staff
+            and listing.seller_id != request.user.id
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Huna ruhusa ya kuona ada ya tangazo hili."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            listing_fee = create_listing_fee(listing)
+        except ValidationError as exc:
+            return Response(
+                {
+                    "detail": exc.message
+                    if hasattr(exc, "message")
+                    else str(exc)
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ListingFeeSerializer(
+            listing_fee,
+            context={"request": request},
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+        # ============================================================================
+# LISTING FEE PAYMENT API
+# ============================================================================
+
+@extend_schema(
+    summary="Lipa ada ya tangazo",
+    description=(
+        "Huthibitisha malipo ya ada ya tangazo. "
+        "Kwa sasa endpoint hii ni simulation ya payment service. "
+        "Baadaye itaunganishwa na payment gateway/webhook."
+    ),
+    request=ListingFeePaymentSerializer,
+    responses={
+        200: ListingFeeSerializer,
+        400: OpenApiResponse(
+            description="Malipo hayawezi kukamilishwa."
+        ),
+        403: OpenApiResponse(
+            description="Huna ruhusa ya kulipia tangazo hili."
+        ),
+        404: OpenApiResponse(
+            description="Tangazo au ada haijapatikana."
+        ),
+    },
+)
+class ListingFeePaymentView(APIView):
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def post(self, request, listing_id):
+        listing = get_object_or_404(
+            Listing,
+            id=listing_id,
+        )
+
+        # Only the seller or admin can pay this listing's fee.
+        if (
+            not request.user.is_staff
+            and listing.seller_id != request.user.id
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Huna ruhusa ya kulipia ada ya tangazo hili."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ListingFeePaymentSerializer(
+            data=request.data,
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            # Make sure the fee exists.
+            create_listing_fee(listing)
+
+            listing_fee = mark_listing_fee_as_paid(
+                listing,
+                serializer.validated_data[
+                    "payment_reference"
+                ],
+            )
+
+        except ListingFee.DoesNotExist:
+            return Response(
+                {
+                    "detail": (
+                        "Ada ya tangazo haijapatikana."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "detail",
+                str(exc),
+            )
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        response_serializer = ListingFeeSerializer(
+            listing_fee,
+            context={"request": request},
+        )
+
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
+           # ============================================================================
+# ADMIN LISTING MODERATION
+# ============================================================================
+
+@extend_schema(
+    summary="Orodha ya matangazo yanayosubiri idhini",
+    description=(
+        "Huonyesha matangazo yote yenye hali ya "
+        "PENDING_APPROVAL kwa wasimamizi wa mfumo pekee."
+    ),
+    responses={
+        200: AdminPendingListingSerializer(many=True),
+        403: OpenApiResponse(
+            description=(
+                "Ni wasimamizi wa mfumo pekee wanaoweza "
+                "kuona matangazo yanayosubiri idhini."
+            )
+        ),
+    },
+)
+class AdminPendingListingsView(APIView):
+    permission_classes = [
+        permissions.IsAdminUser,
+    ]
+
+    def get(self, request):
+        listings = (
+            Listing.objects
+            .filter(
+                status=Listing.Status.PENDING_APPROVAL
+            )
+            .select_related(
+                "seller",
+                "category",
+                "listing_fee",
+            )
+            .prefetch_related(
+                "images",
+                "property_details",
+                "land_details",
+                "vehicle_details",
+                "business_details",
+                "equipment_details",
+            )
+            .order_by("-created_at")
+        )
+
+        serializer = AdminPendingListingSerializer(
+            listings,
+            many=True,
+            context={"request": request},
+        )
+
+        return Response(
+            {
+                "count": listings.count(),
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================================
+# ADMIN APPROVE LISTING
+# ============================================================================
+
+@extend_schema(
+    summary="Idhinisha tangazo",
+    description=(
+        "Humruhusu admin kuidhinisha tangazo lililo kwenye "
+        "PENDING_APPROVAL. Ada ya tangazo lazima iwe imelipwa "
+        "kabla ya tangazo kuidhinishwa."
+    ),
+    responses={
+        200: ListingDetailSerializer,
+        400: OpenApiResponse(
+            description=(
+                "Tangazo haliwezi kuidhinishwa, kwa mfano "
+                "ikiwa ada haijalipwa au hali ya tangazo si sahihi."
+            )
+        ),
+        403: OpenApiResponse(
+            description=(
+                "Ni admin pekee anayeweza kuidhinisha tangazo."
+            )
+        ),
+        404: OpenApiResponse(
+            description="Tangazo halijapatikana.",
+        ),
+    },
+)
+class AdminApproveListingView(APIView):
+    permission_classes = [
+        permissions.IsAdminUser,
+    ]
+
+    def post(self, request, listing_id):
+        try:
+            listing = approve_listing(
+                listing_id=listing_id,
+                admin_user=request.user,
+            )
+
+        except Listing.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Tangazo halijapatikana."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "detail",
+                str(exc),
+            )
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ListingDetailSerializer(
+            listing,
+            context={"request": request},
+        )
+
+        return Response(
+            {
+                "detail": "Tangazo limeidhinishwa na sasa linapatikana.",
+                "listing": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================================
+# ADMIN REJECT LISTING
+# ============================================================================
+
+@extend_schema(
+    summary="Kataa tangazo",
+    description=(
+        "Humruhusu admin kukataa tangazo lililo kwenye "
+        "PENDING_APPROVAL. Sababu ya kukataa inahitajika."
+    ),
+    request=ListingRejectionSerializer,
+    responses={
+        200: ListingDetailSerializer,
+        400: OpenApiResponse(
+            description=(
+                "Sababu haijawekwa au tangazo haliwezi kukataliwa."
+            )
+        ),
+        403: OpenApiResponse(
+            description=(
+                "Ni admin pekee anayeweza kukataa tangazo."
+            )
+        ),
+        404: OpenApiResponse(
+            description="Tangazo halijapatikana.",
+        ),
+    },
+)
+class AdminRejectListingView(APIView):
+    permission_classes = [
+        permissions.IsAdminUser,
+    ]
+
+    def post(self, request, listing_id):
+        serializer = ListingRejectionSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        try:
+            listing = reject_listing(
+                listing_id=listing_id,
+                admin_user=request.user,
+                rejection_reason=serializer.validated_data[
+                    "rejection_reason"
+                ],
+            )
+
+        except Listing.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Tangazo halijapatikana."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValidationError as exc:
+            detail = getattr(
+                exc,
+                "detail",
+                str(exc),
+            )
+
+            return Response(
+                {
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        response_serializer = ListingDetailSerializer(
+            listing,
+            context={"request": request},
+        )
+
+        return Response(
+            {
+                "detail": "Tangazo limekataliwa.",
+                "listing": response_serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )

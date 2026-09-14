@@ -1,24 +1,25 @@
 #!/bin/sh
 set -e
 
-# Wait for PostgreSQL to be ready
-if [ "$DATABASE" = "postgres" ]; then
-    echo "Waiting for PostgreSQL..."
+echo "============================================================"
+echo "SokoMkononi — entrypoint"
+echo "============================================================"
+
+if [ -n "$DB_HOST" ] && [ -n "$DB_PORT" ]; then
+    echo "Waiting for PostgreSQL at $DB_HOST:$DB_PORT ..."
     while ! nc -z "$DB_HOST" "$DB_PORT"; do
-        sleep 0.1
+        sleep 0.5
     done
-    echo "PostgreSQL started"
+    echo "PostgreSQL is up."
+else
+    echo "DB_HOST or DB_PORT not set, skipping wait."
 fi
 
-# Apply database migrations
-echo "Applying migrations..."
-python manage.py migrate --no-input
+echo "Applying database migrations..."
+python manage.py migrate --noinput
 
-# Start Gunicorn
-echo "Starting Gunicorn..."
-exec gunicorn config.wsgi:application \
-    --bind 0.0.0.0:8000 \
-    --workers 3 \
-    --timeout 120 \
-    --access-logfile - \
-    --error-logfile -
+echo "Collecting static files..."
+python manage.py collectstatic --noinput --clear
+
+echo "Starting application..."
+exec "$@"

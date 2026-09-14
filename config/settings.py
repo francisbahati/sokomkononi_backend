@@ -12,6 +12,10 @@ load_dotenv(
 )
 
 
+# ============================================================
+# SECURITY
+# ============================================================
+
 SECRET_KEY = os.getenv(
     "SECRET_KEY",
     "django-insecure-change-this-in-development",
@@ -27,11 +31,29 @@ DEBUG = (
 )
 
 
-ALLOWED_HOSTS = os.getenv(
-    "ALLOWED_HOSTS",
-    "127.0.0.1,localhost",
-).split(",")
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv(
+        "ALLOWED_HOSTS",
+        "127.0.0.1,localhost",
+    ).split(",")
+    if host.strip()
+]
 
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CSRF_TRUSTED_ORIGINS",
+        "",
+    ).split(",")
+    if origin.strip()
+]
+
+
+# ============================================================
+# APPLICATIONS
+# ============================================================
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -57,8 +79,14 @@ INSTALLED_APPS = [
 ]
 
 
+# ============================================================
+# MIDDLEWARE
+# ============================================================
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+
+    "whitenoise.middleware.WhiteNoiseMiddleware",
 
     "django.contrib.sessions.middleware.SessionMiddleware",
 
@@ -74,8 +102,20 @@ MIDDLEWARE = [
 ]
 
 
+# ============================================================
+# URLS / WSGI / ASGI
+# ============================================================
+
 ROOT_URLCONF = "config.urls"
 
+WSGI_APPLICATION = "config.wsgi.application"
+
+ASGI_APPLICATION = "config.asgi.application"
+
+
+# ============================================================
+# TEMPLATES
+# ============================================================
 
 TEMPLATES = [
     {
@@ -101,30 +141,26 @@ TEMPLATES = [
 ]
 
 
-WSGI_APPLICATION = "config.wsgi.application"
-
-ASGI_APPLICATION = "config.asgi.application"
-
+# ============================================================
+# DATABASE
+# ============================================================
 
 DATABASES = {
     "default": {
-        "ENGINE": (
-            "django.db.backends.postgresql"
-        ),
-        "NAME": os.getenv("DB_NAME"),
-        "USER": os.getenv("DB_USER"),
-        "PASSWORD": os.getenv("DB_PASSWORD"),
-        "HOST": os.getenv(
-            "DB_HOST",
-            "127.0.0.1",
-        ),
-        "PORT": os.getenv(
-            "DB_PORT",
-            "5432",
-        ),
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("DB_NAME", "sokomkononi_db"),
+        "USER": os.getenv("DB_USER", "sokomkononi_user"),
+        "PASSWORD": os.getenv("DB_PASSWORD", ""),
+        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
+        "PORT": os.getenv("DB_PORT", "5432"),
+        "CONN_MAX_AGE": 60,
     }
 }
 
+
+# ============================================================
+# AUTH
+# ============================================================
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -157,6 +193,10 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+# ============================================================
+# INTERNATIONALIZATION
+# ============================================================
+
 LANGUAGE_CODE = "en-us"
 
 TIME_ZONE = "Africa/Dar_es_Salaam"
@@ -166,24 +206,33 @@ USE_I18N = True
 USE_TZ = True
 
 
-STATIC_URL = "static/"
+# ============================================================
+# STATIC & MEDIA FILES
+# ============================================================
 
-STATIC_ROOT = (
-    BASE_DIR / "staticfiles"
+STATIC_URL = "/static/"
+
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STATICFILES_STORAGE = (
+    "whitenoise.storage.CompressedManifestStaticFilesStorage"
 )
-
 
 MEDIA_URL = "/media/"
 
-MEDIA_ROOT = (
-    BASE_DIR / "media"
-)
+MEDIA_ROOT = BASE_DIR / "media"
 
 
-DEFAULT_AUTO_FIELD = (
-    "django.db.models.BigAutoField"
-)
+# ============================================================
+# DEFAULT PRIMARY KEY
+# ============================================================
 
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# ============================================================
+# DJANGO REST FRAMEWORK
+# ============================================================
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": (
@@ -203,8 +252,27 @@ REST_FRAMEWORK = {
             "IsAuthenticated"
         ),
     ],
+
+    "DEFAULT_PAGINATION_CLASS": (
+        "rest_framework.pagination."
+        "PageNumberPagination"
+    ),
+
+    "PAGE_SIZE": 20,
+
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
+
+    "EXCEPTION_HANDLER": (
+        "rest_framework.views.exception_handler"
+    ),
 }
 
+
+# ============================================================
+# DRF SPECTACULAR (Swagger)
+# ============================================================
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "SokoMkononi API",
@@ -226,6 +294,10 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
+
+# ============================================================
+# JWT
+# ============================================================
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(
@@ -260,10 +332,9 @@ EMAIL_PORT = int(
     os.getenv("EMAIL_PORT", "587")
 )
 
-EMAIL_USE_TLS = os.getenv(
-    "EMAIL_USE_TLS",
-    "True",
-).lower() == "true"
+EMAIL_USE_TLS = (
+    os.getenv("EMAIL_USE_TLS", "True").lower() == "true"
+)
 
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 
@@ -279,10 +350,47 @@ DEFAULT_FROM_EMAIL = os.getenv(
 # NEXTSMS
 # ============================================================
 
-PYNEXTSMS_TOKEN = os.getenv(
-    "PYNEXTSMS_TOKEN"
-)
+PYNEXTSMS_TOKEN = os.getenv("PYNEXTSMS_TOKEN")
 
-PYNEXTSMS_SENDER_ID = os.getenv(
-    "PYNEXTSMS_SENDER_ID"
-)
+PYNEXTSMS_SENDER_ID = os.getenv("PYNEXTSMS_SENDER_ID")
+
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": (
+                "[{asctime}] {levelname} "
+                "{name}: {message}"
+            ),
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}

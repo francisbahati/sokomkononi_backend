@@ -57,12 +57,20 @@ DEBUG = env_bool("DEBUG", default=False)
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
-    default=["127.0.0.1", "localhost"],
+    default=[
+        "127.0.0.1",
+        "localhost",
+        "sokomkononi.ac.tz",
+        "www.sokomkononi.ac.tz",
+        "api.sokomkononi.ac.tz",
+    ],
 )
-
 CSRF_TRUSTED_ORIGINS = env_list(
     "CSRF_TRUSTED_ORIGINS",
-    default=[],
+    default=[
+        "https://sokomkononi.ac.tz",
+        "https://www.sokomkononi.ac.tz",
+    ],
 )
 
 
@@ -372,7 +380,7 @@ CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
     default=[
         "http://localhost:3000",
-        "http://localhost:5173",
+        "https://sokomkononi.co.tz",
     ],
 )
 

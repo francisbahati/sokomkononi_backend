@@ -163,20 +163,26 @@ class ProfileSerializer(serializers.ModelSerializer):
         model = User
 
         fields = [
+            "id",
             "name",
             "email",
             "phone",
             "account_type",
             "date_joined",
             "is_verified",
+            "is_staff",
+            "is_superuser",
             "seller_status",
             "buyer_status",
         ]
 
         read_only_fields = [
+            "id",
             "email",
             "date_joined",
             "is_verified",
+            "is_staff",
+            "is_superuser",
             "seller_status",
             "buyer_status",
         ]
@@ -277,6 +283,60 @@ class PasswordResetSerializer(serializers.Serializer):
         max_length=128,
         required=True,
     )
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({
+                "confirm_password": "Manenosiri hayafanani."
+            })
+
+        return attrs
+
+    def validate_new_password(self, value):
+        try:
+            validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                list(exc.messages)
+            )
+
+        return value
+
+
+# ============================================================
+# CHANGE PASSWORD (logged-in user)
+# ============================================================
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(
+        write_only=True,
+        required=True,
+        max_length=128,
+    )
+
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        max_length=128,
+        required=True,
+    )
+
+    confirm_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        max_length=128,
+        required=True,
+    )
+
+    def validate_current_password(self, value):
+        user = self.context.get("request").user
+
+        if not user.check_password(value):
+            raise serializers.ValidationError(
+                "Nenosiri la sasa si sahihi."
+            )
+
+        return value
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["confirm_password"]:

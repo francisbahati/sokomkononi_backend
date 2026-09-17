@@ -2,6 +2,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 
+from django_filters.rest_framework import DjangoFilterBackend
+
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiResponse,
@@ -9,7 +11,7 @@ from drf_spectacular.utils import (
     extend_schema_view,
 )
 
-from rest_framework import permissions, status, viewsets
+from rest_framework import filters, permissions, status, viewsets
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -125,6 +127,37 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
     owner_field = "seller"
     staff_can_restore_any = True
+
+    # ------------------------------------------------------------------
+    # Filtering / searching / ordering
+    # ------------------------------------------------------------------
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+
+    filterset_fields = [
+        "category",
+        "status",
+        "is_featured",
+        "seller",
+        "is_boosted",
+    ]
+
+    search_fields = [
+        "title",
+        "description",
+        "location",
+    ]
+
+    ordering_fields = [
+        "created_at",
+        "price",
+        "views_count",
+    ]
+
+    ordering = ["-created_at"]
 
     queryset = Listing.objects.select_related(
         "seller",

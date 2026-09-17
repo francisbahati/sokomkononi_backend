@@ -234,23 +234,60 @@ USE_TZ = True
 # STATIC & MEDIA FILES
 # ============================================================
 
-STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+USE_CF_R2 = env_bool("USE_CF_R2", default=False)
 
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+if USE_CF_R2:
+    # --------------------------------------------------------
+    # Cloudflare R2 configuration
+    # --------------------------------------------------------
 
-STORAGES = {
-    "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
-    },
-    "staticfiles": {
-        "BACKEND": (
-            "whitenoise.storage."
-            "CompressedManifestStaticFilesStorage"
-        ),
-    },
-}
+    R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+    R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+    R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
+    R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+    R2_CUSTOM_DOMAIN = os.getenv("R2_CUSTOM_DOMAIN")
+    R2_MEDIA_LOCATION = os.getenv("R2_MEDIA_LOCATION", "media")
+
+    STATIC_URL = "/static/"
+    STATIC_ROOT = BASE_DIR / "staticfiles"
+
+    MEDIA_URL = f"https://{R2_CUSTOM_DOMAIN}/{R2_MEDIA_LOCATION}/"
+    MEDIA_ROOT = BASE_DIR / "media"  # Not used when R2 is enabled, but kept for local development
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "config.storages.CloudflareR2MediaStorage",
+        },
+        "staticfiles": {
+            "BACKEND": (
+                "whitenoise.storage."
+                "CompressedManifestStaticFilesStorage"
+            ),
+        },
+    }
+
+else:
+    # --------------------------------------------------------
+    # Local disk configuration
+    # --------------------------------------------------------
+
+    STATIC_URL = "/static/"
+    STATIC_ROOT = BASE_DIR / "staticfiles"
+
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = BASE_DIR / "media"
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": (
+                "whitenoise.storage."
+                "CompressedManifestStaticFilesStorage"
+            ),
+        },
+    }
 
 
 # ============================================================

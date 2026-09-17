@@ -1,0 +1,6 @@
+DJANGO_SETTINGS_MODULE=config.settings python -c "
+import django
+django.setup()
+from django.core.files.storage import default_storage
+print(type(default_storage).__module__, type(default_storage).__name__)
+"

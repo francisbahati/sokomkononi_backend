@@ -1,15 +1,18 @@
 from django.contrib import admin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import Category
 
 
 @admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
+class CategoryAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         "name",
         "slug",
         "is_active",
         "ordering",
+        "is_deleted",
         "created_at",
         "updated_at",
     )
@@ -33,6 +36,8 @@ class CategoryAdmin(admin.ModelAdmin):
         "slug",
         "created_at",
         "updated_at",
+        "deleted_at",
+        "deleted_by",
     )
 
     list_editable = (

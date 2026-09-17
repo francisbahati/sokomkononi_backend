@@ -65,6 +65,7 @@ ALLOWED_HOSTS = env_list(
         "api.sokomkononi.ac.tz",
     ],
 )
+
 CSRF_TRUSTED_ORIGINS = env_list(
     "CSRF_TRUSTED_ORIGINS",
     default=[
@@ -72,6 +73,22 @@ CSRF_TRUSTED_ORIGINS = env_list(
         "https://www.sokomkononi.ac.tz",
     ],
 )
+
+
+# ============================================================
+# SILENCED SYSTEM CHECKS
+# ============================================================
+#
+# auth.E003 fires because User.email is the USERNAME_FIELD but
+# is not declared with field-level unique=True. We enforce email
+# uniqueness among non-deleted users via a conditional
+# UniqueConstraint in apps.accounts.models.User.Meta.constraints,
+# which Django's built-in check cannot recognise. The database
+# guarantee is intact.
+#
+SILENCED_SYSTEM_CHECKS = [
+    "auth.E003",
+]
 
 
 # ============================================================
@@ -93,6 +110,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
 
     # Local apps
+    "apps.core",
     "apps.accounts",
     "apps.categories",
     "apps.listings",
@@ -222,7 +240,6 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# Modern Django (4.2+) storage configuration.
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
@@ -332,6 +349,42 @@ DEFAULT_FROM_EMAIL = os.getenv(
 
 PYNEXTSMS_TOKEN = os.getenv("PYNEXTSMS_TOKEN")
 PYNEXTSMS_SENDER_ID = os.getenv("PYNEXTSMS_SENDER_ID")
+
+
+# ============================================================
+# SOFT DELETE / RECYCLE BIN
+# ============================================================
+
+SOFT_DELETE_RETENTION_DAYS = int(
+    os.getenv("SOFT_DELETE_RETENTION_DAYS", "90")
+)
+
+
+# ============================================================
+# CELERY
+# ============================================================
+
+CELERY_BROKER_URL = os.getenv(
+    "CELERY_BROKER_URL",
+    "redis://127.0.0.1:6379/1",
+)
+
+CELERY_RESULT_BACKEND = os.getenv(
+    "CELERY_RESULT_BACKEND",
+    "redis://127.0.0.1:6379/2",
+)
+
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+CELERY_BEAT_SCHEDULE = {
+    "purge-soft-deleted-daily": {
+        "task": "core.purge_soft_deleted",
+        "schedule": timedelta(hours=24),
+    },
+}
 
 
 # ============================================================

@@ -1,7 +1,8 @@
-from django.db.models import Q
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+
+from apps.core.mixins import SoftDeleteViewSetMixin
 
 from .models import Notification
 from .serializers import NotificationSerializer
@@ -12,9 +13,23 @@ from .services.notification import (
 )
 
 
-class NotificationViewSet(viewsets.GenericViewSet):
+class NotificationViewSet(
+    SoftDeleteViewSetMixin,
+    viewsets.GenericViewSet,
+):
     """
     API ya arifa za mtumiaji.
+
+    Supports:
+        list / retrieve
+        POST   <pk>/read/           mark one as read
+        POST   read-all/            mark all as read
+        GET    unread-count/        count unread
+        GET    unread/              list unread
+        GET    priority/<X>/        filter by priority
+        DELETE <pk>/                soft delete
+        POST   <pk>/restore/        restore from trash
+        GET    trash/               staff only
     """
 
     serializer_class = NotificationSerializer
@@ -26,9 +41,12 @@ class NotificationViewSet(viewsets.GenericViewSet):
     http_method_names = [
         "get",
         "post",
+        "delete",
         "head",
         "options",
     ]
+
+    owner_field = "recipient"
 
     queryset = (
         Notification.objects
@@ -48,6 +66,15 @@ class NotificationViewSet(viewsets.GenericViewSet):
     def list(self, request, *args, **kwargs):
         notifications = self.get_queryset()
 
+        page = self.paginate_queryset(notifications)
+
+        if page is not None:
+            serializer = NotificationSerializer(
+                page,
+                many=True,
+            )
+            return self.get_paginated_response(serializer.data)
+
         serializer = NotificationSerializer(
             notifications,
             many=True,
@@ -63,6 +90,24 @@ class NotificationViewSet(viewsets.GenericViewSet):
         )
 
         return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        notification = self.get_object()
+
+        notification.delete(
+            by=request.user,
+            reason="",
+        )
+
+        return Response(
+            {
+                "detail": (
+                    "Arifa imewekwa kwenye kikapu. "
+                    "Itaondolewa kabisa baada ya siku 90."
+                )
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(
         detail=True,
@@ -133,6 +178,15 @@ class NotificationViewSet(viewsets.GenericViewSet):
             .order_by("-created_at")
         )
 
+        page = self.paginate_queryset(notifications)
+
+        if page is not None:
+            serializer = NotificationSerializer(
+                page,
+                many=True,
+            )
+            return self.get_paginated_response(serializer.data)
+
         serializer = NotificationSerializer(
             notifications,
             many=True,
@@ -166,6 +220,15 @@ class NotificationViewSet(viewsets.GenericViewSet):
             .filter(priority=priority)
             .order_by("-created_at")
         )
+
+        page = self.paginate_queryset(notifications)
+
+        if page is not None:
+            serializer = NotificationSerializer(
+                page,
+                many=True,
+            )
+            return self.get_paginated_response(serializer.data)
 
         serializer = NotificationSerializer(
             notifications,

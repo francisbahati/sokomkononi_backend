@@ -9,6 +9,7 @@ from drf_spectacular.utils import (
     extend_schema,
 )
 
+from apps.core.mixins import SoftDeleteViewSetMixin
 from apps.listings.models import Listing
 
 from .models import BoostPackage, ListingBoost
@@ -31,7 +32,10 @@ from .services.boost import (
 # BOOST PACKAGE VIEWSET
 # ============================================================================
 
-class BoostPackageViewSet(viewsets.ReadOnlyModelViewSet):
+class BoostPackageViewSet(
+    SoftDeleteViewSetMixin,
+    viewsets.ReadOnlyModelViewSet,
+):
     """
     Public endpoint for available boost packages.
 
@@ -42,6 +46,8 @@ class BoostPackageViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = BoostPackageSerializer
     permission_classes = [permissions.AllowAny]
 
+    owner_field = "id"  # not used; only staff restore
+
     def get_queryset(self):
         queryset = BoostPackage.objects.all()
 
@@ -49,6 +55,18 @@ class BoostPackageViewSet(viewsets.ReadOnlyModelViewSet):
             return queryset
 
         return queryset.filter(is_active=True)
+
+    def _can_restore(self, instance):
+        return bool(
+            self.request.user.is_authenticated
+            and self.request.user.is_staff
+        )
+
+    def get_permissions(self):
+        if self.action in ["trash", "restore"]:
+            return [permissions.IsAdminUser()]
+
+        return super().get_permissions()
 
 
 # ============================================================================
@@ -107,10 +125,6 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             .filter(seller=user)
         )
 
-    # ========================================================================
-    # CREATE BOOST
-    # ========================================================================
-
     @extend_schema(
         request=BoostCreateSerializer,
         responses={
@@ -165,10 +179,6 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    # ========================================================================
-    # MY BOOSTS
-    # ========================================================================
-
     @extend_schema(
         responses=ListingBoostSerializer(many=True),
         summary="Get my boosts",
@@ -196,10 +206,6 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
         )
 
         return Response(serializer.data)
-
-    # ========================================================================
-    # PAY BOOST
-    # ========================================================================
 
     @extend_schema(
         request=BoostPaymentSerializer,
@@ -255,10 +261,6 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ========================================================================
-    # ACTIVATE BOOST
-    # ========================================================================
-
     @extend_schema(
         request=None,
         responses={
@@ -302,10 +304,6 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             output.data,
             status=status.HTTP_200_OK,
         )
-
-    # ========================================================================
-    # CANCEL BOOST
-    # ========================================================================
 
     @extend_schema(
         request=BoostCancelSerializer,

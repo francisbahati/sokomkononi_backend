@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import (
     OTPVerification,
     PendingRegistration,
@@ -9,7 +11,7 @@ from .models import (
 
 
 @admin.register(User)
-class UserAdmin(BaseUserAdmin):
+class UserAdmin(SoftDeleteAdminMixin, BaseUserAdmin):
 
     ordering = ["-created_at"]
 
@@ -22,6 +24,7 @@ class UserAdmin(BaseUserAdmin):
         "is_verified",
         "is_active",
         "is_staff",
+        "is_deleted",
         "created_at",
     ]
 
@@ -44,6 +47,8 @@ class UserAdmin(BaseUserAdmin):
         "updated_at",
         "last_login",
         "date_joined",
+        "deleted_at",
+        "deleted_by",
     ]
 
     fieldsets = (
@@ -94,6 +99,17 @@ class UserAdmin(BaseUserAdmin):
                     "date_joined",
                     "created_at",
                     "updated_at",
+                )
+            },
+        ),
+        (
+            "Kikapu",
+            {
+                "fields": (
+                    "is_deleted",
+                    "deleted_at",
+                    "deleted_by",
+                    "deletion_reason",
                 )
             },
         ),

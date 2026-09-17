@@ -7,6 +7,8 @@ from drf_spectacular.utils import (
 
 from rest_framework import permissions, viewsets
 
+from apps.core.mixins import SoftDeleteViewSetMixin
+
 from .models import Category
 from .serializers import CategorySerializer
 
@@ -85,17 +87,23 @@ class IsAdminOrReadOnly(permissions.BasePermission):
     ),
     destroy=extend_schema(
         summary="Futa kundi",
-        description="Admin pekee ndiye anayeweza kufuta kundi.",
+        description=(
+            "Admin pekee ndiye anayeweza kufuta kundi. "
+            "Kundi haliwezi kufutwa kama lina matangazo yanayotumika."
+        ),
         responses={
             204: OpenApiResponse(
-                description="Kundi limefutwa.",
+                description="Kundi limewekwa kwenye kikapu.",
             ),
         },
     ),
 )
-class CategoryViewSet(viewsets.ModelViewSet):
+class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     serializer_class = CategorySerializer
     permission_classes = [IsAdminOrReadOnly]
+
+    owner_field = "id"  # unused; only staff can restore categories
+    staff_can_restore_any = True
 
     def get_queryset(self):
         queryset = Category.objects.all()
@@ -107,3 +115,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(is_active=True)
+
+    def _can_restore(self, instance):
+        # Only staff can restore categories.
+        return bool(self.request.user.is_staff)

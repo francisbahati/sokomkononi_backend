@@ -3,12 +3,16 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
+    DeleteAccountView,
+    ForgotPasswordView,
     LoginView,
     LogoutView,
     MeView,
+    PasswordResetView,
     ProfileView,
     RegisterView,
     VerifyOTPView,
+    VerifyPasswordResetOTPView,
 )
 
 
@@ -17,7 +21,7 @@ app_name = "accounts"
 
 urlpatterns = [
     # --------------------------------------------------------
-    # AUTHENTICATION
+    # REGISTRATION
     # --------------------------------------------------------
 
     path(
@@ -31,6 +35,10 @@ urlpatterns = [
         VerifyOTPView.as_view(),
         name="verify-otp",
     ),
+
+    # --------------------------------------------------------
+    # LOGIN / LOGOUT
+    # --------------------------------------------------------
 
     path(
         "login/",
@@ -51,6 +59,28 @@ urlpatterns = [
     ),
 
     # --------------------------------------------------------
+    # PASSWORD RESET
+    # --------------------------------------------------------
+
+    path(
+        "password/forgot/",
+        ForgotPasswordView.as_view(),
+        name="password-forgot",
+    ),
+
+    path(
+        "password/verify-otp/",
+        VerifyPasswordResetOTPView.as_view(),
+        name="password-verify-otp",
+    ),
+
+    path(
+        "password/reset/",
+        PasswordResetView.as_view(),
+        name="password-reset",
+    ),
+
+    # --------------------------------------------------------
     # USER
     # --------------------------------------------------------
 
@@ -64,5 +94,11 @@ urlpatterns = [
         "profile/",
         ProfileView.as_view(),
         name="profile",
+    ),
+
+    path(
+        "delete-account/",
+        DeleteAccountView.as_view(),
+        name="delete-account",
     ),
 ]

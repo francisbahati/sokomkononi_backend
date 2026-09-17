@@ -1,4 +1,10 @@
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import (
+    validate_password,
+)
+from django.core.exceptions import (
+    ValidationError as DjangoValidationError,
+)
 from rest_framework import serializers
 
 from .models import User
@@ -69,7 +75,7 @@ class RegisterSerializer(serializers.Serializer):
 
 
 # ============================================================
-# VERIFY OTP
+# VERIFY OTP (registration)
 # ============================================================
 
 class VerifyOTPSerializer(serializers.Serializer):
@@ -110,18 +116,12 @@ class LoginSerializer(serializers.Serializer):
 
         user = None
 
-        # ----------------------------------------------------
-        # EMAIL LOGIN
-        # ----------------------------------------------------
         if "@" in identifier:
             user = authenticate(
                 username=identifier.lower(),
                 password=password,
             )
 
-        # ----------------------------------------------------
-        # PHONE LOGIN
-        # ----------------------------------------------------
         else:
             try:
                 user_obj = User.objects.get(phone=identifier)
@@ -186,3 +186,112 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def get_buyer_status(self, obj):
         return obj.can_buy
+
+
+# ============================================================
+# FORGOT PASSWORD
+# ============================================================
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    identifier = serializers.CharField(
+        max_length=254,
+        required=True,
+        help_text="Barua pepe au namba ya simu iliyosajiliwa.",
+    )
+
+    def validate_identifier(self, value):
+        value = (value or "").strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Barua pepe au namba ya simu inahitajika."
+            )
+
+        return value
+
+
+# ============================================================
+# VERIFY PASSWORD RESET OTP
+# ============================================================
+
+class VerifyPasswordResetOTPSerializer(serializers.Serializer):
+    identifier = serializers.CharField(
+        max_length=254,
+        required=True,
+    )
+
+    otp_code = serializers.CharField(
+        min_length=6,
+        max_length=6,
+        required=True,
+    )
+
+    verification_type = serializers.ChoiceField(
+        choices=[
+            ("EMAIL", "Email"),
+            ("PHONE", "Phone"),
+        ],
+        required=True,
+    )
+
+    def validate_identifier(self, value):
+        value = (value or "").strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Barua pepe au namba ya simu inahitajika."
+            )
+
+        return value
+
+    def validate_otp_code(self, value):
+        value = (value or "").strip()
+
+        if not value.isdigit() or len(value) != 6:
+            raise serializers.ValidationError(
+                "OTP lazima iwe namba sita."
+            )
+
+        return value
+
+
+# ============================================================
+# RESET PASSWORD
+# ============================================================
+
+class PasswordResetSerializer(serializers.Serializer):
+    reset_token = serializers.CharField(
+        required=True,
+    )
+
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        max_length=128,
+        required=True,
+    )
+
+    confirm_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        max_length=128,
+        required=True,
+    )
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({
+                "confirm_password": "Manenosiri hayafanani."
+            })
+
+        return attrs
+
+    def validate_new_password(self, value):
+        try:
+            validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                list(exc.messages)
+            )
+
+        return value

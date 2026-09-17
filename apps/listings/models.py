@@ -1,16 +1,16 @@
-
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
 
 from apps.categories.models import Category
+from apps.core.models import SoftDeleteModel
 
 
 # ============================================================================
 # LISTING
 # ============================================================================
 
-class Listing(models.Model):
+class Listing(SoftDeleteModel):
 
     class Status(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
@@ -140,6 +140,9 @@ class Listing(models.Model):
         verbose_name = "Tangazo"
         verbose_name_plural = "Matangazo"
 
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
+
         indexes = [
             models.Index(
                 fields=["category", "status"],
@@ -211,7 +214,7 @@ class ListingImage(models.Model):
 
 
 # ============================================================================
-# PROPERTY DETAILS — NYUMBA & MAJENGO
+# PROPERTY DETAILS
 # ============================================================================
 
 class PropertyDetails(models.Model):
@@ -298,7 +301,7 @@ class PropertyDetails(models.Model):
 
 
 # ============================================================================
-# LAND DETAILS — VIWANJA & MASHAMBA
+# LAND DETAILS
 # ============================================================================
 
 class LandDetails(models.Model):
@@ -401,7 +404,7 @@ class LandDetails(models.Model):
 
 
 # ============================================================================
-# VEHICLE DETAILS — MAGARI
+# VEHICLE DETAILS
 # ============================================================================
 
 class VehicleDetails(models.Model):
@@ -519,7 +522,7 @@ class VehicleDetails(models.Model):
 
 
 # ============================================================================
-# BUSINESS DETAILS — BIASHARA ZINAZOUZWA
+# BUSINESS DETAILS
 # ============================================================================
 
 class BusinessDetails(models.Model):
@@ -601,7 +604,7 @@ class BusinessDetails(models.Model):
 
 
 # ============================================================================
-# EQUIPMENT DETAILS — MASHAINE / HEAVY EQUIPMENT
+# EQUIPMENT DETAILS
 # ============================================================================
 
 class EquipmentDetails(models.Model):
@@ -696,15 +699,10 @@ class EquipmentDetails(models.Model):
 
 
 # ============================================================================
-# LISTING FEE
+# LISTING FEE (financial — NOT soft-deletable)
 # ============================================================================
 
 class ListingFee(models.Model):
-
-    """
-    Represents the fee a seller must pay before a listing
-    can move from DRAFT to PENDING_APPROVAL.
-    """
 
     class PaymentStatus(models.TextChoices):
         PENDING = "PENDING", "Inasubiri Malipo"
@@ -793,14 +791,7 @@ class ListingFee(models.Model):
 # LISTING FEE RULE
 # ============================================================================
 
-class ListingFeeRule(models.Model):
-
-    """
-    Dynamic rules used to calculate the listing fee.
-
-    The rule with a matching price range is used when calculating
-    the fee for a listing.
-    """
+class ListingFeeRule(SoftDeleteModel):
 
     name = models.CharField(
         max_length=100,
@@ -855,6 +846,9 @@ class ListingFeeRule(models.Model):
 
         verbose_name = "Kanuni ya ada ya tangazo"
         verbose_name_plural = "Kanuni za ada za matangazo"
+
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
 
         indexes = [
             models.Index(

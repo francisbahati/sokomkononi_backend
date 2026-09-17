@@ -2,10 +2,12 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.utils import timezone
 
+from apps.core.models import SoftDeleteModel
+
 from .managers import UserManager
 
 
-class User(AbstractBaseUser, PermissionsMixin):
+class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
 
     class AccountType(models.TextChoices):
         INDIVIDUAL = "INDIVIDUAL", "Individual"
@@ -17,7 +19,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
 
     email = models.EmailField(
-        unique=True,
         null=True,
         blank=True,
         verbose_name="Barua pepe",
@@ -25,7 +26,6 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     phone = models.CharField(
         max_length=20,
-        unique=True,
         null=True,
         blank=True,
         verbose_name="Namba ya simu",
@@ -80,6 +80,28 @@ class User(AbstractBaseUser, PermissionsMixin):
         verbose_name = "Mtumiaji"
         verbose_name_plural = "Watumiaji"
 
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["email"],
+                condition=models.Q(
+                    is_deleted=False,
+                    email__isnull=False,
+                ),
+                name="unique_active_user_email",
+            ),
+            models.UniqueConstraint(
+                fields=["phone"],
+                condition=models.Q(
+                    is_deleted=False,
+                    phone__isnull=False,
+                ),
+                name="unique_active_user_phone",
+            ),
+        ]
+
     def __str__(self):
         return (
             self.name
@@ -90,11 +112,19 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def can_buy(self):
-        return self.is_active and self.is_verified
+        return (
+            self.is_active
+            and self.is_verified
+            and not self.is_deleted
+        )
 
     @property
     def can_sell(self):
-        return self.is_active and self.is_verified
+        return (
+            self.is_active
+            and self.is_verified
+            and not self.is_deleted
+        )
 
 
 class PendingRegistration(models.Model):
@@ -161,6 +191,14 @@ class OTPVerification(models.Model):
     class VerificationType(models.TextChoices):
         EMAIL = "EMAIL", "Email"
         PHONE = "PHONE", "Phone"
+        PASSWORD_RESET_EMAIL = (
+            "PASSWORD_RESET_EMAIL",
+            "Password Reset (Email)",
+        )
+        PASSWORD_RESET_PHONE = (
+            "PASSWORD_RESET_PHONE",
+            "Password Reset (Phone)",
+        )
 
     identifier = models.CharField(
         max_length=254,
@@ -169,7 +207,7 @@ class OTPVerification(models.Model):
     )
 
     verification_type = models.CharField(
-        max_length=10,
+        max_length=30,
         choices=VerificationType.choices,
         verbose_name="Aina ya uthibitishaji",
     )

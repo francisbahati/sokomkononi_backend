@@ -1,16 +1,19 @@
 from django.contrib import admin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import BoostPackage, ListingBoost
 
 
 @admin.register(BoostPackage)
-class BoostPackageAdmin(admin.ModelAdmin):
+class BoostPackageAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         "name",
         "duration_hours",
         "price",
         "is_active",
         "ordering",
+        "is_deleted",
         "created_at",
     )
 
@@ -33,6 +36,13 @@ class BoostPackageAdmin(admin.ModelAdmin):
         "is_active",
         "ordering",
         "price",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "deleted_by",
     )
 
 

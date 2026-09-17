@@ -14,6 +14,8 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.mixins import SoftDeleteViewSetMixin
+
 from .models import (
     BusinessDetails,
     EquipmentDetails,
@@ -54,6 +56,8 @@ from .services.listing_moderation import (
 )
 
 from .services.listing_payment import mark_listing_fee_as_paid
+
+
 # ============================================================================
 # CATEGORY NAMES
 # ============================================================================
@@ -111,9 +115,16 @@ CATEGORY_NAMES = {
     ),
     destroy=extend_schema(
         summary="Futa/hifadhi tangazo",
+        description=(
+            "Tangazo huwekwa kwenye kikapu kwa siku 90. "
+            "Muuzaji anaweza kulirejesha kabla ya muda kuisha."
+        ),
     ),
 )
-class ListingViewSet(viewsets.ModelViewSet):
+class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
+
+    owner_field = "seller"
+    staff_can_restore_any = True
 
     queryset = Listing.objects.select_related(
         "seller",
@@ -207,8 +218,11 @@ class ListingViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
 
-        if request.user.is_staff:
-            listing.delete()
+        # Staff -> hard delete
+        if request.user.is_staff and request.query_params.get(
+            "hard", "false"
+        ).lower() in ("true", "1", "yes"):
+            listing.hard_delete()
 
             return Response(
                 {
@@ -217,20 +231,19 @@ class ListingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_204_NO_CONTENT,
             )
 
-        listing.status = Listing.Status.ARCHIVED
-
-        listing.save(
-            update_fields=[
-                "status",
-                "updated_at",
-            ]
+        # Everyone else -> soft delete (recycle bin, 90 days)
+        listing.delete(
+            by=request.user,
+            reason=request.data.get("reason", "") if isinstance(
+                request.data, dict
+            ) else "",
         )
 
         return Response(
             {
                 "detail": (
-                    "Tangazo limehifadhiwa "
-                    "kwenye kumbukumbu."
+                    "Tangazo limewekwa kwenye kikapu. "
+                    "Litaondolewa kabisa baada ya siku 90."
                 )
             },
             status=status.HTTP_200_OK,
@@ -355,7 +368,6 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         listing = self.get_listing()
 
-        # Public can only see public listings
         if not request.user.is_authenticated:
             if listing.status not in [
                 Listing.Status.AVAILABLE,
@@ -369,8 +381,6 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-        # Authenticated users can see their own listings
-        # or public listings.
         elif not (
             request.user.is_staff
             or listing.seller_id == request.user.id
@@ -572,7 +582,9 @@ class EquipmentDetailsViewSet(CategoryDetailsViewSet):
     deleted_message = (
         "Maelezo ya mashine yamefutwa."
     )
- # ============================================================================
+
+
+# ============================================================================
 # LISTING IMAGE VIEWSET
 # ============================================================================
 
@@ -637,10 +649,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
         "options",
     ]
 
-    # ------------------------------------------------------------------------
-    # QUERYSET
-    # ------------------------------------------------------------------------
-
     def get_queryset(self):
 
         listing_id = self.kwargs.get(
@@ -654,7 +662,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
 
         user = self.request.user
 
-        # Admin
         if (
             user.is_authenticated
             and user.is_staff
@@ -668,7 +675,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                 )
             )
 
-        # Listing owner
         if (
             user.is_authenticated
             and listing.seller_id == user.id
@@ -682,7 +688,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                 )
             )
 
-        # Public listing
         if listing.status in [
             Listing.Status.AVAILABLE,
             Listing.Status.RESERVED,
@@ -698,10 +703,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             )
 
         return ListingImage.objects.none()
-
-    # ------------------------------------------------------------------------
-    # PERMISSIONS
-    # ------------------------------------------------------------------------
 
     def get_permissions(self):
 
@@ -724,10 +725,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             for permission in permission_classes
         ]
 
-    # ------------------------------------------------------------------------
-    # CREATE
-    # ------------------------------------------------------------------------
-
     def create(
         self,
         request,
@@ -740,7 +737,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             pk=kwargs["listing_id"],
         )
 
-        # Ownership
         if (
             not request.user.is_staff
             and listing.seller_id != request.user.id
@@ -755,7 +751,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Image required
         image = request.FILES.get(
             "image"
         )
@@ -768,7 +763,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Allowed image types
         allowed_types = [
             "image/jpeg",
             "image/png",
@@ -786,7 +780,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Maximum 5 MB
         max_size = 5 * 1024 * 1024
 
         if image.size > max_size:
@@ -800,7 +793,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Primary
         is_primary = request.data.get(
             "is_primary",
             False,
@@ -819,7 +811,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                 ]
             )
 
-        # Ordering
         try:
             ordering = int(
                 request.data.get(
@@ -854,7 +845,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
 
         with transaction.atomic():
 
-            # First image automatically becomes primary
             has_images = (
                 ListingImage.objects
                 .filter(
@@ -866,7 +856,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             if not has_images:
                 is_primary = True
 
-            # Only one primary
             if is_primary:
 
                 ListingImage.objects.filter(
@@ -894,10 +883,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    # ------------------------------------------------------------------------
-    # PARTIAL UPDATE
-    # ------------------------------------------------------------------------
-
     def partial_update(
         self,
         request,
@@ -909,7 +894,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
 
         listing = image_object.listing
 
-        # Ownership
         if (
             not request.user.is_staff
             and listing.seller_id != request.user.id
@@ -934,7 +918,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             None,
         )
 
-        # Validate ordering
         if ordering is not None:
 
             try:
@@ -1037,10 +1020,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ------------------------------------------------------------------------
-    # DELETE
-    # ------------------------------------------------------------------------
-
     def destroy(
         self,
         request,
@@ -1052,7 +1031,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
 
         listing = image_object.listing
 
-        # Ownership
         if (
             not request.user.is_staff
             and listing.seller_id != request.user.id
@@ -1073,7 +1051,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
 
             image_object.delete()
 
-            # Promote another image if primary was deleted
             if was_primary:
 
                 next_image = (
@@ -1110,8 +1087,9 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
-        
-     # ============================================================================
+
+
+# ============================================================================
 # LISTING FEE API
 # ============================================================================
 
@@ -1145,8 +1123,6 @@ class ListingFeeView(APIView):
             id=listing_id,
         )
 
-        # Admin can view any listing fee.
-        # Sellers can view fees for their own listings.
         if (
             not request.user.is_staff
             and listing.seller_id != request.user.id
@@ -1181,7 +1157,9 @@ class ListingFeeView(APIView):
             serializer.data,
             status=status.HTTP_200_OK,
         )
-        # ============================================================================
+
+
+# ============================================================================
 # LISTING FEE PAYMENT API
 # ============================================================================
 
@@ -1217,7 +1195,6 @@ class ListingFeePaymentView(APIView):
             id=listing_id,
         )
 
-        # Only the seller or admin can pay this listing's fee.
         if (
             not request.user.is_staff
             and listing.seller_id != request.user.id
@@ -1238,7 +1215,6 @@ class ListingFeePaymentView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            # Make sure the fee exists.
             create_listing_fee(listing)
 
             listing_fee = mark_listing_fee_as_paid(
@@ -1281,7 +1257,9 @@ class ListingFeePaymentView(APIView):
             response_serializer.data,
             status=status.HTTP_200_OK,
         )
-           # ============================================================================
+
+
+# ============================================================================
 # ADMIN LISTING MODERATION
 # ============================================================================
 

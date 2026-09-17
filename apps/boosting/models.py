@@ -1,12 +1,13 @@
-
 from decimal import Decimal
 
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
 
+from apps.core.models import SoftDeleteModel
 
-class BoostPackage(models.Model):
+
+class BoostPackage(SoftDeleteModel):
     """
     Admin-configurable boost package.
 
@@ -19,7 +20,6 @@ class BoostPackage(models.Model):
 
     name = models.CharField(
         max_length=100,
-        unique=True,
     )
 
     duration_hours = models.PositiveIntegerField(
@@ -64,6 +64,17 @@ class BoostPackage(models.Model):
             ),
         ]
 
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name"],
+                condition=models.Q(is_deleted=False),
+                name="unique_active_boost_package_name",
+            ),
+        ]
+
     def __str__(self):
         return f"{self.name} - TZS {self.price}"
 
@@ -71,6 +82,8 @@ class BoostPackage(models.Model):
 class ListingBoost(models.Model):
     """
     Represents a seller's request/payment for boosting a listing.
+
+    Financial record — never soft-deleted.
     """
 
     class PaymentStatus(models.TextChoices):

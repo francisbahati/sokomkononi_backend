@@ -1,17 +1,17 @@
 from django.db import models
 from django.utils.text import slugify
 
+from apps.core.models import SoftDeleteModel
 
-class Category(models.Model):
+
+class Category(SoftDeleteModel):
     name = models.CharField(
         max_length=100,
-        unique=True,
         verbose_name="Jina la kundi",
     )
 
     slug = models.SlugField(
         max_length=120,
-        unique=True,
         blank=True,
         verbose_name="Slug",
     )
@@ -47,6 +47,22 @@ class Category(models.Model):
         ordering = ["ordering", "name"]
         verbose_name = "Kundi"
         verbose_name_plural = "Makundi"
+
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name"],
+                condition=models.Q(is_deleted=False),
+                name="unique_active_category_name",
+            ),
+            models.UniqueConstraint(
+                fields=["slug"],
+                condition=models.Q(is_deleted=False),
+                name="unique_active_category_slug",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.slug:

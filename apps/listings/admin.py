@@ -1,5 +1,7 @@
 from django.contrib import admin
 
+from apps.core.admin import SoftDeleteAdminMixin
+
 from .models import Listing, ListingImage
 
 
@@ -14,7 +16,7 @@ class ListingImageInline(admin.TabularInline):
 
 
 @admin.register(Listing)
-class ListingAdmin(admin.ModelAdmin):
+class ListingAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display = (
         "title",
         "seller",
@@ -23,6 +25,7 @@ class ListingAdmin(admin.ModelAdmin):
         "status",
         "is_featured",
         "is_boosted",
+        "is_deleted",
         "views_count",
         "created_at",
     )
@@ -51,6 +54,8 @@ class ListingAdmin(admin.ModelAdmin):
         "views_count",
         "created_at",
         "updated_at",
+        "deleted_at",
+        "deleted_by",
     )
 
     list_editable = (

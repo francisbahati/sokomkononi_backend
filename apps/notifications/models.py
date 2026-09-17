@@ -1,14 +1,21 @@
 from django.conf import settings
 from django.db import models
 
+from apps.core.models import SoftDeleteModel
 
-class Notification(models.Model):
+
+class Notification(SoftDeleteModel):
     class NotificationType(models.TextChoices):
         GENERAL = "GENERAL", "General"
 
         LISTING_CREATED = "LISTING_CREATED", "Listing Created"
         LISTING_APPROVED = "LISTING_APPROVED", "Listing Approved"
         LISTING_REJECTED = "LISTING_REJECTED", "Listing Rejected"
+        LISTING_DELETED = "LISTING_DELETED", "Listing Deleted"
+        LISTING_RESTORED = "LISTING_RESTORED", "Listing Restored"
+
+        ACCOUNT_DELETED = "ACCOUNT_DELETED", "Account Deleted"
+        ACCOUNT_RESTORED = "ACCOUNT_RESTORED", "Account Restored"
 
         NEW_OFFER = "NEW_OFFER", "New Offer"
         OFFER_COUNTERED = "OFFER_COUNTERED", "Offer Countered"
@@ -108,8 +115,6 @@ class Notification(models.Model):
         verbose_name="Muda wa kusomwa",
     )
 
-    # Optional reference to an object related to the notification.
-    # Example: listing ID, deal room ID, transaction ID, etc.
     related_object_type = models.CharField(
         max_length=100,
         blank=True,
@@ -141,6 +146,9 @@ class Notification(models.Model):
     class Meta:
         db_table = "notifications"
         ordering = ["-created_at"]
+
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
 
         indexes = [
             models.Index(

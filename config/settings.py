@@ -103,6 +103,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
+    "django_filters",
+
     # Third-party
     "corsheaders",
     "rest_framework",

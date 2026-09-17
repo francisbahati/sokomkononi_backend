@@ -1,4 +1,5 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
 from .views import (
     AdminApproveListingView,
@@ -13,6 +14,19 @@ from .views import (
     ListingViewSet,
     PropertyDetailsViewSet,
     VehicleDetailsViewSet,
+)
+from .views_fee_rules import ListingFeeRuleViewSet
+
+
+# ============================================================================
+# FEE-RULE ROUTER
+# ============================================================================
+
+fee_rules_router = DefaultRouter()
+fee_rules_router.register(
+    r"",
+    ListingFeeRuleViewSet,
+    basename="listing-fee-rule",
 )
 
 
@@ -154,6 +168,15 @@ admin_reject_listing = AdminRejectListingView.as_view()
 # ============================================================================
 
 urlpatterns = [
+
+    # ------------------------------------------------------------------------
+    # Fee rules  ← MUST come before the <int:pk>/ catch-all
+    # ------------------------------------------------------------------------
+
+    path(
+        "fee-rules/",
+        include(fee_rules_router.urls),
+    ),
 
     # ------------------------------------------------------------------------
     # Listings

@@ -34,3 +34,4 @@ whitenoise==6.8.2
 django-cors-headers==4.7.0
 celery==5.5.3
 redis==5.2.1
+django-filter==24.3

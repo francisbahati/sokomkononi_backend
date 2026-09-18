@@ -1,13 +1,13 @@
-from django.urls import include, path
-from rest_framework.routers import DefaultRouter
+from django.urls import path
 
 from .views import ContentViewSet
 
 
-router = DefaultRouter()
-router.register(r"", ContentViewSet, basename="content")
-
-
 urlpatterns = [
-    path("", include(router.urls)),
+    path("", ContentViewSet.as_view({"get": "list"}), name="content-list"),
+    path(
+        "section/<slug:key>/",
+        ContentViewSet.as_view({"get": "by_key"}),
+        name="content-by-key",
+    ),
 ]

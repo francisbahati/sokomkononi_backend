@@ -20,41 +20,37 @@ from .serializers import (
 )
 
 
+MODEL_MAP = {
+    "banners": (Banner, BannerSerializer),
+    "testimonials": (Testimonial, TestimonialSerializer),
+    "faqs": (FAQ, FAQSerializer),
+    "site-content": (SiteContent, SiteContentSerializer),
+}
+
+
 class AdminContentViewSet(viewsets.GenericViewSet):
     """
-    Admin-only management of content blocks.
-
-        GET     /api/admin/content/banners/
-        POST    /api/admin/content/banners/
-        PATCH   /api/admin/content/banners/{id}/
-        DELETE  /api/admin/content/banners/{id}/
-
-        ...same pattern for testimonials, faqs, site-content
+    Admin-only management of content blocks. `kind` is passed via
+    URL kwargs by urls_admin.py.
     """
 
     permission_classes = [IsAdminUser]
 
-    def _model_serializer(self, kind):
-        return {
-            "banners": (Banner, BannerSerializer),
-            "testimonials": (Testimonial, TestimonialSerializer),
-            "faqs": (FAQ, FAQSerializer),
-            "site-content": (SiteContent, SiteContentSerializer),
-        }.get(kind)
+    def _resolve(self, kind):
+        return MODEL_MAP.get(kind)
 
-    def _list(self, request, kind):
-        pair = self._model_serializer(kind)
+    def _list(self, request, kind=None):
+        pair = self._resolve(kind)
         if not pair:
             return Response(
                 {"detail": "Haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
         Model, Serializer = pair
-        qs = Model.objects.all()
-        return Response(Serializer(qs, many=True).data)
+        return Response(Serializer(Model.objects.all(), many=True).data)
 
-    def _create(self, request, kind):
-        pair = self._model_serializer(kind)
+    def _create(self, request, kind=None):
+        pair = self._resolve(kind)
         if not pair:
             return Response(
                 {"detail": "Haipatikani."},
@@ -66,8 +62,8 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    def _detail(self, request, kind, pk, method):
-        pair = self._model_serializer(kind)
+    def _detail(self, request, kind=None, pk=None):
+        pair = self._resolve(kind)
         if not pair:
             return Response(
                 {"detail": "Haipatikani."},
@@ -80,14 +76,20 @@ class AdminContentViewSet(viewsets.GenericViewSet):
                 {"detail": "Haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        if method == "get":
+
+        if request.method == "GET":
             return Response(Serializer(obj).data)
-        if method == "patch":
-            serializer = Serializer(obj, data=request.data, partial=True)
+
+        if request.method in ("PATCH", "PUT"):
+            serializer = Serializer(
+                obj, data=request.data, partial=(request.method == "PATCH"),
+            )
             serializer.is_valid(raise_exception=True)
             serializer.save()
             return Response(serializer.data)
-        if method == "delete":
+
+        if request.method == "DELETE":
             obj.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
+
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)

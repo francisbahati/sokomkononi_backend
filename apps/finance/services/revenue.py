@@ -119,12 +119,10 @@ def calculate_financial_dashboard(period="all"):
     paid_boosts = boosts.count()
 
     # ---------------- Advertisement (banners) ----------------
-    banners = BannerAd.objects.all().annotate(
-        effective_paid=Coalesce("created_at", "created_at"),
-    )
+    banners = BannerAd.objects.all()
     if start and end:
         banners = banners.filter(
-            effective_paid__gte=start, effective_paid__lt=end,
+            created_at__gte=start, created_at__lt=end,
         )
     advertisement_revenue = banners.aggregate(
         total=Sum("amount"),

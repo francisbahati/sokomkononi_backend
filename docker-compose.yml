@@ -6,21 +6,29 @@ services:
       - .env
     environment:
       DEBUG: "False"
-    expose:
-      - "8000"
     ports:
       - "8000:8000"
     volumes:
       - static_files:/app/staticfiles
       - media_files:/app/media
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8000)); s.close()\""]
+      test:
+        - CMD-SHELL
+        - >
+          python -c "import socket; s=socket.socket();
+          s.settimeout(2); s.connect(('127.0.0.1',8000)); s.close()"
       interval: 20s
       timeout: 5s
       retries: 5
-      start_period: 40s
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
@@ -32,6 +40,11 @@ services:
       interval: 20s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   celery_worker:
     build: .
@@ -44,8 +57,15 @@ services:
     volumes:
       - media_files:/app/media
     depends_on:
-      - web
-      - redis
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   celery_beat:
     build: .
@@ -55,11 +75,21 @@ services:
     environment:
       DEBUG: "False"
     command: celery -A config beat -l info
+    volumes:
+      - beat_data:/app/celerybeat
     depends_on:
-      - web
-      - redis
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   static_files:
   media_files:
   redis_data:
+  beat_data:

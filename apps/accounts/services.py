@@ -9,11 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from .models import (
-    OTPVerification,
-    PendingRegistration,
-    User,
-)
+from .models import OTPVerification, PendingRegistration, User
 
 
 OTP_EXPIRY_MINUTES = 10
@@ -28,156 +24,73 @@ OTP_MAX_ATTEMPTS = 5
 def normalize_email(email):
     if not email:
         return None
-
     return email.strip().lower()
 
 
 def normalize_tanzania_phone(phone):
-    """
-    Converts common Tanzania formats into:
-
-    +255712345678
-    """
-
     if not phone:
         return None
 
-    phone = (
-        phone.strip()
-        .replace(" ", "")
-        .replace("-", "")
-    )
+    phone = phone.strip().replace(" ", "").replace("-", "")
 
     if phone.startswith("+255"):
         return phone
-
     if phone.startswith("255"):
         return f"+{phone}"
-
     if phone.startswith("0"):
         return f"+255{phone[1:]}"
 
-    raise ValidationError(
-        {
-            "phone": (
-                "Namba ya simu si sahihi. "
-                "Tumia mfano 0712345678."
-            )
-        }
-    )
+    raise ValidationError({
+        "phone": "Namba ya simu si sahihi. Tumia mfano 0712345678."
+    })
 
 
 def phone_for_nextsms(phone):
-    """
-    NextSMS examples use Tanzania numbers
-    without the '+' prefix.
-    """
-
-    normalized = normalize_tanzania_phone(phone)
-
-    return normalized.replace("+", "")
+    return normalize_tanzania_phone(phone).replace("+", "")
 
 
 def resolve_identifier(identifier):
-    """
-    Determine whether an identifier is an email or phone number.
-
-    Returns:
-        (normalized_identifier, base_type)
-
-    Where base_type is "EMAIL" or "PHONE".
-    """
     identifier = (identifier or "").strip()
-
     if not identifier:
-        raise ValidationError(
-            "Barua pepe au namba ya simu inahitajika."
-        )
-
+        raise ValidationError("Barua pepe au namba ya simu inahitajika.")
     if "@" in identifier:
         return normalize_email(identifier), "EMAIL"
-
     return normalize_tanzania_phone(identifier), "PHONE"
 
 
-def _normalize_for_verification_type(
-    identifier,
-    verification_type,
-):
-    """
-    Normalize an identifier based on the OTP type.
-    Supports both registration and password-reset variants.
-    """
-    if verification_type in (
-        "EMAIL",
-        "PASSWORD_RESET_EMAIL",
-    ):
+def _normalize_for_verification_type(identifier, verification_type):
+    if verification_type in ("EMAIL", "PASSWORD_RESET_EMAIL"):
         return normalize_email(identifier)
-
-    if verification_type in (
-        "PHONE",
-        "PASSWORD_RESET_PHONE",
-    ):
+    if verification_type in ("PHONE", "PASSWORD_RESET_PHONE"):
         return normalize_tanzania_phone(identifier)
-
-    raise ValidationError(
-        {
-            "verification_type": (
-                "Aina ya uthibitishaji si sahihi."
-            )
-        }
-    )
+    raise ValidationError({
+        "verification_type": "Aina ya uthibitishaji si sahihi."
+    })
 
 
 # ============================================================
-# OTP GENERATION
+# OTP HELPERS
 # ============================================================
 
 def generate_otp():
-    return str(
-        secrets.randbelow(900000) + 100000
-    )
+    return str(secrets.randbelow(900000) + 100000)
 
 
 def hash_otp(otp):
-    return hashlib.sha256(
-        otp.encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(otp.encode("utf-8")).hexdigest()
 
-
-# ============================================================
-# LOW-LEVEL OTP CREATION
-# ============================================================
 
 def _create_otp_record(identifier, verification_type):
-    """
-    Create a fresh OTP record.
-
-    Returns:
-        (otp_record, plaintext_otp, normalized_identifier)
-
-    Side effects:
-        - invalidates any previous unused OTP for the same
-          identifier + type
-        - enforces the resend cooldown
-    """
     normalized = _normalize_for_verification_type(
-        identifier,
-        verification_type,
+        identifier, verification_type,
     )
 
-    if not can_resend_otp(
-        normalized,
-        verification_type,
-    ):
-        raise ValidationError(
-            {
-                "detail": (
-                    "Subiri sekunde 60 kabla ya "
-                    "kuomba OTP nyingine."
-                )
-            }
-        )
+    if not can_resend_otp(normalized, verification_type):
+        raise ValidationError({
+            "detail": (
+                "Subiri sekunde 60 kabla ya kuomba OTP nyingine."
+            )
+        })
 
     OTPVerification.objects.filter(
         identifier=normalized,
@@ -191,10 +104,7 @@ def _create_otp_record(identifier, verification_type):
         identifier=normalized,
         verification_type=verification_type,
         otp_code=hash_otp(otp),
-        expires_at=(
-            timezone.now()
-            + timedelta(minutes=OTP_EXPIRY_MINUTES)
-        ),
+        expires_at=timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES),
     )
 
     return otp_record, otp, normalized
@@ -203,10 +113,7 @@ def _create_otp_record(identifier, verification_type):
 def can_resend_otp(identifier, verification_type):
     latest = (
         OTPVerification.objects
-        .filter(
-            identifier=identifier,
-            verification_type=verification_type,
-        )
+        .filter(identifier=identifier, verification_type=verification_type)
         .order_by("-created_at")
         .first()
     )
@@ -214,33 +121,23 @@ def can_resend_otp(identifier, verification_type):
     if not latest:
         return True
 
-    elapsed = (
-        timezone.now() - latest.created_at
-    ).total_seconds()
-
+    elapsed = (timezone.now() - latest.created_at).total_seconds()
     return elapsed >= OTP_RESEND_SECONDS
 
 
 # ============================================================
-# EMAIL / SMS TRANSPORTS
+# EMAIL / SMS
 # ============================================================
 
 def send_email_otp(email, otp):
-    subject = (
-        "SokoMkononi - Nambari ya Uthibitishaji"
-    )
-
+    subject = "SokoMkononi - Nambari ya Uthibitishaji"
     message = (
         "Habari,\n\n"
-        "Nambari yako ya uthibitishaji wa "
-        "SokoMkononi ni:\n\n"
+        "Nambari yako ya uthibitishaji wa SokoMkononi ni:\n\n"
         f"{otp}\n\n"
-        f"Nambari hii itaisha baada ya "
-        f"{OTP_EXPIRY_MINUTES} dakika.\n\n"
-        "Usimpe mtu mwingine nambari hii.\n\n"
-        "SokoMkononi"
+        f"Nambari hii itaisha baada ya {OTP_EXPIRY_MINUTES} dakika.\n\n"
+        "Usimpe mtu mwingine nambari hii.\n\nSokoMkononi"
     )
-
     send_mail(
         subject=subject,
         message=message,
@@ -255,67 +152,45 @@ def send_sms_otp(phone, otp):
     sender_id = getattr(settings, "PYNEXTSMS_SENDER_ID", None)
 
     if not token:
-        raise RuntimeError(
-            "PYNEXTSMS_TOKEN haijawekwa kwenye .env."
-        )
-
+        raise RuntimeError("PYNEXTSMS_TOKEN haijawekwa kwenye .env.")
     if not sender_id:
-        raise RuntimeError(
-            "PYNEXTSMS_SENDER_ID haijawekwa kwenye .env."
-        )
+        raise RuntimeError("PYNEXTSMS_SENDER_ID haijawekwa kwenye .env.")
 
     try:
         from pynextsms import SMSClient
     except ImportError as exc:
         raise RuntimeError(
-            "pynextsms haijasakinishwa. "
-            "Tumia: pip install pynextsms"
+            "pynextsms haijasakinishwa. Tumia: pip install pynextsms"
         ) from exc
 
     message = (
-        "SokoMkononi: Nambari yako ya "
-        f"uthibitishaji ni {otp}. "
-        f"Itaisha baada ya "
-        f"{OTP_EXPIRY_MINUTES} dakika."
+        f"SokoMkononi: Nambari yako ya uthibitishaji ni {otp}. "
+        f"Itaisha baada ya {OTP_EXPIRY_MINUTES} dakika."
     )
 
-    nextsms_phone = phone_for_nextsms(phone)
+    with SMSClient(token=token, sender_id=sender_id) as client:
+        response = client.sms.send(phone_for_nextsms(phone), message)
 
-    with SMSClient(
-        token=token,
-        sender_id=sender_id,
-    ) as client:
-        response = client.sms.send(
-            nextsms_phone,
-            message,
+    if hasattr(response, "successful") and not response.successful:
+        raise RuntimeError(
+            f"NextSMS imeshindwa kutuma OTP: "
+            f"{getattr(response, 'raw', response)}"
         )
-
-    if hasattr(response, "successful"):
-        if not response.successful:
-            raise RuntimeError(
-                f"NextSMS imeshindwa kutuma OTP: "
-                f"{getattr(response, 'raw', response)}"
-            )
 
     return response
 
 
 def send_password_reset_email(email, otp):
     subject = "SokoMkononi - Kubadilisha Nenosiri"
-
     message = (
         "Habari,\n\n"
         "Umeomba kubadilisha nenosiri lako la SokoMkononi.\n\n"
         "Nambari yako ya uthibitishaji ni:\n\n"
         f"{otp}\n\n"
-        f"Nambari hii itaisha baada ya "
-        f"{OTP_EXPIRY_MINUTES} dakika.\n\n"
-        "Kama hukuomba kubadilisha nenosiri, "
-        "puuza ujumbe huu na nenosiri lako "
-        "litabaki kama lilivyo.\n\n"
+        f"Nambari hii itaisha baada ya {OTP_EXPIRY_MINUTES} dakika.\n\n"
+        "Kama hukuomba kubadilisha nenosiri, puuza ujumbe huu.\n\n"
         "SokoMkononi"
     )
-
     send_mail(
         subject=subject,
         message=message,
@@ -330,48 +205,31 @@ def send_password_reset_sms(phone, otp):
     sender_id = getattr(settings, "PYNEXTSMS_SENDER_ID", None)
 
     if not token:
-        raise RuntimeError(
-            "PYNEXTSMS_TOKEN haijawekwa kwenye .env."
-        )
-
+        raise RuntimeError("PYNEXTSMS_TOKEN haijawekwa kwenye .env.")
     if not sender_id:
-        raise RuntimeError(
-            "PYNEXTSMS_SENDER_ID haijawekwa kwenye .env."
-        )
+        raise RuntimeError("PYNEXTSMS_SENDER_ID haijawekwa kwenye .env.")
 
     try:
         from pynextsms import SMSClient
     except ImportError as exc:
         raise RuntimeError(
-            "pynextsms haijasakinishwa. "
-            "Tumia: pip install pynextsms"
+            "pynextsms haijasakinishwa. Tumia: pip install pynextsms"
         ) from exc
 
     message = (
-        "SokoMkononi: Nambari yako ya kubadilisha "
-        f"nenosiri ni {otp}. "
-        f"Itaisha baada ya "
-        f"{OTP_EXPIRY_MINUTES} dakika. "
+        f"SokoMkononi: Nambari yako ya kubadilisha nenosiri ni {otp}. "
+        f"Itaisha baada ya {OTP_EXPIRY_MINUTES} dakika. "
         "Kama hukuomba, puuza ujumbe huu."
     )
 
-    nextsms_phone = phone_for_nextsms(phone)
+    with SMSClient(token=token, sender_id=sender_id) as client:
+        response = client.sms.send(phone_for_nextsms(phone), message)
 
-    with SMSClient(
-        token=token,
-        sender_id=sender_id,
-    ) as client:
-        response = client.sms.send(
-            nextsms_phone,
-            message,
+    if hasattr(response, "successful") and not response.successful:
+        raise RuntimeError(
+            f"NextSMS imeshindwa kutuma OTP: "
+            f"{getattr(response, 'raw', response)}"
         )
-
-    if hasattr(response, "successful"):
-        if not response.successful:
-            raise RuntimeError(
-                f"NextSMS imeshindwa kutuma OTP: "
-                f"{getattr(response, 'raw', response)}"
-            )
 
     return response
 
@@ -381,116 +239,60 @@ def send_password_reset_sms(phone, otp):
 # ============================================================
 
 def create_pending_registration(data):
-    email = normalize_email(
-        data.get("email")
-    )
-
+    email = normalize_email(data.get("email"))
     phone = data.get("phone")
 
     if phone:
         phone = normalize_tanzania_phone(phone)
 
-    if email and User.objects.filter(
-        email__iexact=email
-    ).exists():
-        raise ValidationError(
-            {
-                "email": (
-                    "Barua pepe hii tayari "
-                    "imesajiliwa."
-                )
-            }
-        )
+    if email and User.all_objects.filter(email__iexact=email).exists():
+        raise ValidationError({
+            "email": "Barua pepe hii tayari imesajiliwa."
+        })
 
-    if phone and User.objects.filter(
-        phone=phone
-    ).exists():
-        raise ValidationError(
-            {
-                "phone": (
-                    "Namba hii tayari "
-                    "imesajiliwa."
-                )
-            }
-        )
+    if phone and User.objects.filter(phone=phone).exists():
+        raise ValidationError({
+            "phone": "Namba hii tayari imesajiliwa."
+        })
 
     if email:
-        PendingRegistration.objects.filter(
-            email__iexact=email
-        ).delete()
+        PendingRegistration.objects.filter(email__iexact=email).delete()
 
     if phone:
-        PendingRegistration.objects.filter(
-            phone=phone
-        ).delete()
+        PendingRegistration.objects.filter(phone=phone).delete()
 
-    pending = PendingRegistration.objects.create(
+    return PendingRegistration.objects.create(
         name=data["name"].strip(),
         email=email,
         phone=phone,
         account_type=data.get(
-            "account_type",
-            User.AccountType.INDIVIDUAL,
+            "account_type", User.AccountType.INDIVIDUAL,
         ),
-        password_hash=make_password(
-            data["password"]
-        ),
+        password_hash=make_password(data["password"]),
     )
-
-    return pending
 
 
 def create_registration_otp(identifier, verification_type):
-    """
-    Create an OTP for email or phone registration.
-    """
-    record, otp, _ = _create_otp_record(
-        identifier,
-        verification_type,
-    )
+    record, otp, _ = _create_otp_record(identifier, verification_type)
     return record, otp
 
 
 def send_registration_otp(pending, verification_type):
     if verification_type == "EMAIL":
         if not pending.email:
-            raise ValidationError(
-                {
-                    "email": (
-                        "Usajili huu hauna "
-                        "barua pepe."
-                    )
-                }
-            )
+            raise ValidationError({"email": "Usajili huu hauna barua pepe."})
         identifier = normalize_email(pending.email)
-
     elif verification_type == "PHONE":
         if not pending.phone:
-            raise ValidationError(
-                {
-                    "phone": (
-                        "Usajili huu hauna "
-                        "namba ya simu."
-                    )
-                }
-            )
-        identifier = normalize_tanzania_phone(
-            pending.phone
-        )
-
+            raise ValidationError({"phone": "Usajili huu hauna namba ya simu."})
+        identifier = normalize_tanzania_phone(pending.phone)
     else:
-        raise ValidationError(
-            {
-                "verification_type": (
-                    "Aina ya uthibitishaji "
-                    "si sahihi."
-                )
-            }
-        )
+        raise ValidationError({
+            "verification_type": "Aina ya uthibitishaji si sahihi."
+        })
 
     otp_record, otp = create_registration_otp(
-        identifier=identifier,
-        verification_type=verification_type,
+        identifier=identifier, verification_type=verification_type,
     )
 
     try:
@@ -498,7 +300,6 @@ def send_registration_otp(pending, verification_type):
             send_email_otp(identifier, otp)
         else:
             send_sms_otp(identifier, otp)
-
     except Exception:
         otp_record.delete()
         raise
@@ -507,28 +308,17 @@ def send_registration_otp(pending, verification_type):
 
 
 @transaction.atomic
-def verify_registration_otp(
-    identifier,
-    otp_code,
-    verification_type,
-):
+def verify_registration_otp(identifier, otp_code, verification_type):
     if verification_type == "EMAIL":
         identifier = normalize_email(identifier)
-
+        lookup_field = "email__iexact"
     elif verification_type == "PHONE":
-        identifier = normalize_tanzania_phone(
-            identifier
-        )
-
+        identifier = normalize_tanzania_phone(identifier)
+        lookup_field = "phone"
     else:
-        raise ValidationError(
-            {
-                "verification_type": (
-                    "Aina ya uthibitishaji "
-                    "si sahihi."
-                )
-            }
-        )
+        raise ValidationError({
+            "verification_type": "Aina ya uthibitishaji si sahihi."
+        })
 
     otp_record = (
         OTPVerification.objects
@@ -543,110 +333,51 @@ def verify_registration_otp(
     )
 
     if not otp_record:
-        raise ValidationError(
-            {
-                "otp_code": (
-                    "OTP haipo au tayari "
-                    "imetumika."
-                )
-            }
-        )
+        raise ValidationError({
+            "otp_code": "OTP haipo au tayari imetumika."
+        })
 
     if otp_record.is_expired:
-        raise ValidationError(
-            {
-                "otp_code": (
-                    "OTP imekwisha muda wake. "
-                    "Omba OTP mpya."
-                )
-            }
-        )
+        raise ValidationError({
+            "otp_code": "OTP imekwisha muda wake. Omba OTP mpya."
+        })
 
     if otp_record.attempts >= OTP_MAX_ATTEMPTS:
-        raise ValidationError(
-            {
-                "otp_code": (
-                    "Umefikia idadi ya juu "
-                    "ya majaribio."
-                )
-            }
-        )
+        raise ValidationError({
+            "otp_code": "Umefikia idadi ya juu ya majaribio."
+        })
 
-    expected_hash = otp_record.otp_code
-    supplied_hash = hash_otp(otp_code)
-
-    if not secrets.compare_digest(
-        expected_hash,
-        supplied_hash,
-    ):
+    if not secrets.compare_digest(otp_record.otp_code, hash_otp(otp_code)):
         otp_record.attempts += 1
-        otp_record.save(
-            update_fields=["attempts"]
-        )
+        otp_record.save(update_fields=["attempts"])
+        remaining = OTP_MAX_ATTEMPTS - otp_record.attempts
+        raise ValidationError({
+            "otp_code": (
+                f"OTP si sahihi. Umebakiwa na {remaining} jaribio."
+            )
+        })
 
-        remaining = (
-            OTP_MAX_ATTEMPTS
-            - otp_record.attempts
-        )
-
-        raise ValidationError(
-            {
-                "otp_code": (
-                    "OTP si sahihi. "
-                    f"Umebakiwa na {remaining} "
-                    "jaribio."
-                )
-            }
-        )
-
-    pending_query = PendingRegistration.objects
-
-    if verification_type == "EMAIL":
-        pending = (
-            pending_query
-            .filter(email__iexact=identifier)
-            .first()
-        )
-    else:
-        pending = (
-            pending_query
-            .filter(phone=identifier)
-            .first()
-        )
+    pending = (
+        PendingRegistration.objects
+        .select_for_update()
+        .filter(**{lookup_field: identifier})
+        .first()
+    )
 
     if not pending:
-        raise ValidationError(
-            {
-                "detail": (
-                    "Usajili unaosubiri "
-                    "haupatikani."
-                )
-            }
-        )
+        raise ValidationError({
+            "detail": "Usajili unaosubiri haupatikani."
+        })
 
-    if pending.email and User.objects.filter(
+    if pending.email and User.all_objects.filter(
         email__iexact=pending.email
     ).exists():
-        raise ValidationError(
-            {
-                "detail": (
-                    "Barua pepe tayari "
-                    "imesajiliwa."
-                )
-            }
-        )
+        raise ValidationError({"detail": "Barua pepe tayari imesajiliwa."})
 
-    if pending.phone and User.objects.filter(
-        phone=pending.phone
-    ).exists():
-        raise ValidationError(
-            {
-                "detail": (
-                    "Namba ya simu tayari "
-                    "imesajiliwa."
-                )
-            }
-        )
+    if pending.phone and User.objects.filter(phone=pending.phone).exists():
+        raise ValidationError({
+            "detail": "Namba ya simu tayari imesajiliwa."
+        })
 
     user = User.objects.create(
         name=pending.name,
@@ -660,16 +391,9 @@ def verify_registration_otp(
 
     otp_record.is_used = True
     otp_record.verified_at = timezone.now()
-
-    otp_record.save(
-        update_fields=[
-            "is_used",
-            "verified_at",
-        ]
-    )
+    otp_record.save(update_fields=["is_used", "verified_at"])
 
     pending.delete()
-
     return user
 
 
@@ -678,35 +402,21 @@ def verify_registration_otp(
 # ============================================================
 
 def send_password_reset_otp(user, base_type):
-    """
-    Send a password reset OTP to the user via the requested channel.
-
-    base_type must be "EMAIL" or "PHONE".
-    """
     if base_type == "EMAIL":
         if not user.email:
-            raise ValidationError(
-                "Mtumiaji hana barua pepe."
-            )
+            raise ValidationError("Mtumiaji hana barua pepe.")
         identifier = normalize_email(user.email)
         verification_type = "PASSWORD_RESET_EMAIL"
-
     elif base_type == "PHONE":
         if not user.phone:
-            raise ValidationError(
-                "Mtumiaji hana namba ya simu."
-            )
+            raise ValidationError("Mtumiaji hana namba ya simu.")
         identifier = normalize_tanzania_phone(user.phone)
         verification_type = "PASSWORD_RESET_PHONE"
-
     else:
-        raise ValidationError(
-            "Aina ya uthibitishaji si sahihi."
-        )
+        raise ValidationError("Aina ya uthibitishaji si sahihi.")
 
     otp_record, otp, identifier = _create_otp_record(
-        identifier,
-        verification_type,
+        identifier, verification_type,
     )
 
     try:
@@ -714,7 +424,6 @@ def send_password_reset_otp(user, base_type):
             send_password_reset_email(identifier, otp)
         else:
             send_password_reset_sms(identifier, otp)
-
     except Exception:
         otp_record.delete()
         raise
@@ -723,33 +432,19 @@ def send_password_reset_otp(user, base_type):
 
 
 @transaction.atomic
-def verify_password_reset_otp(
-    identifier,
-    otp_code,
-    verification_type,
-):
-    """
-    Verify the password reset OTP and return the matching User.
-    """
+def verify_password_reset_otp(identifier, otp_code, verification_type):
     if verification_type == "EMAIL":
         identifier = normalize_email(identifier)
         lookup_type = "PASSWORD_RESET_EMAIL"
-
+        lookup_filter = {"email__iexact": identifier}
     elif verification_type == "PHONE":
-        identifier = normalize_tanzania_phone(
-            identifier
-        )
+        identifier = normalize_tanzania_phone(identifier)
         lookup_type = "PASSWORD_RESET_PHONE"
-
+        lookup_filter = {"phone": identifier}
     else:
-        raise ValidationError(
-            {
-                "verification_type": (
-                    "Aina ya uthibitishaji "
-                    "si sahihi."
-                )
-            }
-        )
+        raise ValidationError({
+            "verification_type": "Aina ya uthibitishaji si sahihi."
+        })
 
     otp_record = (
         OTPVerification.objects
@@ -764,131 +459,55 @@ def verify_password_reset_otp(
     )
 
     if not otp_record:
-        raise ValidationError(
-            {
-                "otp_code": (
-                    "OTP haipo au tayari "
-                    "imetumika."
-                )
-            }
-        )
+        raise ValidationError({
+            "otp_code": "OTP haipo au tayari imetumika."
+        })
 
     if otp_record.is_expired:
-        raise ValidationError(
-            {
-                "otp_code": (
-                    "OTP imekwisha muda wake. "
-                    "Omba OTP mpya."
-                )
-            }
-        )
+        raise ValidationError({
+            "otp_code": "OTP imekwisha muda wake. Omba OTP mpya."
+        })
 
     if otp_record.attempts >= OTP_MAX_ATTEMPTS:
-        raise ValidationError(
-            {
-                "otp_code": (
-                    "Umefikia idadi ya juu "
-                    "ya majaribio."
-                )
-            }
-        )
+        raise ValidationError({
+            "otp_code": "Umefikia idadi ya juu ya majaribio."
+        })
 
-    if not secrets.compare_digest(
-        otp_record.otp_code,
-        hash_otp(otp_code),
-    ):
+    if not secrets.compare_digest(otp_record.otp_code, hash_otp(otp_code)):
         otp_record.attempts += 1
-        otp_record.save(
-            update_fields=["attempts"]
-        )
+        otp_record.save(update_fields=["attempts"])
+        remaining = OTP_MAX_ATTEMPTS - otp_record.attempts
+        raise ValidationError({
+            "otp_code": f"OTP si sahihi. Umebakiwa na {remaining} jaribio."
+        })
 
-        remaining = (
-            OTP_MAX_ATTEMPTS
-            - otp_record.attempts
-        )
-
-        raise ValidationError(
-            {
-                "otp_code": (
-                    "OTP si sahihi. "
-                    f"Umebakiwa na {remaining} "
-                    "jaribio."
-                )
-            }
-        )
-
-    if lookup_type == "PASSWORD_RESET_EMAIL":
-        user = (
-            User.objects
-            .filter(email__iexact=identifier)
-            .first()
-        )
-    else:
-        user = (
-            User.objects
-            .filter(phone=identifier)
-            .first()
-        )
+    user = User.objects.filter(**lookup_filter).first()
 
     if not user:
-        raise ValidationError(
-            {
-                "detail": (
-                    "Mtumiaji haipatikani."
-                )
-            }
-        )
+        raise ValidationError({"detail": "Mtumiaji haipatikani."})
 
     otp_record.is_used = True
     otp_record.verified_at = timezone.now()
-
-    otp_record.save(
-        update_fields=[
-            "is_used",
-            "verified_at",
-        ]
-    )
+    otp_record.save(update_fields=["is_used", "verified_at"])
 
     return user
 
 
 @transaction.atomic
 def reset_user_password(user, new_password):
-    """
-    Set a new password for the user and revoke outstanding
-    refresh tokens.
-    """
     if not user or user.is_deleted:
-        raise ValidationError(
-            "Mtumiaji haipatikani."
-        )
-
+        raise ValidationError("Mtumiaji haipatikani.")
     if not new_password:
-        raise ValidationError(
-            "Nenosiri jipya linahitajika."
-        )
+        raise ValidationError("Nenosiri jipya linahitajika.")
 
     user.set_password(new_password)
-
-    user.save(
-        update_fields=[
-            "password",
-            "updated_at",
-        ]
-    )
+    user.save(update_fields=["password", "updated_at"])
 
     _blacklist_user_refresh_tokens(user)
-
     return user
 
 
 def _blacklist_user_refresh_tokens(user):
-    """
-    Revoke every outstanding refresh token issued for this user.
-
-    Access tokens remain valid until they expire, which is
-    intentionally short (30 minutes) in this project.
-    """
     try:
         from rest_framework_simplejwt.token_blacklist.models import (
             BlacklistedToken,
@@ -897,10 +516,11 @@ def _blacklist_user_refresh_tokens(user):
     except ImportError:
         return
 
-    for outstanding in OutstandingToken.objects.filter(user=user):
-        BlacklistedToken.objects.get_or_create(
-            token=outstanding
-        )
+    outstanding = OutstandingToken.objects.filter(user=user)
+    BlacklistedToken.objects.bulk_create(
+        [BlacklistedToken(token=t) for t in outstanding],
+        ignore_conflicts=True,
+    )
 
 
 # ============================================================
@@ -909,14 +529,6 @@ def _blacklist_user_refresh_tokens(user):
 
 @transaction.atomic
 def delete_user_account(*, user, actor, reason=""):
-    """
-    Soft-delete a user and cascade the soft-delete to content
-    they own.
-
-    Financial records (ListingFee, ListingBoost, Transaction,
-    Reservation) are NEVER touched — they persist for audit
-    and reconciliation.
-    """
     from apps.listings.models import Listing
     from apps.notifications.models import Notification
 
@@ -925,14 +537,18 @@ def delete_user_account(*, user, actor, reason=""):
 
     now = timezone.now()
 
-    Listing.objects.filter(seller=user).update(
+    Listing.objects.filter(
+        seller=user, is_deleted=False,
+    ).update(
         is_deleted=True,
         deleted_at=now,
         deleted_by=actor,
         deletion_reason="Account deleted",
     )
 
-    Notification.objects.filter(recipient=user).update(
+    Notification.objects.filter(
+        recipient=user, is_deleted=False,
+    ).update(
         is_deleted=True,
         deleted_at=now,
         deleted_by=actor,
@@ -949,10 +565,6 @@ def delete_user_account(*, user, actor, reason=""):
 
 @transaction.atomic
 def restore_user_account(*, user, actor):
-    """
-    Restore a soft-deleted user and everything that was cascaded
-    when their account was deleted.
-    """
     from apps.listings.models import Listing
     from apps.notifications.models import Notification
 
@@ -964,7 +576,7 @@ def restore_user_account(*, user, actor):
     Listing.objects.filter(
         seller=user,
         is_deleted=True,
-        deleted_by=user,
+        deletion_reason="Account deleted",
     ).update(
         is_deleted=False,
         deleted_at=None,
@@ -975,7 +587,7 @@ def restore_user_account(*, user, actor):
     Notification.objects.filter(
         recipient=user,
         is_deleted=True,
-        deleted_by=user,
+        deletion_reason="Account deleted",
     ).update(
         is_deleted=False,
         deleted_at=None,

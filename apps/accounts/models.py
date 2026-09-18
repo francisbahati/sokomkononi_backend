@@ -18,10 +18,23 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
         verbose_name="Jina kamili",
     )
 
+    # ----------------------------------------------------------------
+    # Unique unconditionally so Django's auth system accepts it as
+    # USERNAME_FIELD. Soft-delete tombstones it to free it up.
+    # ----------------------------------------------------------------
     email = models.EmailField(
         null=True,
         blank=True,
+        unique=True,
         verbose_name="Barua pepe",
+    )
+
+    # Holds the original email of a soft-deleted user so it can be
+    # reclaimed on restore, while keeping `email` free for reuse.
+    deleted_email = models.EmailField(
+        null=True,
+        blank=True,
+        verbose_name="Barua pepe ya awali",
     )
 
     phone = models.CharField(
@@ -84,14 +97,8 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
         default_manager_name = "objects"
 
         constraints = [
-            models.UniqueConstraint(
-                fields=["email"],
-                condition=models.Q(
-                    is_deleted=False,
-                    email__isnull=False,
-                ),
-                name="unique_active_user_email",
-            ),
+            # Email uniqueness is now enforced by the field itself
+            # (unique=True). The partial constraint is no longer needed.
             models.UniqueConstraint(
                 fields=["phone"],
                 condition=models.Q(
@@ -106,9 +113,14 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
         return (
             self.name
             or self.email
+            or self.deleted_email
             or self.phone
             or f"User {self.pk}"
         )
+
+    # ------------------------------------------------------------------
+    # Capabilities
+    # ------------------------------------------------------------------
 
     @property
     def can_buy(self):
@@ -124,6 +136,83 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
             self.is_active
             and self.is_verified
             and not self.is_deleted
+        )
+
+    # ------------------------------------------------------------------
+    # Soft-delete override — tombstone the unique email
+    # ------------------------------------------------------------------
+
+    def delete(self, using=None, keep_parents=False, *, by=None, reason=""):
+        """
+        Soft-delete the user and free up the unique email so a new
+        account can register with it immediately.
+
+        The original email is preserved in `deleted_email` and can be
+        reclaimed via `restore()` if it's still free.
+        """
+        if self.is_deleted:
+            return (0, {})
+
+        if self.email:
+            self.deleted_email = self.email
+            self.email = None
+
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.deleted_by = by
+        if reason:
+            self.deletion_reason = reason
+
+        self.save(
+            update_fields=[
+                "email",
+                "deleted_email",
+                "is_deleted",
+                "deleted_at",
+                "deleted_by",
+                "deletion_reason",
+            ]
+        )
+
+        return (0, {})
+
+    def restore(self):
+        """
+        Restore the user and reclaim the original email if it's still
+        available. If someone else has taken it, the original is
+        dropped and the user must set a new email.
+        """
+        if not self.is_deleted:
+            return
+
+        if self.deleted_email and not self.email:
+            email_taken = (
+                User.all_objects
+                .filter(email=self.deleted_email)
+                .exclude(pk=self.pk)
+                .exists()
+            )
+
+            if not email_taken:
+                self.email = self.deleted_email
+
+            # Clear deleted_email either way — either reclaimed or lost.
+            self.deleted_email = None
+
+        self.is_deleted = False
+        self.deleted_at = None
+        self.deleted_by = None
+        self.deletion_reason = ""
+
+        self.save(
+            update_fields=[
+                "email",
+                "deleted_email",
+                "is_deleted",
+                "deleted_at",
+                "deleted_by",
+                "deletion_reason",
+            ]
         )
 
 

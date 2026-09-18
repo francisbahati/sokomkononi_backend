@@ -1,30 +1,20 @@
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils.text import slugify
 
 from apps.core.models import SoftDeleteModel
 
 
 class Category(SoftDeleteModel):
-    name = models.CharField(
-        max_length=100,
-        verbose_name="Jina la kundi",
-    )
+    name = models.CharField(max_length=100, verbose_name="Jina la kundi")
 
     slug = models.SlugField(
-        max_length=120,
-        blank=True,
-        verbose_name="Slug",
+        max_length=120, blank=True, verbose_name="Slug",
     )
 
-    description = models.TextField(
-        blank=True,
-        verbose_name="Maelezo",
-    )
+    description = models.TextField(blank=True, verbose_name="Maelezo")
 
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name="Lipo hai",
-    )
+    is_active = models.BooleanField(default=True, verbose_name="Lipo hai")
 
     ordering = models.PositiveIntegerField(
         default=0,
@@ -32,15 +22,8 @@ class Category(SoftDeleteModel):
         help_text="Namba ndogo huonekana kwanza.",
     )
 
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name="Imeundwa",
-    )
-
-    updated_at = models.DateTimeField(
-        auto_now=True,
-        verbose_name="Imesasishwa",
-    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Imeundwa")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Imesasishwa")
 
     class Meta:
         db_table = "categories"
@@ -53,7 +36,7 @@ class Category(SoftDeleteModel):
 
         constraints = [
             models.UniqueConstraint(
-                fields=["name"],
+                Lower("name"),
                 condition=models.Q(is_deleted=False),
                 name="unique_active_category_name",
             ),
@@ -66,9 +49,24 @@ class Category(SoftDeleteModel):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)
-
+            self.slug = self._generate_unique_slug()
         super().save(*args, **kwargs)
+
+    def _generate_unique_slug(self):
+        base = slugify(self.name) or "category"
+        slug = base
+        counter = 2
+
+        while (
+            Category.all_objects
+            .filter(slug=slug, is_deleted=False)
+            .exclude(pk=self.pk)
+            .exists()
+        ):
+            slug = f"{base}-{counter}"
+            counter += 1
+
+        return slug
 
     def __str__(self):
         return self.name

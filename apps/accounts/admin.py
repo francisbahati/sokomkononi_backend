@@ -39,6 +39,7 @@ class UserAdmin(SoftDeleteAdminMixin, BaseUserAdmin):
     search_fields = [
         "name",
         "email",
+        "deleted_email",
         "phone",
     ]
 
@@ -110,6 +111,7 @@ class UserAdmin(SoftDeleteAdminMixin, BaseUserAdmin):
                     "deleted_at",
                     "deleted_by",
                     "deletion_reason",
+                    "deleted_email",
                 )
             },
         ),
@@ -119,9 +121,7 @@ class UserAdmin(SoftDeleteAdminMixin, BaseUserAdmin):
         (
             "Unda Mtumiaji",
             {
-                "classes": (
-                    "wide",
-                ),
+                "classes": ("wide",),
                 "fields": (
                     "email",
                     "name",
@@ -139,9 +139,7 @@ class UserAdmin(SoftDeleteAdminMixin, BaseUserAdmin):
 
 
 @admin.register(PendingRegistration)
-class PendingRegistrationAdmin(
-    admin.ModelAdmin
-):
+class PendingRegistrationAdmin(admin.ModelAdmin):
 
     list_display = [
         "id",
@@ -172,9 +170,7 @@ class PendingRegistrationAdmin(
 
 
 @admin.register(OTPVerification)
-class OTPVerificationAdmin(
-    admin.ModelAdmin
-):
+class OTPVerificationAdmin(admin.ModelAdmin):
 
     list_display = [
         "id",

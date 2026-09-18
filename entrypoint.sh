@@ -6,7 +6,7 @@ echo "SokoMkononi — entrypoint"
 echo "============================================================"
 
 # ------------------------------------------------------------
-# Wait for Postgres (pure Python — no netcat required)
+# Wait for Postgres
 # ------------------------------------------------------------
 if [ -n "$DB_HOST" ] && [ -n "$DB_PORT" ]; then
     echo "Waiting for PostgreSQL at $DB_HOST:$DB_PORT ..."
@@ -27,13 +27,47 @@ for attempt in range(120):
     except OSError:
         time.sleep(0.5)
 
-print(f"FATAL: PostgreSQL at {host}:{port} never became reachable", file=sys.stderr)
+print(
+    f"FATAL: PostgreSQL at {host}:{port} never became reachable",
+    file=sys.stderr,
+)
 sys.exit(1)
 PY
 else
     echo "FATAL: DB_HOST or DB_PORT is not set" >&2
     exit 1
 fi
+
+# ------------------------------------------------------------
+# Wait for Redis
+# ------------------------------------------------------------
+REDIS_HOST="${REDIS_HOST:-redis}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+
+echo "Waiting for Redis at $REDIS_HOST:$REDIS_PORT ..."
+python - <<'PY'
+import os
+import socket
+import sys
+import time
+
+host = os.environ.get("REDIS_HOST", "redis")
+port = int(os.environ.get("REDIS_PORT", "6379"))
+
+for attempt in range(120):
+    try:
+        socket.create_connection((host, port), timeout=1).close()
+        print(f"Redis is up at {host}:{port}")
+        sys.exit(0)
+    except OSError:
+        time.sleep(0.5)
+
+print(
+    f"FATAL: Redis at {host}:{port} never became reachable",
+    file=sys.stderr,
+)
+sys.exit(1)
+PY
 
 # ------------------------------------------------------------
 # Migrations
@@ -45,7 +79,7 @@ python manage.py migrate --noinput
 # Static files
 # ------------------------------------------------------------
 echo "Collecting static files..."
-python manage.py collectstatic --noinput --clear
+python manage.py collectstatic --noinput
 
 # ------------------------------------------------------------
 # Start

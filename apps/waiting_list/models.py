@@ -12,58 +12,31 @@ class WaitingListEntry(models.Model):
         FULFILLED = "FULFILLED", "Fulfilled"
 
     listing = models.ForeignKey(
-        Listing,
-        on_delete=models.CASCADE,
-        related_name="waiting_list_entries",
-        verbose_name="Tangazo",
+        Listing, on_delete=models.CASCADE,
+        related_name="waiting_list_entries", verbose_name="Tangazo",
     )
-
     buyer = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="waiting_list_entries",
-        verbose_name="Mnunuzi",
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="waiting_list_entries", verbose_name="Mnunuzi",
     )
-
     status = models.CharField(
-        max_length=20,
-        choices=Status.choices,
-        default=Status.WAITING,
-        verbose_name="Hali",
+        max_length=20, choices=Status.choices,
+        default=Status.WAITING, verbose_name="Hali",
     )
-
-    position = models.PositiveIntegerField(
-        default=1,
-        verbose_name="Nafasi",
-    )
-
+    position = models.PositiveIntegerField(default=1, verbose_name="Nafasi")
     notified_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        verbose_name="Muda wa kutaarifiwa",
+        null=True, blank=True, verbose_name="Muda wa kutaarifiwa",
     )
-
     joined_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name="Muda wa kujiunga",
+        auto_now_add=True, verbose_name="Muda wa kujiunga",
     )
-
     updated_at = models.DateTimeField(
-        auto_now=True,
-        verbose_name="Imesasishwa",
+        auto_now=True, verbose_name="Imesasishwa",
     )
 
     class Meta:
         db_table = "waiting_list_entries"
         ordering = ["position", "joined_at"]
-
-        constraints = [
-            models.UniqueConstraint(
-                fields=["listing", "buyer"],
-                name="unique_waiting_listing_buyer",
-            ),
-        ]
-
         indexes = [
             models.Index(
                 fields=["listing", "status", "position"],
@@ -78,10 +51,10 @@ class WaitingListEntry(models.Model):
                 name="wait_status_joined_idx",
             ),
         ]
+        # No unique constraint — allows re-joining after CANCELLED.
 
     def __str__(self):
         return (
             f"Waiting List #{self.pk} - "
-            f"{self.listing.title} - "
-            f"{self.buyer.name}"
+            f"{self.listing.title} - {self.buyer.name}"
         )

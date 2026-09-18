@@ -1,5 +1,6 @@
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import permissions
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -19,10 +20,6 @@ from .services.revenue import (
 
 
 class IsAdminUser(permissions.BasePermission):
-    """
-    Only Django staff/admin users can access system-wide financial data.
-    """
-
     def has_permission(self, request, view):
         return bool(
             request.user
@@ -35,12 +32,9 @@ class FinancialDashboardView(APIView):
     permission_classes = [IsAdminUser]
 
     @extend_schema(
-        summary="Financial dashboard",
         parameters=[
             OpenApiParameter(
-                name="period",
-                type=str,
-                required=False,
+                name="period", type=str, required=False,
                 enum=["all", "today", "week", "month"],
             ),
         ],
@@ -51,44 +45,25 @@ class FinancialDashboardView(APIView):
 
         if period not in {"all", "today", "week", "month"}:
             return Response(
-                {
-                    "detail": (
-                        "Invalid period. "
-                        "Use all, today, week, or month."
-                    )
-                },
-                status=400,
+                {"detail": "Invalid period."}, status=400,
             )
 
         data = calculate_financial_dashboard(period)
-        serializer = FinancialDashboardSerializer(data)
-
-        return Response(serializer.data)
+        return Response(FinancialDashboardSerializer(data).data)
 
 
 class RevenueReportView(APIView):
     permission_classes = [IsAdminUser]
 
     @extend_schema(
-        summary="Detailed revenue report",
         parameters=[
             OpenApiParameter(
-                name="period",
-                type=str,
-                required=False,
+                name="period", type=str, required=False,
                 enum=["all", "today", "week", "month"],
             ),
             OpenApiParameter(
-                name="source",
-                type=str,
-                required=False,
-                enum=[
-                    "all",
-                    "listing_fee",
-                    "reservation",
-                    "boosting",
-                    "refund",
-                ],
+                name="source", type=str, required=False,
+                enum=["all", "listing_fee", "reservation", "boosting", "refund"],
             ),
         ],
         responses=RevenueRecordSerializer(many=True),
@@ -101,54 +76,39 @@ class RevenueReportView(APIView):
             return Response({"detail": "Invalid period."}, status=400)
 
         if source not in {
-            "all",
-            "listing_fee",
-            "reservation",
-            "boosting",
-            "refund",
+            "all", "listing_fee", "reservation", "boosting", "refund",
         }:
             return Response({"detail": "Invalid source."}, status=400)
 
         records = get_revenue_records(period=period, source=source)
         serializer = RevenueRecordSerializer(records, many=True)
 
-        return Response(
-            {
-                "period": period,
-                "source": source,
-                "count": len(records),
-                "results": serializer.data,
-            }
-        )
+        return Response({
+            "period": period,
+            "source": source,
+            "count": len(records),
+            "results": serializer.data,
+        })
 
 
-# ============================================================
-# MY TRANSACTIONS — per-user flat list of fee payments
-# ============================================================
+class MyTransactionsPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = "page_size"
+    max_page_size = 200
+
 
 class MyTransactionsView(APIView):
-    """
-    Return the authenticated user's own fee payments — listing fees,
-    boosts, and reservation deposits — as a single flat list.
-    """
-
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
-        summary="My transactions",
-        description=(
-            "Miamala yako yote — listing fees, boosts, na reservations — "
-            "kama orodha moja ya pande zote."
-        ),
         responses=MyTransactionSerializer(many=True),
     )
     def get(self, request):
         user = request.user
         records = []
 
-        # ---- Listing fees ----
         for item in ListingFee.objects.filter(
-            seller=user
+            seller=user,
         ).select_related("listing").order_by("-created_at"):
             records.append({
                 "id": f"lf_{item.pk}",
@@ -162,14 +122,13 @@ class MyTransactionsView(APIView):
                 "status": self._map_status(item.payment_status),
                 "payment_status": item.payment_status,
                 "payment_reference": item.payment_reference,
-                "method": "—",
+                "method": None,
                 "paid_at": item.paid_at,
                 "created_at": item.created_at,
             })
 
-        # ---- Boosts ----
         for item in ListingBoost.objects.filter(
-            seller=user
+            seller=user,
         ).select_related("listing", "package").order_by("-created_at"):
             records.append({
                 "id": f"b_{item.pk}",
@@ -183,16 +142,15 @@ class MyTransactionsView(APIView):
                 "status": self._map_status(item.payment_status),
                 "payment_status": item.payment_status,
                 "payment_reference": item.payment_reference,
-                "method": "—",
+                "method": None,
                 "paid_at": item.paid_at,
                 "created_at": item.created_at,
             })
 
-        # ---- Reservation deposits (user is the buyer) ----
         for item in Reservation.objects.filter(
-            transaction__buyer=user
+            transaction__buyer=user,
         ).select_related(
-            "transaction", "transaction__listing"
+            "transaction", "transaction__listing",
         ).order_by("-created_at"):
             listing = item.transaction.listing
             records.append({
@@ -207,31 +165,34 @@ class MyTransactionsView(APIView):
                 "status": self._map_status(item.payment_status),
                 "payment_status": item.payment_status,
                 "payment_reference": item.payment_reference,
-                "method": "—",
+                "method": None,
                 "paid_at": item.paid_at,
                 "created_at": item.created_at,
             })
 
-        records.sort(
-            key=lambda r: r["created_at"],
-            reverse=True,
+        records.sort(key=lambda r: r["created_at"], reverse=True)
+
+        paginator = MyTransactionsPagination()
+        page = paginator.paginate_queryset(records, request)
+
+        serializer = MyTransactionSerializer(
+            page if page is not None else records, many=True,
         )
 
-        serializer = MyTransactionSerializer(records, many=True)
+        if page is not None:
+            return paginator.get_paginated_response(serializer.data)
 
-        return Response(
-            {
-                "count": len(records),
-                "results": serializer.data,
-            }
-        )
+        return Response({
+            "count": len(records),
+            "results": serializer.data,
+        })
 
     @staticmethod
     def _map_status(payment_status):
         mapping = {
-            "PAID": "completed",
-            "PENDING": "pending",
-            "FAILED": "failed",
-            "REFUNDED": "refunded",
+            "PAID": "COMPLETED",
+            "PENDING": "PENDING",
+            "FAILED": "FAILED",
+            "REFUNDED": "REFUNDED",
         }
-        return mapping.get(payment_status, "pending")
+        return mapping.get(payment_status, "PENDING")

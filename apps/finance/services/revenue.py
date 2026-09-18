@@ -1,8 +1,8 @@
-
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.db.models import Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.boosting.models import ListingBoost
@@ -14,74 +14,37 @@ ZERO = Decimal("0.00")
 
 
 def get_period_range(period):
-    """
-    Return (start, end) for the requested reporting period.
-
-    Supported:
-        all
-        today
-        week
-        month
-    """
-
     now = timezone.localtime()
 
     if period == "today":
-        start = datetime.combine(
-            now.date(),
-            time.min,
-            tzinfo=now.tzinfo,
-        )
+        start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
         end = start + timedelta(days=1)
 
     elif period == "week":
-        start_date = (
-            now.date()
-            - timedelta(days=now.weekday())
-        )
-
-        start = datetime.combine(
-            start_date,
-            time.min,
-            tzinfo=now.tzinfo,
-        )
-
+        start_date = now.date() - timedelta(days=now.weekday())
+        start = datetime.combine(start_date, time.min, tzinfo=now.tzinfo)
         end = start + timedelta(days=7)
 
     elif period == "month":
         start_date = now.date().replace(day=1)
-
-        start = datetime.combine(
-            start_date,
-            time.min,
-            tzinfo=now.tzinfo,
-        )
+        start = datetime.combine(start_date, time.min, tzinfo=now.tzinfo)
 
         if start_date.month == 12:
             next_month = start_date.replace(
-                year=start_date.year + 1,
-                month=1,
-                day=1,
+                year=start_date.year + 1, month=1, day=1,
             )
         else:
             next_month = start_date.replace(
-                month=start_date.month + 1,
-                day=1,
+                month=start_date.month + 1, day=1,
             )
 
-        end = datetime.combine(
-            next_month,
-            time.min,
-            tzinfo=now.tzinfo,
-        )
+        end = datetime.combine(next_month, time.min, tzinfo=now.tzinfo)
 
     elif period == "all":
         return None, None
 
     else:
-        raise ValueError(
-            "Invalid period. Use: all, today, week, or month."
-        )
+        raise ValueError("Invalid period. Use: all, today, week, or month.")
 
     return start, end
 
@@ -89,107 +52,68 @@ def get_period_range(period):
 def _apply_date_filter(queryset, start, end, field="created_at"):
     if start is None or end is None:
         return queryset
-
-    return queryset.filter(
-        **{
-            f"{field}__gte": start,
-            f"{field}__lt": end,
-        }
-    )
+    return queryset.filter(**{
+        f"{field}__gte": start, f"{field}__lt": end,
+    })
 
 
 def calculate_financial_dashboard(period="all"):
     start, end = get_period_range(period)
 
-    # Listing Fees
-    listing_fees = ListingFee.objects.filter(
-        payment_status="PAID"
+    # Listing Fees — use paid_at coalesced to created_at
+    listing_fees = ListingFee.objects.filter(payment_status="PAID").annotate(
+        effective_paid=Coalesce("paid_at", "created_at"),
     )
-
-    listing_fees = _apply_date_filter(
-        listing_fees,
-        start,
-        end,
-        field="paid_at",
-    )
-
-    listing_fee_revenue = (
-        listing_fees.aggregate(
-            total=Sum("amount")
-        )["total"]
-        or ZERO
-    )
-
+    if start and end:
+        listing_fees = listing_fees.filter(
+            effective_paid__gte=start, effective_paid__lt=end,
+        )
+    listing_fee_revenue = listing_fees.aggregate(
+        total=Sum("amount"),
+    )["total"] or ZERO
     paid_listing_fees = listing_fees.count()
 
     # Reservations
-    reservations = Reservation.objects.filter(
-        payment_status="PAID"
+    reservations = Reservation.objects.filter(payment_status="PAID").annotate(
+        effective_paid=Coalesce("paid_at", "created_at"),
     )
-
-    reservations = _apply_date_filter(
-        reservations,
-        start,
-        end,
-        field="paid_at",
-    )
-
-    reservation_revenue = (
-        reservations.aggregate(
-            total=Sum("deposit_amount")
-        )["total"]
-        or ZERO
-    )
-
+    if start and end:
+        reservations = reservations.filter(
+            effective_paid__gte=start, effective_paid__lt=end,
+        )
+    reservation_revenue = reservations.aggregate(
+        total=Sum("deposit_amount"),
+    )["total"] or ZERO
     paid_reservations = reservations.count()
 
-    # Boosting
-    boosts = ListingBoost.objects.filter(
-        payment_status="PAID"
+    # Boosts
+    boosts = ListingBoost.objects.filter(payment_status="PAID").annotate(
+        effective_paid=Coalesce("paid_at", "created_at"),
     )
-
-    boosts = _apply_date_filter(
-        boosts,
-        start,
-        end,
-        field="paid_at",
-    )
-
-    boosting_revenue = (
-        boosts.aggregate(
-            total=Sum("amount")
-        )["total"]
-        or ZERO
-    )
-
+    if start and end:
+        boosts = boosts.filter(
+            effective_paid__gte=start, effective_paid__lt=end,
+        )
+    boosting_revenue = boosts.aggregate(total=Sum("amount"))["total"] or ZERO
     paid_boosts = boosts.count()
 
     # Refunds
-    refunds = Reservation.objects.filter(
-        payment_status="REFUNDED"
+    refunds = Reservation.objects.filter(payment_status="REFUNDED").annotate(
+        effective_refund=Coalesce("refunded_at", "created_at"),
     )
-
-    refunds = _apply_date_filter(
-        refunds,
-        start,
-        end,
-        field="refunded_at",
-    )
-
-    refund_amount = (
-        refunds.aggregate(
-            total=Sum("deposit_amount")
-        )["total"]
-        or ZERO
-    )
-
+    if start and end:
+        refunds = refunds.filter(
+            effective_refund__gte=start, effective_refund__lt=end,
+        )
+    refund_amount = refunds.aggregate(
+        total=Sum("deposit_amount"),
+    )["total"] or ZERO
     refund_count = refunds.count()
 
-    # Future revenue sources
+    # Placeholders for future revenue sources.
     advertisement_revenue = ZERO
     leading_revenue = ZERO
 
-    # Totals
     total_revenue = (
         listing_fee_revenue
         + reservation_revenue
@@ -197,7 +121,6 @@ def calculate_financial_dashboard(period="all"):
         + advertisement_revenue
         + leading_revenue
     )
-
     net_revenue = total_revenue - refund_amount
 
     return {
@@ -219,248 +142,148 @@ def calculate_financial_dashboard(period="all"):
     }
 
 
-def get_revenue_records(
-    period="all",
-    source="all",
-):
-    """
-    Return individual financial records.
-
-    Supported sources:
-        all
-        listing_fee
-        reservation
-        boosting
-        refund
-    """
-
+def get_revenue_records(period="all", source="all"):
     start, end = get_period_range(period)
-
     records = []
 
-    # Listing Fees
     if source in {"all", "listing_fee"}:
-        queryset = ListingFee.objects.filter(
-            payment_status="PAID"
-        ).select_related(
-            "seller",
-            "listing",
+        qs = ListingFee.objects.filter(
+            payment_status="PAID",
+        ).select_related("seller", "listing").annotate(
+            effective_paid=Coalesce("paid_at", "created_at"),
         )
-
-        queryset = _apply_date_filter(
-            queryset,
-            start,
-            end,
-            field="paid_at",
-        )
-
-        for item in queryset:
-            records.append(
-                {
-                    "id": item.id,
-                    "source": "listing_fee",
-                    "source_label": "Listing Fee",
-                    "amount": item.amount,
-                    "payment_status": item.payment_status,
-                    "payment_reference": item.payment_reference,
-                    "paid_at": item.paid_at,
-                    "refunded_at": None,
-                    "seller_id": item.seller_id,
-                    "seller_name": getattr(
-                        item.seller,
-                        "name",
-                        "",
-                    ),
-                    "seller_email": getattr(
-                        item.seller,
-                        "email",
-                        "",
-                    ),
-                    "listing_id": item.listing_id,
-                    "listing_title": getattr(
-                        item.listing,
-                        "title",
-                        "",
-                    ),
-                    "status": None,
-                    "created_at": item.created_at,
-                }
+        if start and end:
+            qs = qs.filter(
+                effective_paid__gte=start, effective_paid__lt=end,
             )
+        for item in qs:
+            records.append({
+                "id": item.id,
+                "source": "listing_fee",
+                "source_label": "Listing Fee",
+                "amount": item.amount,
+                "payment_status": item.payment_status,
+                "payment_reference": item.payment_reference,
+                "paid_at": item.paid_at,
+                "refunded_at": None,
+                "seller_id": item.seller_id,
+                "seller_name": getattr(item.seller, "name", ""),
+                "seller_email": getattr(item.seller, "email", "") or "",
+                "listing_id": item.listing_id,
+                "listing_title": getattr(item.listing, "title", ""),
+                "status": None,
+                "created_at": item.created_at,
+            })
 
-    # Reservation Payments
     if source in {"all", "reservation"}:
-        queryset = Reservation.objects.filter(
-            payment_status="PAID"
+        qs = Reservation.objects.filter(
+            payment_status="PAID",
         ).select_related(
-            "transaction",
-            "transaction__seller",
-            "transaction__listing",
+            "transaction", "transaction__seller", "transaction__listing",
+        ).annotate(
+            effective_paid=Coalesce("paid_at", "created_at"),
         )
-
-        queryset = _apply_date_filter(
-            queryset,
-            start,
-            end,
-            field="paid_at",
-        )
-
-        for item in queryset:
+        if start and end:
+            qs = qs.filter(
+                effective_paid__gte=start, effective_paid__lt=end,
+            )
+        for item in qs:
             transaction = item.transaction
             seller = transaction.seller
             listing = transaction.listing
+            records.append({
+                "id": item.id,
+                "source": "reservation",
+                "source_label": "Reservation Deposit",
+                "amount": item.deposit_amount,
+                "payment_status": item.payment_status,
+                "payment_reference": item.payment_reference,
+                "paid_at": item.paid_at,
+                "refunded_at": None,
+                "seller_id": seller.id if seller else None,
+                "seller_name": getattr(seller, "name", "") if seller else "",
+                "seller_email": (
+                    (getattr(seller, "email", "") or "") if seller else ""
+                ),
+                "listing_id": listing.id if listing else None,
+                "listing_title": (
+                    getattr(listing, "title", "") if listing else ""
+                ),
+                "status": item.status,
+                "created_at": item.created_at,
+            })
 
-            records.append(
-                {
-                    "id": item.id,
-                    "source": "reservation",
-                    "source_label": "Reservation Deposit",
-                    "amount": item.deposit_amount,
-                    "payment_status": item.payment_status,
-                    "payment_reference": item.payment_reference,
-                    "paid_at": item.paid_at,
-                    "refunded_at": None,
-                    "seller_id": seller.id if seller else None,
-                    "seller_name": (
-                        getattr(seller, "name", "")
-                        if seller
-                        else ""
-                    ),
-                    "seller_email": (
-                        getattr(seller, "email", "")
-                        if seller
-                        else ""
-                    ),
-                    "listing_id": (
-                        listing.id
-                        if listing
-                        else None
-                    ),
-                    "listing_title": (
-                        getattr(listing, "title", "")
-                        if listing
-                        else ""
-                    ),
-                    "status": item.status,
-                    "created_at": item.created_at,
-                }
-            )
-
-    # Boosting Payments
     if source in {"all", "boosting"}:
-        queryset = ListingBoost.objects.filter(
-            payment_status="PAID"
-        ).select_related(
-            "seller",
-            "listing",
-            "package",
+        qs = ListingBoost.objects.filter(
+            payment_status="PAID",
+        ).select_related("seller", "listing", "package").annotate(
+            effective_paid=Coalesce("paid_at", "created_at"),
         )
-
-        queryset = _apply_date_filter(
-            queryset,
-            start,
-            end,
-            field="paid_at",
-        )
-
-        for item in queryset:
-            records.append(
-                {
-                    "id": item.id,
-                    "source": "boosting",
-                    "source_label": "Boosting Fee",
-                    "amount": item.amount,
-                    "payment_status": item.payment_status,
-                    "payment_reference": item.payment_reference,
-                    "paid_at": item.paid_at,
-                    "refunded_at": None,
-                    "seller_id": item.seller_id,
-                    "seller_name": getattr(
-                        item.seller,
-                        "name",
-                        "",
-                    ),
-                    "seller_email": getattr(
-                        item.seller,
-                        "email",
-                        "",
-                    ),
-                    "listing_id": item.listing_id,
-                    "listing_title": getattr(
-                        item.listing,
-                        "title",
-                        "",
-                    ),
-                    "status": item.status,
-                    "created_at": item.created_at,
-                }
+        if start and end:
+            qs = qs.filter(
+                effective_paid__gte=start, effective_paid__lt=end,
             )
+        for item in qs:
+            records.append({
+                "id": item.id,
+                "source": "boosting",
+                "source_label": "Boosting Fee",
+                "amount": item.amount,
+                "payment_status": item.payment_status,
+                "payment_reference": item.payment_reference,
+                "paid_at": item.paid_at,
+                "refunded_at": None,
+                "seller_id": item.seller_id,
+                "seller_name": getattr(item.seller, "name", ""),
+                "seller_email": getattr(item.seller, "email", "") or "",
+                "listing_id": item.listing_id,
+                "listing_title": getattr(item.listing, "title", ""),
+                "status": item.status,
+                "created_at": item.created_at,
+            })
 
-    # Refunds
     if source in {"all", "refund"}:
-        queryset = Reservation.objects.filter(
-            payment_status="REFUNDED"
+        qs = Reservation.objects.filter(
+            payment_status="REFUNDED",
         ).select_related(
-            "transaction",
-            "transaction__seller",
-            "transaction__listing",
+            "transaction", "transaction__seller", "transaction__listing",
+        ).annotate(
+            effective_refund=Coalesce("refunded_at", "created_at"),
         )
-
-        queryset = _apply_date_filter(
-            queryset,
-            start,
-            end,
-            field="refunded_at",
-        )
-
-        for item in queryset:
+        if start and end:
+            qs = qs.filter(
+                effective_refund__gte=start, effective_refund__lt=end,
+            )
+        for item in qs:
             transaction = item.transaction
             seller = transaction.seller
             listing = transaction.listing
+            records.append({
+                "id": item.id,
+                "source": "refund",
+                "source_label": "Reservation Refund",
+                "amount": item.deposit_amount,
+                "payment_status": item.payment_status,
+                "payment_reference": item.refund_reference,
+                "paid_at": item.paid_at,
+                "refunded_at": item.refunded_at,
+                "seller_id": seller.id if seller else None,
+                "seller_name": getattr(seller, "name", "") if seller else "",
+                "seller_email": (
+                    (getattr(seller, "email", "") or "") if seller else ""
+                ),
+                "listing_id": listing.id if listing else None,
+                "listing_title": (
+                    getattr(listing, "title", "") if listing else ""
+                ),
+                "status": item.status,
+                "created_at": item.created_at,
+            })
 
-            records.append(
-                {
-                    "id": item.id,
-                    "source": "refund",
-                    "source_label": "Reservation Refund",
-                    "amount": item.deposit_amount,
-                    "payment_status": item.payment_status,
-                    "payment_reference": item.refund_reference,
-                    "paid_at": item.paid_at,
-                    "refunded_at": item.refunded_at,
-                    "seller_id": seller.id if seller else None,
-                    "seller_name": (
-                        getattr(seller, "name", "")
-                        if seller
-                        else ""
-                    ),
-                    "seller_email": (
-                        getattr(seller, "email", "")
-                        if seller
-                        else ""
-                    ),
-                    "listing_id": (
-                        listing.id
-                        if listing
-                        else None
-                    ),
-                    "listing_title": (
-                        getattr(listing, "title", "")
-                        if listing
-                        else ""
-                    ),
-                    "status": item.status,
-                    "created_at": item.created_at,
-                }
-            )
-
-    # Newest first
     records.sort(
-        key=lambda record: (
-            record["paid_at"]
-            or record["refunded_at"]
-            or record["created_at"]
+        key=lambda r: (
+            r["paid_at"] or r["refunded_at"] or r["created_at"]
         ),
         reverse=True,
     )
-
     return records

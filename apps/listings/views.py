@@ -2,8 +2,8 @@
 # apps/listings/views.py
 # ============================================================
 
-from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
@@ -17,6 +17,7 @@ from drf_spectacular.utils import (
 )
 
 from rest_framework import filters, permissions, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -66,15 +67,17 @@ from .services.listing_payment import mark_listing_fee_as_paid
 
 
 # ============================================================================
-# CATEGORY NAMES
+# CATEGORY SLUGS
+# ============================================================================
+# Slug-based matching is resilient to category display-name changes.
 # ============================================================================
 
-CATEGORY_NAMES = {
-    "PROPERTY": "Nyumba & Majengo",
-    "LAND": "Viwanja & Mashamba",
-    "VEHICLE": "Magari",
-    "BUSINESS": "Biashara Zinazouzwa",
-    "EQUIPMENT": "Mashine / Heavy Equipment",
+CATEGORY_SLUGS = {
+    "property": "nyumba-majengo",
+    "land": "viwanja-mashamba",
+    "vehicle": "magari",
+    "business": "biashara-zinazouzwa",
+    "equipment": "mashine-heavy-equipment",
 }
 
 
@@ -114,12 +117,8 @@ CATEGORY_NAMES = {
             )
         ],
     ),
-    update=extend_schema(
-        summary="Badilisha tangazo",
-    ),
-    partial_update=extend_schema(
-        summary="Badilisha sehemu ya tangazo",
-    ),
+    update=extend_schema(summary="Badilisha tangazo"),
+    partial_update=extend_schema(summary="Badilisha sehemu ya tangazo"),
     destroy=extend_schema(
         summary="Futa/hifadhi tangazo",
         description=(
@@ -133,9 +132,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     owner_field = "seller"
     staff_can_restore_any = True
 
-    # ------------------------------------------------------------------
-    # Filtering / searching / ordering
-    # ------------------------------------------------------------------
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,
@@ -206,28 +202,14 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         return ListingWriteSerializer
 
     def get_permissions(self):
-        if self.action in [
-            "list",
-            "retrieve",
-        ]:
-            permission_classes = [
-                permissions.AllowAny,
-            ]
-
+        if self.action in ["list", "retrieve"]:
+            permission_classes = [permissions.AllowAny]
         elif self.action == "create":
-            permission_classes = [
-                IsVerifiedUser,
-            ]
-
+            permission_classes = [IsVerifiedUser]
         else:
-            permission_classes = [
-                IsOwnerOrAdmin,
-            ]
+            permission_classes = [IsOwnerOrAdmin]
 
-        return [
-            permission()
-            for permission in permission_classes
-        ]
+        return [permission() for permission in permission_classes]
 
     def perform_create(self, serializer):
         serializer.save(
@@ -254,11 +236,8 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             "hard", "false"
         ).lower() in ("true", "1", "yes"):
             listing.hard_delete()
-
             return Response(
-                {
-                    "detail": "Tangazo limefutwa kabisa."
-                },
+                {"detail": "Tangazo limefutwa kabisa."},
                 status=status.HTTP_204_NO_CONTENT,
             )
 
@@ -290,61 +269,45 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
 
     detail_model = None
     detail_serializer = None
-    required_category = None
+    required_category_slug = None
     already_exists_message = "Maelezo tayari yapo."
     created_message = "Maelezo yameongezwa."
     deleted_message = "Maelezo yamefutwa."
 
     def get_queryset(self):
         listing = self.get_listing()
-
-        return self.detail_model.objects.filter(
-            listing=listing
-        )
+        return self.detail_model.objects.filter(listing=listing)
 
     def get_serializer_class(self):
         return self.detail_serializer
 
     def get_permissions(self):
         if self.action == "retrieve":
-            return [
-                permissions.AllowAny()
-            ]
-
-        return [
-            IsVerifiedUser(),
-            IsOwnerOrAdmin(),
-        ]
+            return [permissions.AllowAny()]
+        return [IsVerifiedUser(), IsOwnerOrAdmin()]
 
     def get_listing(self):
         return get_object_or_404(
-            Listing.objects.select_related(
-                "seller",
-                "category",
-            ),
-            pk=self.kwargs[
-                self.lookup_url_kwarg
-            ],
+            Listing.objects.select_related("seller", "category"),
+            pk=self.kwargs[self.lookup_url_kwarg],
         )
 
     def check_owner(self, listing):
         if self.request.user.is_staff:
             return True
-
         return listing.seller_id == self.request.user.id
 
     def validate_listing_category(self, listing):
-        if listing.category.name != self.required_category:
+        if listing.category.slug != self.required_category_slug:
             return Response(
                 {
                     "detail": (
                         f"Tangazo hili si la kundi "
-                        f"{self.required_category}."
+                        f"{self.required_category_slug}."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
         return None
 
     def create(self, request, *args, **kwargs):
@@ -361,34 +324,25 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        category_error = self.validate_listing_category(
-            listing
-        )
-
+        category_error = self.validate_listing_category(listing)
         if category_error:
             return category_error
 
-        if self.detail_model.objects.filter(
-            listing=listing
-        ).exists():
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            with transaction.atomic():
+                if self.detail_model.objects.filter(
+                    listing=listing,
+                ).exists():
+                    raise IntegrityError("already_exists")
+                serializer.save(listing=listing)
+        except IntegrityError:
             return Response(
-                {
-                    "detail": self.already_exists_message
-                },
+                {"detail": self.already_exists_message},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        serializer = self.get_serializer(
-            data=request.data
-        )
-
-        serializer.is_valid(
-            raise_exception=True
-        )
-
-        serializer.save(
-            listing=listing
-        )
 
         return Response(
             serializer.data,
@@ -405,12 +359,9 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
                 Listing.Status.SOLD,
             ]:
                 return Response(
-                    {
-                        "detail": "Tangazo halipatikani."
-                    },
+                    {"detail": "Tangazo halipatikani."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-
         elif not (
             request.user.is_staff
             or listing.seller_id == request.user.id
@@ -421,34 +372,19 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
             ]
         ):
             return Response(
-                {
-                    "detail": "Tangazo halipatikani."
-                },
+                {"detail": "Tangazo halipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        obj = get_object_or_404(
-            self.detail_model,
-            listing=listing,
-        )
-
+        obj = get_object_or_404(self.detail_model, listing=listing)
         serializer = self.get_serializer(obj)
-
-        return Response(
-            serializer.data
-        )
+        return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
-        return self._update_details(
-            request,
-            partial=False,
-        )
+        return self._update_details(request, partial=False)
 
     def partial_update(self, request, *args, **kwargs):
-        return self._update_details(
-            request,
-            partial=True,
-        )
+        return self._update_details(request, partial=True)
 
     def _update_details(self, request, partial):
         listing = self.get_listing()
@@ -464,26 +400,15 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        obj = get_object_or_404(
-            self.detail_model,
-            listing=listing,
-        )
+        obj = get_object_or_404(self.detail_model, listing=listing)
 
         serializer = self.get_serializer(
-            obj,
-            data=request.data,
-            partial=partial,
+            obj, data=request.data, partial=partial,
         )
-
-        serializer.is_valid(
-            raise_exception=True
-        )
-
+        serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        return Response(
-            serializer.data
-        )
+        return Response(serializer.data)
 
     def destroy(self, request, *args, **kwargs):
         listing = self.get_listing()
@@ -492,24 +417,17 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
             return Response(
                 {
                     "detail": (
-                        "Huna ruhusa ya kufuta "
-                        "taarifa hizi."
+                        "Huna ruhusa ya kufuta taarifa hizi."
                     )
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        obj = get_object_or_404(
-            self.detail_model,
-            listing=listing,
-        )
-
+        obj = get_object_or_404(self.detail_model, listing=listing)
         obj.delete()
 
         return Response(
-            {
-                "detail": self.deleted_message
-            },
+            {"detail": self.deleted_message},
             status=status.HTTP_200_OK,
         )
 
@@ -519,19 +437,14 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
 # ============================================================================
 
 class PropertyDetailsViewSet(CategoryDetailsViewSet):
-
     detail_model = PropertyDetails
     detail_serializer = PropertyDetailsSerializer
-    required_category = CATEGORY_NAMES["PROPERTY"]
+    required_category_slug = CATEGORY_SLUGS["property"]
 
     already_exists_message = (
-        "Maelezo ya nyumba/jengo tayari "
-        "yameongezwa kwenye tangazo hili."
+        "Maelezo ya nyumba/jengo tayari yameongezwa kwenye tangazo hili."
     )
-
-    deleted_message = (
-        "Maelezo ya nyumba/jengo yamefutwa."
-    )
+    deleted_message = "Maelezo ya nyumba/jengo yamefutwa."
 
 
 # ============================================================================
@@ -539,19 +452,14 @@ class PropertyDetailsViewSet(CategoryDetailsViewSet):
 # ============================================================================
 
 class LandDetailsViewSet(CategoryDetailsViewSet):
-
     detail_model = LandDetails
     detail_serializer = LandDetailsSerializer
-    required_category = CATEGORY_NAMES["LAND"]
+    required_category_slug = CATEGORY_SLUGS["land"]
 
     already_exists_message = (
-        "Maelezo ya ardhi tayari "
-        "yameongezwa kwenye tangazo hili."
+        "Maelezo ya ardhi tayari yameongezwa kwenye tangazo hili."
     )
-
-    deleted_message = (
-        "Maelezo ya ardhi yamefutwa."
-    )
+    deleted_message = "Maelezo ya ardhi yamefutwa."
 
 
 # ============================================================================
@@ -559,19 +467,14 @@ class LandDetailsViewSet(CategoryDetailsViewSet):
 # ============================================================================
 
 class VehicleDetailsViewSet(CategoryDetailsViewSet):
-
     detail_model = VehicleDetails
     detail_serializer = VehicleDetailsSerializer
-    required_category = CATEGORY_NAMES["VEHICLE"]
+    required_category_slug = CATEGORY_SLUGS["vehicle"]
 
     already_exists_message = (
-        "Maelezo ya gari tayari "
-        "yameongezwa kwenye tangazo hili."
+        "Maelezo ya gari tayari yameongezwa kwenye tangazo hili."
     )
-
-    deleted_message = (
-        "Maelezo ya gari yamefutwa."
-    )
+    deleted_message = "Maelezo ya gari yamefutwa."
 
 
 # ============================================================================
@@ -579,19 +482,14 @@ class VehicleDetailsViewSet(CategoryDetailsViewSet):
 # ============================================================================
 
 class BusinessDetailsViewSet(CategoryDetailsViewSet):
-
     detail_model = BusinessDetails
     detail_serializer = BusinessDetailsSerializer
-    required_category = CATEGORY_NAMES["BUSINESS"]
+    required_category_slug = CATEGORY_SLUGS["business"]
 
     already_exists_message = (
-        "Maelezo ya biashara tayari "
-        "yameongezwa kwenye tangazo hili."
+        "Maelezo ya biashara tayari yameongezwa kwenye tangazo hili."
     )
-
-    deleted_message = (
-        "Maelezo ya biashara yamefutwa."
-    )
+    deleted_message = "Maelezo ya biashara yamefutwa."
 
 
 # ============================================================================
@@ -599,19 +497,14 @@ class BusinessDetailsViewSet(CategoryDetailsViewSet):
 # ============================================================================
 
 class EquipmentDetailsViewSet(CategoryDetailsViewSet):
-
     detail_model = EquipmentDetails
     detail_serializer = EquipmentDetailsSerializer
-    required_category = CATEGORY_NAMES["EQUIPMENT"]
+    required_category_slug = CATEGORY_SLUGS["equipment"]
 
     already_exists_message = (
-        "Maelezo ya mashine tayari "
-        "yameongezwa kwenye tangazo hili."
+        "Maelezo ya mashine tayari yameongezwa kwenye tangazo hili."
     )
-
-    deleted_message = (
-        "Maelezo ya mashine yamefutwa."
-    )
+    deleted_message = "Maelezo ya mashine yamefutwa."
 
 
 # ============================================================================
@@ -621,101 +514,47 @@ class EquipmentDetailsViewSet(CategoryDetailsViewSet):
 @extend_schema_view(
     list=extend_schema(
         summary="Orodha ya picha za tangazo",
-        description=(
-            "Huonyesha picha zote za tangazo kwa mpangilio."
-        ),
+        description="Huonyesha picha zote za tangazo kwa mpangilio.",
     ),
-
-    retrieve=extend_schema(
-        summary="Angalia picha ya tangazo",
-    ),
-
+    retrieve=extend_schema(summary="Angalia picha ya tangazo"),
     create=extend_schema(
         summary="Ongeza picha kwenye tangazo",
         description=(
             "Muuzaji anaweza kuongeza picha kwenye tangazo lake. "
             "Admin anaweza kuongeza picha kwenye tangazo lolote."
         ),
-        request={
-            "multipart/form-data": ListingImageSerializer,
-        },
+        request={"multipart/form-data": ListingImageSerializer},
         responses={
             201: ListingImageSerializer,
-            400: OpenApiResponse(
-                description="Taarifa za picha si sahihi."
-            ),
-            403: OpenApiResponse(
-                description="Huna ruhusa ya kuongeza picha."
-            ),
+            400: OpenApiResponse(description="Taarifa za picha si sahihi."),
+            403: OpenApiResponse(description="Huna ruhusa ya kuongeza picha."),
         },
     ),
-
     partial_update=extend_schema(
         summary="Badilisha taarifa za picha",
-        description=(
-            "Badilisha picha kuwa primary au badilisha mpangilio wake."
-        ),
+        description="Badilisha picha kuwa primary au badilisha mpangilio wake.",
     ),
-
-    destroy=extend_schema(
-        summary="Futa picha ya tangazo",
-    ),
+    destroy=extend_schema(summary="Futa picha ya tangazo"),
 )
 class ListingImageViewSet(viewsets.ModelViewSet):
 
     serializer_class = ListingImageSerializer
-
-    parser_classes = [
-        MultiPartParser,
-        FormParser,
-    ]
-
-    http_method_names = [
-        "get",
-        "post",
-        "patch",
-        "delete",
-        "head",
-        "options",
-    ]
+    parser_classes = [MultiPartParser, FormParser]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-
-        listing_id = self.kwargs.get(
-            "listing_id"
-        )
-
-        listing = get_object_or_404(
-            Listing,
-            pk=listing_id,
-        )
-
+        listing_id = self.kwargs.get("listing_id")
+        listing = get_object_or_404(Listing, pk=listing_id)
         user = self.request.user
 
-        if (
-            user.is_authenticated
-            and user.is_staff
-        ):
-            return (
-                ListingImage.objects
-                .filter(listing=listing)
-                .order_by(
-                    "ordering",
-                    "created_at",
-                )
+        if user.is_authenticated and user.is_staff:
+            return ListingImage.objects.filter(listing=listing).order_by(
+                "ordering", "created_at",
             )
 
-        if (
-            user.is_authenticated
-            and listing.seller_id == user.id
-        ):
-            return (
-                ListingImage.objects
-                .filter(listing=listing)
-                .order_by(
-                    "ordering",
-                    "created_at",
-                )
+        if user.is_authenticated and listing.seller_id == user.id:
+            return ListingImage.objects.filter(listing=listing).order_by(
+                "ordering", "created_at",
             )
 
         if listing.status in [
@@ -723,49 +562,21 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             Listing.Status.RESERVED,
             Listing.Status.SOLD,
         ]:
-            return (
-                ListingImage.objects
-                .filter(listing=listing)
-                .order_by(
-                    "ordering",
-                    "created_at",
-                )
+            return ListingImage.objects.filter(listing=listing).order_by(
+                "ordering", "created_at",
             )
 
         return ListingImage.objects.none()
 
     def get_permissions(self):
-
-        if self.action in [
-            "list",
-            "retrieve",
-        ]:
-            permission_classes = [
-                permissions.AllowAny,
-            ]
-
+        if self.action in ["list", "retrieve"]:
+            permission_classes = [permissions.AllowAny]
         else:
-            permission_classes = [
-                IsVerifiedUser,
-                IsOwnerOrAdmin,
-            ]
+            permission_classes = [IsVerifiedUser, IsOwnerOrAdmin]
+        return [permission() for permission in permission_classes]
 
-        return [
-            permission()
-            for permission in permission_classes
-        ]
-
-    def create(
-        self,
-        request,
-        *args,
-        **kwargs,
-    ):
-
-        listing = get_object_or_404(
-            Listing,
-            pk=kwargs["listing_id"],
-        )
+    def create(self, request, *args, **kwargs):
+        listing = get_object_or_404(Listing, pk=kwargs["listing_id"])
 
         if (
             not request.user.is_staff
@@ -774,31 +585,21 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             return Response(
                 {
                     "detail": (
-                        "Huna ruhusa ya kuongeza picha "
-                        "kwenye tangazo ambalo si lako."
+                        "Huna ruhusa ya kuongeza picha kwenye "
+                        "tangazo ambalo si lako."
                     )
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        image = request.FILES.get(
-            "image"
-        )
-
+        image = request.FILES.get("image")
         if not image:
             return Response(
-                {
-                    "detail": "Picha inahitajika."
-                },
+                {"detail": "Picha inahitajika."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        allowed_types = [
-            "image/jpeg",
-            "image/png",
-            "image/webp",
-        ]
-
+        allowed_types = ["image/jpeg", "image/png", "image/webp"]
         if image.content_type not in allowed_types:
             return Response(
                 {
@@ -811,117 +612,57 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             )
 
         max_size = 5 * 1024 * 1024
-
         if image.size > max_size:
             return Response(
-                {
-                    "detail": (
-                        "Picha haiwezi kuzidi "
-                        "ukubwa wa 5 MB."
-                    )
-                },
+                {"detail": "Picha haiwezi kuzidi ukubwa wa 5 MB."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        is_primary = request.data.get(
-            "is_primary",
-            False,
-        )
-
-        if isinstance(
-            is_primary,
-            str,
-        ):
-            is_primary = (
-                is_primary.lower()
-                in [
-                    "true",
-                    "1",
-                    "yes",
-                ]
-            )
+        is_primary = request.data.get("is_primary", False)
+        if isinstance(is_primary, str):
+            is_primary = is_primary.lower() in ["true", "1", "yes"]
 
         try:
-            ordering = int(
-                request.data.get(
-                    "ordering",
-                    0,
-                )
-            )
-
-        except (
-            TypeError,
-            ValueError,
-        ):
+            ordering = int(request.data.get("ordering", 0))
+        except (TypeError, ValueError):
             return Response(
-                {
-                    "detail": (
-                        "Ordering lazima iwe namba."
-                    )
-                },
+                {"detail": "Ordering lazima iwe namba."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         if ordering < 0:
             return Response(
-                {
-                    "detail": (
-                        "Ordering haiwezi kuwa "
-                        "chini ya sifuri."
-                    )
-                },
+                {"detail": "Ordering haiwezi kuwa chini ya sifuri."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         with transaction.atomic():
-
-            has_images = (
-                ListingImage.objects
-                .filter(
-                    listing=listing
-                )
-                .exists()
-            )
+            has_images = ListingImage.objects.filter(
+                listing=listing,
+            ).exists()
 
             if not has_images:
                 is_primary = True
 
             if is_primary:
-
                 ListingImage.objects.filter(
-                    listing=listing,
-                    is_primary=True,
-                ).update(
-                    is_primary=False
-                )
+                    listing=listing, is_primary=True,
+                ).update(is_primary=False)
 
-            image_object = (
-                ListingImage.objects.create(
-                    listing=listing,
-                    image=image,
-                    is_primary=is_primary,
-                    ordering=ordering,
-                )
+            image_object = ListingImage.objects.create(
+                listing=listing,
+                image=image,
+                is_primary=is_primary,
+                ordering=ordering,
             )
 
-        serializer = self.get_serializer(
-            image_object
-        )
-
         return Response(
-            serializer.data,
+            self.get_serializer(image_object).data,
             status=status.HTTP_201_CREATED,
         )
 
-    def partial_update(
-        self,
-        request,
-        *args,
-        **kwargs,
-    ):
-
+    def partial_update(self, request, *args, **kwargs):
         image_object = self.get_object()
-
         listing = image_object.listing
 
         if (
@@ -931,98 +672,47 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             return Response(
                 {
                     "detail": (
-                        "Huna ruhusa ya kubadilisha "
-                        "picha ambalo si lako."
+                        "Huna ruhusa ya kubadilisha picha ambalo si lako."
                     )
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        is_primary = request.data.get(
-            "is_primary",
-            None,
-        )
-
-        ordering = request.data.get(
-            "ordering",
-            None,
-        )
+        is_primary = request.data.get("is_primary", None)
+        ordering = request.data.get("ordering", None)
 
         if ordering is not None:
-
             try:
                 ordering = int(ordering)
-
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 return Response(
-                    {
-                        "detail": (
-                            "Ordering lazima iwe namba."
-                        )
-                    },
+                    {"detail": "Ordering lazima iwe namba."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
             if ordering < 0:
                 return Response(
-                    {
-                        "detail": (
-                            "Ordering haiwezi kuwa "
-                            "chini ya sifuri."
-                        )
-                    },
+                    {"detail": "Ordering haiwezi kuwa chini ya sifuri."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
         with transaction.atomic():
-
             if is_primary is not None:
-
-                if isinstance(
-                    is_primary,
-                    str,
-                ):
-                    is_primary = (
-                        is_primary.lower()
-                        in [
-                            "true",
-                            "1",
-                            "yes",
-                        ]
-                    )
+                if isinstance(is_primary, str):
+                    is_primary = is_primary.lower() in ["true", "1", "yes"]
 
                 if is_primary:
-
                     ListingImage.objects.filter(
-                        listing=listing,
-                        is_primary=True,
-                    ).exclude(
-                        pk=image_object.pk
-                    ).update(
-                        is_primary=False
-                    )
-
+                        listing=listing, is_primary=True,
+                    ).exclude(pk=image_object.pk).update(is_primary=False)
                     image_object.is_primary = True
-
                 else:
-
                     if image_object.is_primary:
-
                         other_primary_exists = (
                             ListingImage.objects
-                            .filter(
-                                listing=listing,
-                                is_primary=True,
-                            )
-                            .exclude(
-                                pk=image_object.pk
-                            )
+                            .filter(listing=listing, is_primary=True)
+                            .exclude(pk=image_object.pk)
                             .exists()
                         )
-
                         if not other_primary_exists:
                             return Response(
                                 {
@@ -1033,7 +723,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                                 },
                                 status=status.HTTP_400_BAD_REQUEST,
                             )
-
                         image_object.is_primary = False
 
             if ordering is not None:
@@ -1041,24 +730,13 @@ class ListingImageViewSet(viewsets.ModelViewSet):
 
             image_object.save()
 
-        serializer = self.get_serializer(
-            image_object
-        )
-
         return Response(
-            serializer.data,
+            self.get_serializer(image_object).data,
             status=status.HTTP_200_OK,
         )
 
-    def destroy(
-        self,
-        request,
-        *args,
-        **kwargs,
-    ):
-
+    def destroy(self, request, *args, **kwargs):
         image_object = self.get_object()
-
         listing = image_object.listing
 
         if (
@@ -1068,8 +746,7 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             return Response(
                 {
                     "detail": (
-                        "Huna ruhusa ya kufuta "
-                        "picha ambalo si lako."
+                        "Huna ruhusa ya kufuta picha ambalo si lako."
                     )
                 },
                 status=status.HTTP_403_FORBIDDEN,
@@ -1078,43 +755,24 @@ class ListingImageViewSet(viewsets.ModelViewSet):
         was_primary = image_object.is_primary
 
         with transaction.atomic():
-
             image_object.delete()
 
             if was_primary:
-
                 next_image = (
                     ListingImage.objects
-                    .filter(
-                        listing=listing
-                    )
-                    .order_by(
-                        "ordering",
-                        "created_at",
-                    )
+                    .filter(listing=listing)
+                    .order_by("ordering", "created_at")
                     .first()
                 )
-
                 if next_image:
-
                     ListingImage.objects.filter(
-                        listing=listing
-                    ).update(
-                        is_primary=False
-                    )
-
+                        listing=listing,
+                    ).update(is_primary=False)
                     next_image.is_primary = True
-
-                    next_image.save(
-                        update_fields=[
-                            "is_primary"
-                        ]
-                    )
+                    next_image.save(update_fields=["is_primary"])
 
         return Response(
-            {
-                "detail": "Picha imefutwa."
-            },
+            {"detail": "Picha imefutwa."},
             status=status.HTTP_200_OK,
         )
 
@@ -1126,65 +784,44 @@ class ListingImageViewSet(viewsets.ModelViewSet):
 @extend_schema(
     summary="Angalia ada ya tangazo",
     description=(
-        "Hupata au huunda ada ya tangazo kulingana na bei ya tangazo "
-        "na kanuni za ada zinazotumika."
+        "Hupata ada ya tangazo iliyotengenezwa. Kama haijatengenezwa, "
+        "tumia endpoint ya payment ili kuitengeneza."
     ),
     responses={
         200: ListingFeeSerializer,
-        400: OpenApiResponse(
-            description="Bei ya tangazo si sahihi au hakuna kanuni ya ada."
-        ),
-        403: OpenApiResponse(
-            description="Huna ruhusa ya kuona ada hii."
-        ),
+        403: OpenApiResponse(description="Huna ruhusa ya kuona ada hii."),
         404: OpenApiResponse(
-            description="Tangazo halijapatikana."
+            description="Tangazo au ada haijapatikana."
         ),
     },
 )
 class ListingFeeView(APIView):
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, listing_id):
-        listing = get_object_or_404(
-            Listing,
-            id=listing_id,
-        )
+        listing = get_object_or_404(Listing, id=listing_id)
 
         if (
             not request.user.is_staff
             and listing.seller_id != request.user.id
         ):
             return Response(
-                {
-                    "detail": (
-                        "Huna ruhusa ya kuona ada ya tangazo hili."
-                    )
-                },
+                {"detail": "Huna ruhusa ya kuona ada ya tangazo hili."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         try:
-            listing_fee = create_listing_fee(listing)
-        except ValidationError as exc:
+            listing_fee = ListingFee.objects.get(listing=listing)
+        except ListingFee.DoesNotExist:
             return Response(
-                {
-                    "detail": exc.message
-                    if hasattr(exc, "message")
-                    else str(exc)
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+                {"detail": "Ada ya tangazo haijatengenezwa bado."},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-        serializer = ListingFeeSerializer(
-            listing_fee,
-            context={"request": request},
-        )
-
         return Response(
-            serializer.data,
+            ListingFeeSerializer(
+                listing_fee, context={"request": request},
+            ).data,
             status=status.HTTP_200_OK,
         )
 
@@ -1203,88 +840,53 @@ class ListingFeeView(APIView):
     request=ListingFeePaymentSerializer,
     responses={
         200: ListingFeeSerializer,
-        400: OpenApiResponse(
-            description="Malipo hayawezi kukamilishwa."
-        ),
-        403: OpenApiResponse(
-            description="Huna ruhusa ya kulipia tangazo hili."
-        ),
-        404: OpenApiResponse(
-            description="Tangazo au ada haijapatikana."
-        ),
+        400: OpenApiResponse(description="Malipo hayawezi kukamilishwa."),
+        403: OpenApiResponse(description="Huna ruhusa ya kulipia tangazo hili."),
+        404: OpenApiResponse(description="Tangazo au ada haijapatikana."),
     },
 )
 class ListingFeePaymentView(APIView):
-    permission_classes = [
-        permissions.IsAuthenticated,
-    ]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, listing_id):
-        listing = get_object_or_404(
-            Listing,
-            id=listing_id,
-        )
+        listing = get_object_or_404(Listing, id=listing_id)
 
         if (
             not request.user.is_staff
             and listing.seller_id != request.user.id
         ):
             return Response(
-                {
-                    "detail": (
-                        "Huna ruhusa ya kulipia ada ya tangazo hili."
-                    )
-                },
+                {"detail": "Huna ruhusa ya kulipia ada ya tangazo hili."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        serializer = ListingFeePaymentSerializer(
-            data=request.data,
-        )
-
+        serializer = ListingFeePaymentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            create_listing_fee(listing)
+        # Ensure the fee record exists before marking it paid.
+        create_listing_fee(listing)
 
+        try:
             listing_fee = mark_listing_fee_as_paid(
                 listing,
-                serializer.validated_data[
-                    "payment_reference"
-                ],
+                serializer.validated_data["payment_reference"],
             )
-
         except ListingFee.DoesNotExist:
             return Response(
-                {
-                    "detail": (
-                        "Ada ya tangazo haijapatikana."
-                    )
-                },
+                {"detail": "Ada ya tangazo haijapatikana."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-
         except ValidationError as exc:
-            detail = getattr(
-                exc,
-                "detail",
-                str(exc),
-            )
-
+            detail = getattr(exc, "detail", str(exc))
             return Response(
-                {
-                    "detail": detail,
-                },
+                {"detail": detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = ListingFeeSerializer(
-            listing_fee,
-            context={"request": request},
-        )
-
         return Response(
-            response_serializer.data,
+            ListingFeeSerializer(
+                listing_fee, context={"request": request},
+            ).data,
             status=status.HTTP_200_OK,
         )
 
@@ -1310,43 +912,29 @@ class ListingFeePaymentView(APIView):
     },
 )
 class AdminPendingListingsView(APIView):
-    permission_classes = [
-        permissions.IsAdminUser,
-    ]
+    permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
         listings = (
             Listing.objects
-            .filter(
-                status=Listing.Status.PENDING_APPROVAL
-            )
-            .select_related(
-                "seller",
-                "category",
-                "listing_fee",
-            )
-            .prefetch_related(
-                "images",
-                "property_details",
-                "land_details",
-                "vehicle_details",
-                "business_details",
-                "equipment_details",
-            )
+            .filter(status=Listing.Status.PENDING_APPROVAL)
+            .select_related("seller", "category", "listing_fee")
+            .prefetch_related("images")
             .order_by("-created_at")
         )
 
+        page = self.paginate_queryset(listings)
         serializer = AdminPendingListingSerializer(
-            listings,
+            page if page is not None else listings,
             many=True,
             context={"request": request},
         )
 
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+
         return Response(
-            {
-                "count": listings.count(),
-                "results": serializer.data,
-            },
+            {"count": listings.count(), "results": serializer.data},
             status=status.HTTP_200_OK,
         )
 
@@ -1364,26 +952,13 @@ class AdminPendingListingsView(APIView):
     ),
     responses={
         200: ListingDetailSerializer,
-        400: OpenApiResponse(
-            description=(
-                "Tangazo haliwezi kuidhinishwa, kwa mfano "
-                "ikiwa ada haijalipwa au hali ya tangazo si sahihi."
-            )
-        ),
-        403: OpenApiResponse(
-            description=(
-                "Ni admin pekee anayeweza kuidhinisha tangazo."
-            )
-        ),
-        404: OpenApiResponse(
-            description="Tangazo halijapatikana.",
-        ),
+        400: OpenApiResponse(description="Tangazo haliwezi kuidhinishwa."),
+        403: OpenApiResponse(description="Ni admin pekee."),
+        404: OpenApiResponse(description="Tangazo halijapatikana."),
     },
 )
 class AdminApproveListingView(APIView):
-    permission_classes = [
-        permissions.IsAdminUser,
-    ]
+    permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, listing_id):
         try:
@@ -1391,32 +966,20 @@ class AdminApproveListingView(APIView):
                 listing_id=listing_id,
                 admin_user=request.user,
             )
-
         except Listing.DoesNotExist:
             return Response(
-                {
-                    "detail": "Tangazo halijapatikana."
-                },
+                {"detail": "Tangazo halijapatikana."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-
         except ValidationError as exc:
-            detail = getattr(
-                exc,
-                "detail",
-                str(exc),
-            )
-
+            detail = getattr(exc, "detail", str(exc))
             return Response(
-                {
-                    "detail": detail,
-                },
+                {"detail": detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         serializer = ListingDetailSerializer(
-            listing,
-            context={"request": request},
+            listing, context={"request": request},
         )
 
         return Response(
@@ -1441,34 +1004,17 @@ class AdminApproveListingView(APIView):
     request=ListingRejectionSerializer,
     responses={
         200: ListingDetailSerializer,
-        400: OpenApiResponse(
-            description=(
-                "Sababu haijawekwa au tangazo haliwezi kukataliwa."
-            )
-        ),
-        403: OpenApiResponse(
-            description=(
-                "Ni admin pekee anayeweza kukataa tangazo."
-            )
-        ),
-        404: OpenApiResponse(
-            description="Tangazo halijapatikana.",
-        ),
+        400: OpenApiResponse(description="Sababu haijawekwa."),
+        403: OpenApiResponse(description="Ni admin pekee."),
+        404: OpenApiResponse(description="Tangazo halijapatikana."),
     },
 )
 class AdminRejectListingView(APIView):
-    permission_classes = [
-        permissions.IsAdminUser,
-    ]
+    permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, listing_id):
-        serializer = ListingRejectionSerializer(
-            data=request.data
-        )
-
-        serializer.is_valid(
-            raise_exception=True
-        )
+        serializer = ListingRejectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
         try:
             listing = reject_listing(
@@ -1478,32 +1024,20 @@ class AdminRejectListingView(APIView):
                     "rejection_reason"
                 ],
             )
-
         except Listing.DoesNotExist:
             return Response(
-                {
-                    "detail": "Tangazo halijapatikana."
-                },
+                {"detail": "Tangazo halijapatikana."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-
         except ValidationError as exc:
-            detail = getattr(
-                exc,
-                "detail",
-                str(exc),
-            )
-
+            detail = getattr(exc, "detail", str(exc))
             return Response(
-                {
-                    "detail": detail,
-                },
+                {"detail": detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         response_serializer = ListingDetailSerializer(
-            listing,
-            context={"request": request},
+            listing, context={"request": request},
         )
 
         return Response(

@@ -3,17 +3,17 @@ from django.utils import timezone
 
 
 class SoftDeleteQuerySet(models.QuerySet):
-    """Queryset that hides soft-deleted rows by default."""
-
     def delete(self):
-        """Bulk soft delete."""
-        return self.update(
+        """
+        Bulk soft delete. Returns (count, {}) for parity with Django.
+        """
+        count = self.update(
             is_deleted=True,
             deleted_at=timezone.now(),
         )
+        return (count, {})
 
     def hard_delete(self):
-        """Really delete rows (used by the purge task only)."""
         return super().delete()
 
     def alive(self):
@@ -32,12 +32,6 @@ class SoftDeleteQuerySet(models.QuerySet):
 
 
 class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
-    """
-    Default manager. Hides soft-deleted rows.
-
-    `SoftDeleteManager(include_deleted=True)` returns *all* rows.
-    """
-
     def __init__(self, *args, include_deleted=False, **kwargs):
         self.include_deleted = include_deleted
         super().__init__(*args, **kwargs)

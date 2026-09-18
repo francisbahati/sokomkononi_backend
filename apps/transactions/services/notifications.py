@@ -1,4 +1,3 @@
-
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
@@ -10,22 +9,13 @@ from ..models import Transaction
 # ============================================================================
 
 def notify_transaction_created(*, transaction):
-    """
-    Notify buyer and seller when a Transaction is created
-    from an AGREED Deal Room.
-    """
-
     message = (
         f"Transaction #{transaction.id} imeundwa kwa tangazo "
         f"'{transaction.listing.title}'. "
-        f"Bei iliyokubaliwa ni TZS "
-        f"{transaction.agreed_price:,.2f}."
+        f"Bei iliyokubaliwa ni TZS {transaction.agreed_price:,.2f}."
     )
 
-    for recipient in (
-        transaction.buyer,
-        transaction.seller,
-    ):
+    for recipient in (transaction.buyer, transaction.seller):
         create_notification(
             recipient=recipient,
             notification_type=(
@@ -45,20 +35,13 @@ def notify_transaction_created(*, transaction):
 # ============================================================================
 
 def notify_buyer_decision(*, transaction):
-    """
-    Notify seller when buyer submits a decision after inspection.
-    """
-
     decision_labels = {
         Transaction.BuyerDecision.READY_FOR_FINAL_PAYMENT:
             "Tayari kwa malipo ya mwisho",
-
         Transaction.BuyerDecision.NOT_AS_DESCRIBED:
             "Bidhaa haifanani na maelezo",
-
         Transaction.BuyerDecision.REQUEST_NEGOTIATION:
             "Anaomba mazungumzo zaidi",
-
         Transaction.BuyerDecision.CANCEL_TRANSACTION:
             "Anataka kughairi Transaction",
     }
@@ -74,9 +57,7 @@ def notify_buyer_decision(*, transaction):
     )
 
     if transaction.buyer_decision_note:
-        message += (
-            f" Maelezo: {transaction.buyer_decision_note}"
-        )
+        message += f" Maelezo: {transaction.buyer_decision_note}"
 
     create_notification(
         recipient=transaction.seller,
@@ -95,10 +76,6 @@ def notify_buyer_decision(*, transaction):
 # ============================================================================
 
 def notify_payment_proof_uploaded(*, transaction):
-    """
-    Notify seller when buyer uploads final payment proof.
-    """
-
     message = (
         f"Mnunuzi amepakia ushahidi wa malipo ya mwisho "
         f"kwa Transaction #{transaction.id}. "
@@ -107,9 +84,7 @@ def notify_payment_proof_uploaded(*, transaction):
     )
 
     if transaction.final_payment_reference:
-        message += (
-            f" Reference: {transaction.final_payment_reference}."
-        )
+        message += f" Reference: {transaction.final_payment_reference}."
 
     create_notification(
         recipient=transaction.seller,
@@ -130,10 +105,6 @@ def notify_payment_proof_uploaded(*, transaction):
 # ============================================================================
 
 def notify_payment_confirmed(*, transaction):
-    """
-    Notify buyer when seller confirms final payment.
-    """
-
     message = (
         f"Muuzaji amethibitisha kupokea malipo ya mwisho "
         f"kwa Transaction #{transaction.id}."
@@ -158,20 +129,13 @@ def notify_payment_confirmed(*, transaction):
 # ============================================================================
 
 def notify_transaction_completed(*, transaction):
-    """
-    Notify buyer and seller when the transaction is completed.
-    """
-
     message = (
         f"Transaction #{transaction.id} ya "
         f"'{transaction.listing.title}' imekamilika. "
         f"Tangazo sasa limewekwa SOLD."
     )
 
-    for recipient in (
-        transaction.buyer,
-        transaction.seller,
-    ):
+    for recipient in (transaction.buyer, transaction.seller):
         create_notification(
             recipient=recipient,
             notification_type=(
@@ -190,32 +154,20 @@ def notify_transaction_completed(*, transaction):
 # TRANSACTION CANCELLED
 # ============================================================================
 
-def notify_transaction_cancelled(
-    *,
-    transaction,
-    cancelled_by,
-    reason,
-):
-    """
-    Notify the other participant when a transaction is cancelled.
-    """
-
+def notify_transaction_cancelled(*, transaction, cancelled_by, reason):
     if cancelled_by.id == transaction.buyer_id:
         recipient = transaction.seller
         cancelled_by_role = "Mnunuzi"
-
     elif cancelled_by.id == transaction.seller_id:
         recipient = transaction.buyer
         cancelled_by_role = "Muuzaji"
-
     else:
         return
 
     message = (
-        f"{cancelled_by_role} amegairi Transaction "
+        f"{cancelled_by_role} ameghairi Transaction "
         f"#{transaction.id} ya '{transaction.listing.title}'."
     )
-
     if reason:
         message += f" Sababu: {reason}"
 
@@ -238,13 +190,6 @@ def notify_transaction_cancelled(
 # ============================================================================
 
 def notify_reservation_created(*, reservation):
-    """
-    Notify buyer and seller when a reservation is created.
-
-    At this point the reservation is still PENDING_PAYMENT.
-    The listing is NOT yet RESERVED.
-    """
-
     transaction = reservation.transaction
 
     message = (
@@ -255,7 +200,6 @@ def notify_reservation_created(*, reservation):
         f"Tafadhali kamilisha malipo ya reservation."
     )
 
-    # Buyer receives confirmation.
     create_notification(
         recipient=transaction.buyer,
         notification_type=(
@@ -269,7 +213,6 @@ def notify_reservation_created(*, reservation):
         action_url=f"/transactions/{transaction.id}",
     )
 
-    # Seller is informed that the buyer has started the reservation process.
     seller_message = (
         f"Mnunuzi ameanzisha reservation kwa Transaction "
         f"#{transaction.id} ya tangazo '{transaction.listing.title}'. "
@@ -295,10 +238,6 @@ def notify_reservation_created(*, reservation):
 # ============================================================================
 
 def notify_reservation_paid(*, reservation):
-    """
-    Notify buyer and seller after reservation deposit is confirmed.
-    """
-
     transaction = reservation.transaction
 
     message = (
@@ -308,10 +247,7 @@ def notify_reservation_paid(*, reservation):
         f"na imeanza rasmi."
     )
 
-    for recipient in (
-        transaction.buyer,
-        transaction.seller,
-    ):
+    for recipient in (transaction.buyer, transaction.seller):
         create_notification(
             recipient=recipient,
             notification_type=(
@@ -331,10 +267,6 @@ def notify_reservation_paid(*, reservation):
 # ============================================================================
 
 def notify_reservation_expired(*, reservation):
-    """
-    Notify buyer and seller when a reservation expires.
-    """
-
     transaction = reservation.transaction
 
     message = (
@@ -344,10 +276,7 @@ def notify_reservation_expired(*, reservation):
         f"kwenye hali ya AVAILABLE."
     )
 
-    for recipient in (
-        transaction.buyer,
-        transaction.seller,
-    ):
+    for recipient in (transaction.buyer, transaction.seller):
         create_notification(
             recipient=recipient,
             notification_type=(
@@ -367,10 +296,6 @@ def notify_reservation_expired(*, reservation):
 # ============================================================================
 
 def notify_inspection_started(*, inspection):
-    """
-    Notify buyer and seller when the inspection period starts.
-    """
-
     transaction = inspection.transaction
 
     message = (
@@ -380,10 +305,7 @@ def notify_inspection_started(*, inspection):
         f"Tafadhali kamilisha ukaguzi kabla ya muda kuisha."
     )
 
-    for recipient in (
-        transaction.buyer,
-        transaction.seller,
-    ):
+    for recipient in (transaction.buyer, transaction.seller):
         create_notification(
             recipient=recipient,
             notification_type=(
@@ -403,26 +325,14 @@ def notify_inspection_started(*, inspection):
 # ============================================================================
 
 def notify_inspection_completed(*, inspection):
-    """
-    Notify buyer and seller when the inspection period ends.
-    """
-
     transaction = inspection.transaction
 
-    message = (
-        f"Inspection ya Transaction #{transaction.id} "
-        f"imekamilika."
-    )
+    message = f"Inspection ya Transaction #{transaction.id} imekamilika."
 
     if transaction.buyer_decision == Transaction.BuyerDecision.PENDING:
-        message += (
-            " Mnunuzi bado hajatoa uamuzi wa inspection."
-        )
+        message += " Mnunuzi bado hajatoa uamuzi wa inspection."
 
-    for recipient in (
-        transaction.buyer,
-        transaction.seller,
-    ):
+    for recipient in (transaction.buyer, transaction.seller):
         create_notification(
             recipient=recipient,
             notification_type=(

@@ -7,6 +7,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from celery.schedules import crontab
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # ------------------------------------------------------------
@@ -29,12 +31,28 @@ def env_list(key, default=""):
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def env_int(key, default=0):
+    value = os.environ.get(key)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # ------------------------------------------------------------
 # CORE
 # ------------------------------------------------------------
 SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key-change-me")
 
 DEBUG = env_bool("DEBUG", False)
+
+# Fail loudly if production is running with the dev key.
+if not DEBUG and SECRET_KEY == "insecure-dev-key-change-me":
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be set to a secure value when DEBUG=False."
+    )
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
@@ -71,6 +89,7 @@ INSTALLED_APPS = [
     "apps.transactions",
     "apps.finance",
     "apps.notifications",
+    "apps.waiting_list",
 ]
 
 # ------------------------------------------------------------
@@ -155,8 +174,53 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Hard caps on uploads.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024       # 10 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024       # 10 MB
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
+
+# ------------------------------------------------------------
+# STORAGE
+# ------------------------------------------------------------
+# R2 (S3-compatible) for media; WhiteNoise with compression+manifest
+# for static files. Falls back to local FileSystemStorage when the
+# R2 env vars are not configured (dev / CI).
+# ------------------------------------------------------------
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "")
+R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+R2_MEDIA_LOCATION = os.environ.get("R2_MEDIA_LOCATION", "media")
+R2_CUSTOM_DOMAIN = os.environ.get("R2_CUSTOM_DOMAIN", "") or None
+
+R2_ENABLED = bool(
+    R2_BUCKET_NAME
+    and R2_ENDPOINT_URL
+    and R2_ACCESS_KEY_ID
+    and R2_SECRET_ACCESS_KEY
+)
+
+if R2_ENABLED:
+    _default_storage = "config.storages.CloudflareR2MediaStorage"
+else:
+    _default_storage = "django.core.files.storage.FileSystemStorage"
+
+STORAGES = {
+    "default": {
+        "BACKEND": _default_storage,
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
 # ------------------------------------------------------------
 # CORS
+# ------------------------------------------------------------
+# We keep CSRF_TRUSTED_ORIGINS because the Django admin (which uses
+# session cookies + CSRF) is exposed under /admin/. The API itself
+# uses JWT in the Authorization header, so CSRF middleware is a
+# no-op for the API.
 # ------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
@@ -165,7 +229,7 @@ CORS_ALLOWED_ORIGINS = env_list(
 
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", False)
 
-CORS_PREFLIGHT_MAX_AGE = int(os.environ.get("CORS_PREFLIGHT_MAX_AGE", "86400"))
+CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
 
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -196,6 +260,11 @@ CSRF_TRUSTED_ORIGINS = env_list(
 # ------------------------------------------------------------
 # DRF
 # ------------------------------------------------------------
+# Global default is IsAuthenticated for safety. Public endpoints
+# (categories, listing list/retrieve, auth) explicitly override with
+# AllowAny at the view level. This keeps "secure by default" while
+# still allowing public reads.
+# ------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -211,6 +280,21 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+
+    # Scoped throttle class. Views opt-in by setting
+    # `throttle_scope = "<key>"`.
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "register": "10/hour",
+        "login": "20/min",
+        "otp_send": "5/hour",
+        "otp_verify": "10/hour",
+        "password_reset": "5/hour",
+        "anon": "100/min",
+        "user": "1000/hour",
+    },
 }
 
 SIMPLE_JWT = {
@@ -225,7 +309,6 @@ SIMPLE_JWT = {
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
-    "TOKEN_BLACKLIST_ENABLED": True,
 }
 
 SPECTACULAR_SETTINGS = {
@@ -233,18 +316,19 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "SokoMkononi marketplace API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAdminUser"],
 }
 
 # ------------------------------------------------------------
-# EMAIL  ← THIS WAS MISSING — CAUSES 500 ON REGISTER
+# EMAIL
 # ------------------------------------------------------------
 EMAIL_BACKEND = os.environ.get(
     "EMAIL_BACKEND",
-    "django.core.mail.backends.console.EmailBackend",   # safe default for dev
+    "django.core.mail.backends.console.EmailBackend",
 )
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_PORT = env_int("EMAIL_PORT", 587)
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
@@ -253,6 +337,18 @@ DEFAULT_FROM_EMAIL = os.environ.get(
     "DEFAULT_FROM_EMAIL",
     "SokoMkononi <info@sokomkononi.co.tz>",
 )
+
+# Fail loudly if production has no working mailer.
+if not DEBUG and not EMAIL_HOST:
+    raise ImproperlyConfigured(
+        "EMAIL_HOST must be set when DEBUG=False."
+    )
+
+# ADMINS / MANAGERS so mail_admins() works.
+ADMINS = [
+    ("SokoMkononi Admin", os.environ.get("ADMIN_EMAIL", DEFAULT_FROM_EMAIL)),
+]
+MANAGERS = ADMINS
 
 # ------------------------------------------------------------
 # SMS (NextSMS)
@@ -263,12 +359,53 @@ PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
 # ------------------------------------------------------------
 # CELERY
 # ------------------------------------------------------------
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
+# Default to localhost so bare-metal dev works without .env.
+CELERY_BROKER_URL = os.environ.get(
+    "CELERY_BROKER_URL",
+    "redis://localhost:6379/0",
+)
+CELERY_RESULT_BACKEND = os.environ.get(
+    "CELERY_RESULT_BACKEND",
+    "redis://localhost:6379/0",
+)
+
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+
+# Production robustness for tasks.
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 10 * 60          # 10 min hard limit
+CELERY_TASK_SOFT_TIME_LIMIT = 8 * 60      # 8 min soft limit
+CELERY_RESULT_EXPIRES = 60 * 60 * 24      # 24 hours
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+
+# Beat schedule — drives the whole lifecycle.
+CELERY_BEAT_SCHEDULE = {
+    "purge-soft-deleted": {
+        "task": "core.purge_soft_deleted",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    "expire-stale-reservations": {
+        "task": "transactions.expire_stale_reservations",
+        "schedule": crontab(minute="*/15"),
+    },
+    "expire-stale-inspections": {
+        "task": "transactions.expire_stale_inspections",
+        "schedule": crontab(minute="*/15"),
+    },
+    "warn-expiring-reservations": {
+        "task": "transactions.warn_expiring_reservations",
+        "schedule": crontab(minute=0),
+    },
+    "expire-stale-boosts": {
+        "task": "boosting.expire_stale_boosts",
+        "schedule": crontab(minute="*/15"),
+    },
+}
 
 # ------------------------------------------------------------
 # SECURITY (production)
@@ -277,18 +414,66 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     USE_X_FORWARDED_HOST = True
 
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
+    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30      # 30 days
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    X_FRAME_OPTIONS = "DENY"
+
+    SECURE_REFERRER_POLICY = "same-origin"
+
 # ------------------------------------------------------------
 # LOGGING
 # ------------------------------------------------------------
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
-    "root": {"handlers": ["console"], "level": "INFO"},
+    "formatters": {
+        "verbose": {
+            "format": (
+                "[{levelname}] {asctime} "
+                "{name}:{lineno} — {message}"
+            ),
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
     "loggers": {
         "django.request": {
             "handlers": ["console"],
             "level": "ERROR",
+            "propagate": False,
+        },
+        # Security events (suspicious auth, CSRF failures,
+        # disallowed hosts, etc.) at WARNING and above.
+        "django.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "celery": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "apps": {
+            "handlers": ["console"],
+            "level": "INFO",
             "propagate": False,
         },
     },

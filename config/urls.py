@@ -34,10 +34,17 @@ urlpatterns = [
     path("api/transactions/", include("apps.transactions.urls")),
     path("api/finance/", include("apps.finance.urls")),
     path("api/notifications/", include("apps.notifications.urls")),
+    path("api/waiting-list/", include("apps.waiting_list.urls")),
     path("api/trash/", include("apps.core.urls")),
 ]
 
 
 if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    urlpatterns += static(
+        settings.MEDIA_URL,
+        document_root=settings.MEDIA_ROOT,
+    )
+    urlpatterns += static(
+        settings.STATIC_URL,
+        document_root=settings.STATIC_ROOT,
+    )

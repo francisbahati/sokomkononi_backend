@@ -1,3 +1,4 @@
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
@@ -7,18 +8,20 @@ from .managers import SoftDeleteManager
 
 
 class SoftDeleteModel(models.Model):
-    """Abstract base for any model that supports the recycle bin."""
+    """
+    Abstract base for any model that supports the recycle bin.
 
-    is_deleted = models.BooleanField(
-        default=False,
-        db_index=True,
-    )
+    Notes:
+        - `delete()` is a *soft* delete. It does NOT cascade to
+          children via Django's collector. Children with a `CASCADE`
+          FK remain alive. Use `on_delete=PROTECT` on any child
+          that must never be orphaned.
+        - `hard_delete()` bypasses the soft path entirely.
+    """
 
-    deleted_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        db_index=True,
-    )
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     deleted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -28,30 +31,17 @@ class SoftDeleteModel(models.Model):
         related_name="+",
     )
 
-    deletion_reason = models.TextField(
-        blank=True,
-    )
+    deletion_reason = models.TextField(blank=True)
 
-    # Default manager hides deleted rows.
     objects = SoftDeleteManager()
-
-    # Escape hatch: see everything.
     all_objects = SoftDeleteManager(include_deleted=True)
 
     class Meta:
         abstract = True
-        # `base_manager` is used for FK traversal and reverse relations.
-        # We want `listing.category` to still resolve even when the
-        # category is in the recycle bin.
         base_manager_name = "all_objects"
         default_manager_name = "objects"
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def delete(self, using=None, keep_parents=False, *, by=None, reason=""):
-        """Soft delete — never destroys the row."""
         if self.is_deleted:
             return (0, {})
 
@@ -61,19 +51,13 @@ class SoftDeleteModel(models.Model):
         if reason:
             self.deletion_reason = reason
 
-        self.save(
-            update_fields=[
-                "is_deleted",
-                "deleted_at",
-                "deleted_by",
-                "deletion_reason",
-            ]
-        )
+        self.save(update_fields=[
+            "is_deleted", "deleted_at", "deleted_by", "deletion_reason",
+        ])
 
         return (0, {})
 
     def hard_delete(self, using=None, keep_parents=False):
-        """Really remove the row. Use only from the purge task."""
         return super().delete(using=using, keep_parents=keep_parents)
 
     def restore(self):
@@ -85,14 +69,9 @@ class SoftDeleteModel(models.Model):
         self.deleted_by = None
         self.deletion_reason = ""
 
-        self.save(
-            update_fields=[
-                "is_deleted",
-                "deleted_at",
-                "deleted_by",
-                "deletion_reason",
-            ]
-        )
+        self.save(update_fields=[
+            "is_deleted", "deleted_at", "deleted_by", "deletion_reason",
+        ])
 
     @property
     def is_purgeable(self):
@@ -100,8 +79,6 @@ class SoftDeleteModel(models.Model):
             return False
 
         from .constants import SOFT_DELETE_RETENTION_DAYS
-        from datetime import timedelta
-
         return (
             timezone.now() - self.deleted_at
         ) >= timedelta(days=SOFT_DELETE_RETENTION_DAYS)

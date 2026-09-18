@@ -4,34 +4,27 @@ from .models import ListingFeeRule
 
 
 class ListingFeeRuleSerializer(serializers.ModelSerializer):
-    """
-    Serializer for the fee rule used to compute the Listing Fee.
-
-    The frontend uses `name` as the category key (e.g. "nyumba",
-    "viwanja"), so admin must name rules after the category keys
-    they apply to.
-    """
-
     class Meta:
         model = ListingFeeRule
-
         fields = [
-            "id",
-            "name",
-            "min_price",
-            "max_price",
-            "percentage",
-            "is_active",
-            "priority",
-            "created_at",
-            "updated_at",
+            "id", "name", "min_price", "max_price", "percentage",
+            "is_active", "priority", "created_at", "updated_at",
         ]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
-        read_only_fields = [
-            "id",
-            "created_at",
-            "updated_at",
-        ]
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Jina linahitajika.")
+
+        qs = ListingFeeRule.objects.filter(name=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                "Kiwango chenye jina hili tayari kipo."
+            )
+        return value
 
     def validate(self, attrs):
         min_price = attrs.get(
@@ -54,7 +47,6 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
             "percentage",
             getattr(self.instance, "percentage", None),
         )
-
         if percentage is not None and percentage <= 0:
             raise serializers.ValidationError({
                 "percentage": (

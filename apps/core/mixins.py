@@ -5,16 +5,6 @@ from rest_framework.response import Response
 
 
 class SoftDeleteViewSetMixin:
-    """
-    Drop-in mixin for DRF viewsets backed by a SoftDeleteModel.
-
-    Adds:
-        DELETE  -> soft delete
-        POST  .../<pk>/restore/  -> restore
-        GET   .../trash/         -> list of deleted rows (staff only)
-    """
-
-    #: set to True on viewsets where staff-only can restore other users' rows
     staff_can_restore_any = True
 
     def perform_destroy(self, instance):
@@ -36,9 +26,7 @@ class SoftDeleteViewSetMixin:
         instance = self.get_queryset_with_deleted().get(pk=pk)
 
         if not self._can_restore(instance):
-            raise PermissionDenied(
-                "Huna ruhusa ya kurejesha kitu hiki."
-            )
+            raise PermissionDenied("Huna ruhusa ya kurejesha kitu hiki.")
 
         instance.restore()
         return Response(
@@ -56,13 +44,12 @@ class SoftDeleteViewSetMixin:
         qs = self.get_queryset_with_deleted().filter(is_deleted=True)
         page = self.paginate_queryset(qs)
         serializer = self.get_serializer(
-            page if page is not None else qs,
-            many=True,
+            page if page is not None else qs, many=True,
         )
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
     def get_queryset_with_deleted(self):
-        model = self.get_queryset().model
+        model = self.get_serializer_class().Meta.model
         return model.all_objects.all()

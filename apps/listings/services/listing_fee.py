@@ -2,14 +2,10 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 
-from ..models import Listing, ListingFee, ListingFeeRule
+from ..models import ListingFee, ListingFeeRule
 
 
 def get_listing_fee_rule(price):
-    """
-    Find the active fee rule that matches the listing price.
-    """
-
     price = Decimal(price)
 
     rules = ListingFeeRule.objects.filter(
@@ -25,18 +21,6 @@ def get_listing_fee_rule(price):
 
 
 def calculate_listing_fee(price):
-    """
-    Calculate the listing fee using the active fee rules.
-
-    Returns:
-        {
-            "rule": ListingFeeRule,
-            "price": Decimal,
-            "percentage": Decimal,
-            "fee_amount": Decimal,
-        }
-    """
-
     price = Decimal(price)
 
     if price <= 0:
@@ -45,7 +29,6 @@ def calculate_listing_fee(price):
         )
 
     rule = get_listing_fee_rule(price)
-
     if not rule:
         raise ValidationError(
             "Hakuna kanuni ya ada inayolingana na bei ya tangazo."
@@ -53,10 +36,7 @@ def calculate_listing_fee(price):
 
     fee_amount = (
         price * rule.percentage / Decimal("100")
-    ).quantize(
-        Decimal("0.01"),
-        rounding=ROUND_HALF_UP,
-    )
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     return {
         "rule": rule,
@@ -69,10 +49,9 @@ def calculate_listing_fee(price):
 def create_listing_fee(listing):
     """
     Create or update the pending listing fee for a listing.
-
+    Persists the rule and percentage snapshot for audit.
     A paid fee is never overwritten.
     """
-
     result = calculate_listing_fee(listing.price)
 
     listing_fee, created = ListingFee.objects.get_or_create(
@@ -80,6 +59,8 @@ def create_listing_fee(listing):
         defaults={
             "seller": listing.seller,
             "amount": result["fee_amount"],
+            "rule": result["rule"],
+            "percentage": result["percentage"],
             "payment_status": ListingFee.PaymentStatus.PENDING,
         },
     )
@@ -90,14 +71,13 @@ def create_listing_fee(listing):
 
         listing_fee.seller = listing.seller
         listing_fee.amount = result["fee_amount"]
+        listing_fee.rule = result["rule"]
+        listing_fee.percentage = result["percentage"]
         listing_fee.payment_status = ListingFee.PaymentStatus.PENDING
-        listing_fee.save(
-            update_fields=[
-                "seller",
-                "amount",
-                "payment_status",
-                "updated_at",
-            ]
-        )
+
+        listing_fee.save(update_fields=[
+            "seller", "amount", "rule", "percentage",
+            "payment_status", "updated_at",
+        ])
 
     return listing_fee

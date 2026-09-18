@@ -8,67 +8,39 @@ from ..models import WaitingListEntry
 
 
 def get_next_waiting_position(listing):
-    """
-    Returns the next position for a waiting-list entry.
-    """
-
     last_entry = (
         WaitingListEntry.objects
-        .filter(
-            listing=listing,
-            status=WaitingListEntry.Status.WAITING,
-        )
+        .filter(listing=listing, status=WaitingListEntry.Status.WAITING)
         .order_by("-position")
         .first()
     )
-
-    if not last_entry:
-        return 1
-
-    return last_entry.position + 1
+    return 1 if not last_entry else last_entry.position + 1
 
 
 @transaction.atomic
 def join_waiting_list(*, listing, buyer):
-    """
-    Add a verified buyer to a listing waiting list.
-    """
-
     if not buyer.is_authenticated:
-        raise ValidationError(
-            "Lazima uwe umeingia kwenye akaunti."
-        )
-
+        raise ValidationError("Lazima uwe umeingia kwenye akaunti.")
     if not buyer.is_active:
-        raise ValidationError(
-            "Akaunti yako haijawezeshwa."
-        )
-
+        raise ValidationError("Akaunti yako haijawezeshwa.")
     if not buyer.is_verified:
         raise ValidationError(
             "Akaunti yako lazima iwe imethibitishwa."
         )
 
-    listing = (
-        Listing.objects
-        .select_for_update()
-        .get(pk=listing.pk)
-    )
+    listing = Listing.objects.select_for_update().get(pk=listing.pk)
 
     if listing.seller_id == buyer.id:
         raise ValidationError(
             "Huwezi kujiunga kwenye waiting list ya tangazo lako."
         )
-
     if listing.status != Listing.Status.RESERVED:
         raise ValidationError(
-            "Waiting list inapatikana kwa tangazo "
-            "lililo RESERVED pekee."
+            "Waiting list inapatikana kwa tangazo lililo RESERVED pekee."
         )
 
     existing = WaitingListEntry.objects.filter(
-        listing=listing,
-        buyer=buyer,
+        listing=listing, buyer=buyer,
     ).first()
 
     if existing:
@@ -80,9 +52,14 @@ def join_waiting_list(*, listing, buyer):
                 "Tayari uko kwenye waiting list ya tangazo hili."
             )
 
-        raise ValidationError(
-            "Ulishawahi kuwa kwenye waiting list ya tangazo hili."
-        )
+        # Re-join: reuse the row.
+        existing.status = WaitingListEntry.Status.WAITING
+        existing.position = get_next_waiting_position(listing)
+        existing.notified_at = None
+        existing.save(update_fields=[
+            "status", "position", "notified_at", "updated_at",
+        ])
+        return existing
 
     position = get_next_waiting_position(listing)
 
@@ -96,10 +73,6 @@ def join_waiting_list(*, listing, buyer):
 
 @transaction.atomic
 def leave_waiting_list(*, entry, buyer):
-    """
-    Remove a buyer from the waiting list.
-    """
-
     if entry.buyer_id != buyer.id and not buyer.is_staff:
         raise ValidationError(
             "Huruhusiwi kuondoa entry hii ya waiting list."
@@ -109,9 +82,7 @@ def leave_waiting_list(*, entry, buyer):
         WaitingListEntry.Status.CANCELLED,
         WaitingListEntry.Status.FULFILLED,
     ]:
-        raise ValidationError(
-            "Entry hii tayari imefungwa."
-        )
+        raise ValidationError("Entry hii tayari imefungwa.")
 
     listing_id = entry.listing_id
 
@@ -123,16 +94,15 @@ def leave_waiting_list(*, entry, buyer):
 
 @transaction.atomic
 def reorder_waiting_list(*, listing_id):
-    """
-    Recalculate positions after a buyer leaves.
-    """
-
     entries = list(
         WaitingListEntry.objects
         .select_for_update()
         .filter(
             listing_id=listing_id,
-            status=WaitingListEntry.Status.WAITING,
+            status__in=[
+                WaitingListEntry.Status.WAITING,
+                WaitingListEntry.Status.NOTIFIED,
+            ],
         )
         .order_by("joined_at", "id")
     )
@@ -140,68 +110,16 @@ def reorder_waiting_list(*, listing_id):
     for position, entry in enumerate(entries, start=1):
         if entry.position != position:
             entry.position = position
-            entry.save(
-                update_fields=["position", "updated_at"]
-            )
-
-
-@transaction.atomic
-def notify_waiting_buyers(*, listing):
-    """
-    Mark waiting buyers as notified when a reserved listing
-    becomes available again.
-
-    The actual notification system will be connected later.
-    """
-
-    now = timezone.now()
-
-    entries = list(
-        WaitingListEntry.objects
-        .select_for_update()
-        .filter(
-            listing=listing,
-            status=WaitingListEntry.Status.WAITING,
-        )
-        .order_by("position", "joined_at")
-    )
-
-    for entry in entries:
-        entry.status = WaitingListEntry.Status.NOTIFIED
-        entry.notified_at = now
-
-        entry.save(
-            update_fields=[
-                "status",
-                "notified_at",
-                "updated_at",
-            ]
-        )
-
-    return entries
+            entry.save(update_fields=["position", "updated_at"])
 
 
 @transaction.atomic
 def fulfil_waiting_entry(*, entry):
-    """
-    Mark a waiting-list entry as fulfilled.
-    """
-
-    entry = (
-        WaitingListEntry.objects
-        .select_for_update()
-        .get(pk=entry.pk)
-    )
+    entry = WaitingListEntry.objects.select_for_update().get(pk=entry.pk)
 
     if entry.status == WaitingListEntry.Status.FULFILLED:
         return entry
 
     entry.status = WaitingListEntry.Status.FULFILLED
-    entry.save(
-        update_fields=[
-            "status",
-            "updated_at",
-        ]
-    )
-
+    entry.save(update_fields=["status", "updated_at"])
     return entry

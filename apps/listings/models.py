@@ -94,10 +94,6 @@ class Listing(SoftDeleteModel):
         verbose_name="Imesasishwa",
     )
 
-    # =========================================================================
-    # MODERATION
-    # =========================================================================
-
     approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -136,10 +132,8 @@ class Listing(SoftDeleteModel):
     class Meta:
         db_table = "listings"
         ordering = ["-created_at"]
-
         verbose_name = "Tangazo"
         verbose_name_plural = "Matangazo"
-
         base_manager_name = "all_objects"
         default_manager_name = "objects"
 
@@ -198,7 +192,6 @@ class ListingImage(models.Model):
     class Meta:
         db_table = "listing_images"
         ordering = ["ordering", "created_at"]
-
         verbose_name = "Picha ya tangazo"
         verbose_name_plural = "Picha za matangazo"
 
@@ -206,6 +199,14 @@ class ListingImage(models.Model):
             models.Index(
                 fields=["listing", "is_primary"],
                 name="listing_image_primary_idx",
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["listing"],
+                condition=models.Q(is_primary=True),
+                name="unique_primary_image_per_listing",
             ),
         ]
 
@@ -703,6 +704,13 @@ class EquipmentDetails(models.Model):
 # ============================================================================
 
 class ListingFee(models.Model):
+    """
+    Financial record — never soft-deleted.
+
+    The `rule` and `percentage` fields are persisted at creation time
+    so that historical invoices remain accurate even if fee rules are
+    later changed.
+    """
 
     class PaymentStatus(models.TextChoices):
         PENDING = "PENDING", "Inasubiri Malipo"
@@ -728,6 +736,24 @@ class ListingFee(models.Model):
         max_digits=15,
         decimal_places=2,
         verbose_name="Kiasi cha ada",
+    )
+
+    # Persisted snapshot of the rule used at calculation time.
+    rule = models.ForeignKey(
+        "listings.ListingFeeRule",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="listing_fees",
+        verbose_name="Kiwango kilichotumika",
+    )
+
+    percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Asilimia iliyotumika",
     )
 
     payment_status = models.CharField(
@@ -764,7 +790,6 @@ class ListingFee(models.Model):
     class Meta:
         db_table = "listing_fees"
         ordering = ["-created_at"]
-
         verbose_name = "Ada ya tangazo"
         verbose_name_plural = "Ada za matangazo"
 
@@ -781,9 +806,7 @@ class ListingFee(models.Model):
 
     def __str__(self):
         return (
-            f"{self.listing.title} - "
-            f"{self.amount} - "
-            f"{self.payment_status}"
+            f"{self.listing.title} - {self.amount} - {self.payment_status}"
         )
 
 
@@ -843,10 +866,8 @@ class ListingFeeRule(SoftDeleteModel):
     class Meta:
         db_table = "listing_fee_rules"
         ordering = ["priority", "min_price"]
-
         verbose_name = "Kanuni ya ada ya tangazo"
         verbose_name_plural = "Kanuni za ada za matangazo"
-
         base_manager_name = "all_objects"
         default_manager_name = "objects"
 
@@ -861,12 +882,6 @@ class ListingFeeRule(SoftDeleteModel):
         if self.max_price is None:
             price_range = f"TSh {self.min_price}+"
         else:
-            price_range = (
-                f"TSh {self.min_price} - {self.max_price}"
-            )
+            price_range = f"TSh {self.min_price} - {self.max_price}"
 
-        return (
-            f"{self.name} "
-            f"({price_range}) - "
-            f"{self.percentage}%"
-        )
+        return f"{self.name} ({price_range}) - {self.percentage}%"

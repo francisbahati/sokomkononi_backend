@@ -89,38 +89,27 @@ python manage.py migrate --noinput
 # ------------------------------------------------------------
 if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
     echo "Ensuring superuser exists: $DJANGO_SUPERUSER_EMAIL"
-    python - <<'PY'
+    python manage.py shell -c "
 import os
-
 from apps.accounts.models import User
 
-email = os.environ.get("DJANGO_SUPERUSER_EMAIL", "").strip()
-name = os.environ.get("DJANGO_SUPERUSER_NAME", "Admin").strip() or "Admin"
-password = os.environ.get("DJANGO_SUPERUSER_PASSWORD", "")
-
-if not email or not password:
-    print("Skipping — DJANGO_SUPERUSER_EMAIL or DJANGO_SUPERUSER_PASSWORD missing.")
-    raise SystemExit(0)
+email = os.environ['sokomkononi@gmail.com']
+name = os.environ.get( 'Admin')
+password = os.environ['sokomkononi123']
 
 user = User.all_objects.filter(email=email).first()
-
 if user:
     user.set_password(password)
-    user.name = name
     user.is_staff = True
     user.is_superuser = True
     user.is_active = True
     user.is_verified = True
-    user.is_deleted = False
-    user.deleted_at = None
-    user.deleted_by = None
-    user.deletion_reason = ""
     user.save()
-    print(f"Updated existing superuser: {email}")
+    print(f'Updated existing superuser: {email}')
 else:
     User.objects.create_superuser(email=email, name=name, password=password)
-    print(f"Created superuser: {email}")
-PY
+    print(f'Created superuser: {email}')
+" || echo "WARNING: superuser creation failed (continuing)."
 else
     echo "Skipping superuser creation — DJANGO_SUPERUSER_EMAIL or DJANGO_SUPERUSER_PASSWORD not set."
 fi

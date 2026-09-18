@@ -1,5 +1,10 @@
+# ============================================================
+# apps/listings/views.py
+# ============================================================
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
 from django_filters.rest_framework import DjangoFilterBackend
@@ -175,27 +180,21 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
 
+        public_statuses = [
+            Listing.Status.AVAILABLE,
+            Listing.Status.RESERVED,
+            Listing.Status.SOLD,
+        ]
+
         if not user.is_authenticated:
-            return queryset.filter(
-                status__in=[
-                    Listing.Status.AVAILABLE,
-                    Listing.Status.RESERVED,
-                    Listing.Status.SOLD,
-                ]
-            )
+            return queryset.filter(status__in=public_statuses)
 
         if user.is_staff:
             return queryset
 
         return queryset.filter(
-            status__in=[
-                Listing.Status.AVAILABLE,
-                Listing.Status.RESERVED,
-                Listing.Status.SOLD,
-            ]
-        ) | queryset.filter(
-            seller=user
-        )
+            Q(status__in=public_statuses) | Q(seller=user)
+        ).distinct()
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -251,7 +250,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
 
-        # Staff -> hard delete
         if request.user.is_staff and request.query_params.get(
             "hard", "false"
         ).lower() in ("true", "1", "yes"):
@@ -264,7 +262,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_204_NO_CONTENT,
             )
 
-        # Everyone else -> soft delete (recycle bin, 90 days)
         listing.delete(
             by=request.user,
             reason=request.data.get("reason", "") if isinstance(

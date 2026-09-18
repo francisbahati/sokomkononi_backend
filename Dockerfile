@@ -1,64 +1,34 @@
 # ============================================================
-# STAGE 1: BUILDER
-# ============================================================
-
-FROM python:3.12-slim AS builder
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-
-RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
-
-
-# ============================================================
-# STAGE 2: PRODUCTION
+# Dockerfile — SokoMkononi backend
 # ============================================================
 
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH"
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
+# System deps (build deps for psycopg2, pillow, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev \
-    netcat-openbsd \
+        build-essential \
+        libpq-dev \
+        libjpeg-dev \
+        zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /opt/venv /opt/venv
+# Python deps first (Docker layer cache)
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
+# App
 COPY . .
 
-RUN mkdir -p /app/staticfiles /app/media && \
-    chmod +x /app/entrypoint.sh && \
-    addgroup --system django && \
-    adduser --system --ingroup django django && \
-    chown -R django:django /app
-
-USER django
-
-RUN python manage.py collectstatic --no-input
+# Entrypoint
+RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-
-CMD ["gunicorn", "config.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "3", \
-     "--timeout", "120", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "90"]

@@ -1,4 +1,9 @@
+# ============================================================
+# apps/deals/views.py
+# ============================================================
+
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -187,9 +192,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return queryset
 
         return queryset.filter(
-            buyer=user,
-        ) | queryset.filter(
-            seller=user,
+            Q(buyer=user) | Q(seller=user)
         )
 
     # ========================================================================
@@ -211,9 +214,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             deal_room = serializer.save()
 
         except IntegrityError:
-            # Database UniqueConstraint:
-            # listing + buyer = one Deal Room
-
             existing = (
                 DealRoom.objects
                 .select_related(
@@ -240,10 +240,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 )
 
             raise
-
-        # --------------------------------------------------------------------
-        # NOTIFICATION
-        # --------------------------------------------------------------------
 
         notify_deal_room_created(
             deal_room=deal_room,
@@ -326,10 +322,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def offer(self, request, pk=None):
         deal_room = self.get_object()
 
-        # --------------------------------------------------------------------
-        # Basic state protection
-        # --------------------------------------------------------------------
-
         if deal_room.status not in [
             DealRoom.Status.OPEN,
             DealRoom.Status.NEGOTIATING,
@@ -344,10 +336,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # --------------------------------------------------------------------
-        # Validate incoming offer
-        # --------------------------------------------------------------------
-
         serializer = NegotiationOfferCreateSerializer(
             data=request.data,
             context={
@@ -361,12 +349,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         responded_to_id = serializer.validated_data.get(
             "responded_to"
         )
-
-        # --------------------------------------------------------------------
-        # Determine role from authenticated user
-        #
-        # Never trust client-provided offered_by.
-        # --------------------------------------------------------------------
 
         if request.user.id == deal_room.buyer_id:
             offered_by = NegotiationOffer.OfferedBy.BUYER
@@ -383,11 +365,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
-
-        # --------------------------------------------------------------------
-        # If this is a counter-offer, mark previous pending offer
-        # as COUNTERED.
-        # --------------------------------------------------------------------
 
         responded_to = None
 
@@ -438,10 +415,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 ]
             )
 
-        # --------------------------------------------------------------------
-        # Create new offer
-        # --------------------------------------------------------------------
-
         new_offer = NegotiationOffer.objects.create(
             deal_room=deal_room,
             offered_by=request.user,
@@ -454,10 +427,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             responded_to=responded_to,
         )
 
-        # --------------------------------------------------------------------
-        # Update Deal Room status
-        # --------------------------------------------------------------------
-
         if deal_room.status == DealRoom.Status.OPEN:
             deal_room.status = DealRoom.Status.NEGOTIATING
 
@@ -467,10 +436,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                     "updated_at",
                 ]
             )
-
-        # --------------------------------------------------------------------
-        # NOTIFICATION
-        # --------------------------------------------------------------------
 
         notify_new_offer(
             deal_room=deal_room,
@@ -527,10 +492,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def accept_offer(self, request, pk=None):
 
-        # --------------------------------------------------------------------
-        # Lock Deal Room AND check object-level permission
-        # --------------------------------------------------------------------
-
         deal_room = get_object_or_404(
             DealRoom.objects
             .select_for_update()
@@ -544,10 +505,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
 
         self.check_object_permissions(request, deal_room)
-
-        # --------------------------------------------------------------------
-        # Deal Room must still be negotiable
-        # --------------------------------------------------------------------
 
         if deal_room.status not in [
             DealRoom.Status.OPEN,
@@ -563,10 +520,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # --------------------------------------------------------------------
-        # Validate request
-        # --------------------------------------------------------------------
-
         serializer = DealRoomAcceptOfferSerializer(
             data=request.data,
             context={
@@ -578,10 +531,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         offer_id = serializer.validated_data["offer_id"]
-
-        # --------------------------------------------------------------------
-        # Lock selected offer
-        # --------------------------------------------------------------------
 
         offer = (
             NegotiationOffer.objects
@@ -603,10 +552,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 }
             )
 
-        # --------------------------------------------------------------------
-        # Only the opposite party can accept
-        # --------------------------------------------------------------------
-
         if offer.offered_by_id == request.user.id:
             raise ValidationError(
                 {
@@ -626,10 +571,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 }
             )
 
-        # --------------------------------------------------------------------
-        # Accept selected offer
-        # --------------------------------------------------------------------
-
         offer.status = NegotiationOffer.Status.ACCEPTED
 
         offer.save(
@@ -638,10 +579,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 "updated_at",
             ]
         )
-
-        # --------------------------------------------------------------------
-        # Reject all other pending offers
-        # --------------------------------------------------------------------
 
         (
             NegotiationOffer.objects
@@ -656,10 +593,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             )
         )
 
-        # --------------------------------------------------------------------
-        # Mark Deal Room as AGREED
-        # --------------------------------------------------------------------
-
         deal_room.status = DealRoom.Status.AGREED
         deal_room.agreed_price = offer.amount
         deal_room.agreed_at = timezone.now()
@@ -673,13 +606,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             ]
         )
 
-        # --------------------------------------------------------------------
-        # LISTING -> RESERVED
-        #
-        # This prevents another buyer from starting a new Deal Room
-        # for the same listing.
-        # --------------------------------------------------------------------
-
         listing = deal_room.listing
 
         if listing.status == Listing.Status.AVAILABLE:
@@ -691,10 +617,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                     "updated_at",
                 ]
             )
-
-        # --------------------------------------------------------------------
-        # NOTIFICATION
-        # --------------------------------------------------------------------
 
         notify_offer_accepted(
             deal_room=deal_room,
@@ -750,10 +672,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def cancel(self, request, pk=None):
 
-        # --------------------------------------------------------------------
-        # Lock Deal Room AND check object-level permission
-        # --------------------------------------------------------------------
-
         deal_room = get_object_or_404(
             DealRoom.objects
             .select_for_update()
@@ -792,15 +710,10 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
         serializer.is_valid(raise_exception=True)
 
-        # Keep cancellation reason before changing the state.
         cancellation_reason = serializer.validated_data.get(
             "reason",
             "",
         )
-
-        # --------------------------------------------------------------------
-        # Mark Deal Room as CANCELLED
-        # --------------------------------------------------------------------
 
         deal_room.status = DealRoom.Status.CANCELLED
 
@@ -810,10 +723,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 "updated_at",
             ]
         )
-
-        # --------------------------------------------------------------------
-        # Cancel pending offers
-        # --------------------------------------------------------------------
 
         (
             NegotiationOffer.objects
@@ -826,10 +735,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 updated_at=timezone.now(),
             )
         )
-
-        # --------------------------------------------------------------------
-        # NOTIFICATION
-        # --------------------------------------------------------------------
 
         notify_deal_room_cancelled(
             deal_room=deal_room,

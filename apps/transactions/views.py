@@ -1,4 +1,9 @@
+# ============================================================
+# apps/transactions/views.py
+# ============================================================
+
 from django.db import IntegrityError, transaction as db_transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
 from rest_framework import permissions, status, viewsets
@@ -124,9 +129,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
             return queryset
 
         return queryset.filter(
-            buyer=user
-        ) | queryset.filter(
-            seller=user
+            Q(buyer=user) | Q(seller=user)
         )
 
     # ------------------------------------------------------------------------

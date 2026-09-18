@@ -1,100 +1,49 @@
+# ============================================================
+# config/settings.py
+# SokoMkononi — Django settings
+# ============================================================
+
+import os
 from datetime import timedelta
 from pathlib import Path
-import os
 
 from dotenv import load_dotenv
 
-
+# ------------------------------------------------------------
+# ENV
+# ------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
 
-# ============================================================
-# ENV HELPERS
-# ============================================================
-
-def env_bool(name, default=False):
-    """Read a boolean environment variable."""
-    value = os.getenv(name)
-
+def env_bool(key, default=False):
+    value = os.environ.get(key)
     if value is None:
         return default
-
-    return value.strip().lower() in ("true", "1", "yes", "on")
-
-
-def env_list(name, default=None):
-    """
-    Read a comma-separated environment variable as a list.
-
-    Example:
-        CORS_ALLOWED_ORIGINS=http://a.com,http://b.com
-        -> ["http://a.com", "http://b.com"]
-    """
-    value = os.getenv(name)
-
-    if not value:
-        return list(default or [])
-
-    return [
-        item.strip()
-        for item in value.split(",")
-        if item.strip()
-    ]
+    return value.strip().lower() in ("1", "true", "yes", "on")
 
 
-# ============================================================
-# SECURITY
-# ============================================================
+def env_list(key, default=""):
+    raw = os.environ.get(key, default) or ""
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
-SECRET_KEY = os.getenv(
-    "SECRET_KEY",
-    "django-insecure-change-this-in-development",
-)
 
-DEBUG = env_bool("DEBUG", default=False)
+# ------------------------------------------------------------
+# CORE
+# ------------------------------------------------------------
+SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key-change-me")
+
+DEBUG = env_bool("DEBUG", False)
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
-    default=[
-        "127.0.0.1",
-        "localhost",
-        "sokomkononi.ac.tz",
-        "www.sokomkononi.ac.tz",
-        "api.sokomkononi.ac.tz",
-    ],
+    "127.0.0.1,localhost,sokomkononi.co.tz,www.sokomkononi.co.tz,api.sokomkononi.co.tz",
 )
 
-CSRF_TRUSTED_ORIGINS = env_list(
-    "CSRF_TRUSTED_ORIGINS",
-    default=[
-        "https://sokomkononi.ac.tz",
-        "https://www.sokomkononi.ac.tz",
-    ],
-)
-
-
-# ============================================================
-# SILENCED SYSTEM CHECKS
-# ============================================================
-#
-# auth.E003 fires because User.email is the USERNAME_FIELD but
-# is not declared with field-level unique=True. We enforce email
-# uniqueness among non-deleted users via a conditional
-# UniqueConstraint in apps.accounts.models.User.Meta.constraints,
-# which Django's built-in check cannot recognise. The database
-# guarantee is intact.
-#
-SILENCED_SYSTEM_CHECKS = [
-    "auth.E003",
-]
-
-
-# ============================================================
-# APPLICATIONS
-# ============================================================
-
+# ------------------------------------------------------------
+# APPS
+# ------------------------------------------------------------
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -103,35 +52,33 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
-    "django_filters",
-
     # Third-party
-    "corsheaders",
     "rest_framework",
-    "drf_spectacular",
+    "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
+    "corsheaders",
+    "django_filters",
+    "drf_spectacular",
+    "storages",
 
     # Local apps
     "apps.core",
     "apps.accounts",
     "apps.categories",
     "apps.listings",
+    "apps.boosting",
     "apps.deals",
     "apps.transactions",
-    "apps.waiting_list",
-    "apps.notifications",
-    "apps.boosting",
     "apps.finance",
+    "apps.notifications",
 ]
 
-
-# ============================================================
-# MIDDLEWARE
-# ============================================================
-
+# ------------------------------------------------------------
+# MIDDLEWARE  (CorsMiddleware MUST be before CommonMiddleware)
+# ------------------------------------------------------------
 MIDDLEWARE = [
-    "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -141,27 +88,16 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-
-# ============================================================
-# URLS / WSGI / ASGI
-# ============================================================
-
 ROOT_URLCONF = "config.urls"
-WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
-
-
-# ============================================================
-# TEMPLATES
-# ============================================================
 
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
+                "django.template.context_processors.debug",
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
@@ -170,321 +106,73 @@ TEMPLATES = [
     },
 ]
 
+WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
-# ============================================================
+# ------------------------------------------------------------
 # DATABASE
-# ============================================================
-
+# ------------------------------------------------------------
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME", "sokomkononi_db"),
-        "USER": os.getenv("DB_USER", "sokomkononi_user"),
-        "PASSWORD": os.getenv("DB_PASSWORD", ""),
-        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
-        "PORT": os.getenv("DB_PORT", "5432"),
+        "NAME": os.environ.get("DB_NAME", "sokomkononi"),
+        "USER": os.environ.get("DB_USER", "postgres"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+        "HOST": os.environ.get("DB_HOST", "localhost"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
         "CONN_MAX_AGE": 60,
     }
 }
 
-
-# ============================================================
+# ------------------------------------------------------------
 # AUTH
-# ============================================================
-
+# ------------------------------------------------------------
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "UserAttributeSimilarityValidator"
-        )
-    },
-    {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "MinimumLengthValidator"
-        )
-    },
-    {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "CommonPasswordValidator"
-        )
-    },
-    {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "NumericPasswordValidator"
-        )
-    },
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-
-# ============================================================
-# INTERNATIONALIZATION
-# ============================================================
-
+# ------------------------------------------------------------
+# I18N / TZ
+# ------------------------------------------------------------
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Africa/Dar_es_Salaam"
 USE_I18N = True
 USE_TZ = True
 
+# ------------------------------------------------------------
+# STATIC / MEDIA
+# ------------------------------------------------------------
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# ============================================================
-# STATIC & MEDIA FILES
-# ============================================================
-
-USE_CF_R2 = env_bool("USE_CF_R2", default=False)
-
-if USE_CF_R2:
-    # --------------------------------------------------------
-    # Cloudflare R2 configuration
-    # --------------------------------------------------------
-
-    R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-    R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-    R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-    R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
-    R2_CUSTOM_DOMAIN = os.getenv("R2_CUSTOM_DOMAIN")
-    R2_MEDIA_LOCATION = os.getenv("R2_MEDIA_LOCATION", "media")
-
-    STATIC_URL = "/static/"
-    STATIC_ROOT = BASE_DIR / "staticfiles"
-
-    MEDIA_URL = f"https://{R2_CUSTOM_DOMAIN}/{R2_MEDIA_LOCATION}/"
-    MEDIA_ROOT = BASE_DIR / "media"  # Not used when R2 is enabled, but kept for local development
-
-    STORAGES = {
-        "default": {
-            "BACKEND": "config.storages.CloudflareR2MediaStorage",
-        },
-        "staticfiles": {
-            "BACKEND": (
-                "whitenoise.storage."
-                "CompressedManifestStaticFilesStorage"
-            ),
-        },
-    }
-
-else:
-    # --------------------------------------------------------
-    # Local disk configuration
-    # --------------------------------------------------------
-
-    STATIC_URL = "/static/"
-    STATIC_ROOT = BASE_DIR / "staticfiles"
-
-    MEDIA_URL = "/media/"
-    MEDIA_ROOT = BASE_DIR / "media"
-
-    STORAGES = {
-        "default": {
-            "BACKEND": "django.core.files.storage.FileSystemStorage",
-        },
-        "staticfiles": {
-            "BACKEND": (
-                "whitenoise.storage."
-                "CompressedManifestStaticFilesStorage"
-            ),
-        },
-    }
-
-
-# ============================================================
-# DEFAULT PRIMARY KEY
-# ============================================================
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-
-# ============================================================
-# DJANGO REST FRAMEWORK
-# ============================================================
-
-REST_FRAMEWORK = {
-    "DEFAULT_SCHEMA_CLASS": (
-        "drf_spectacular.openapi.AutoSchema"
-    ),
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        (
-            "rest_framework_simplejwt.authentication."
-            "JWTAuthentication"
-        ),
-    ],
-    "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
-    ],
-    "DEFAULT_PAGINATION_CLASS": (
-        "rest_framework.pagination.PageNumberPagination"
-    ),
-    "PAGE_SIZE": 20,
-    "DEFAULT_RENDERER_CLASSES": [
-        "rest_framework.renderers.JSONRenderer",
-    ],
-}
-
-
-# ============================================================
-# DRF SPECTACULAR (Swagger)
-# ============================================================
-
-SPECTACULAR_SETTINGS = {
-    "TITLE": "SokoMkononi API",
-    "DESCRIPTION": (
-        "API ya SokoMkononi — jukwaa la kidijitali "
-        "la kununua na kuuza mali na bidhaa."
-    ),
-    "VERSION": "1.0.0",
-    "SERVE_INCLUDE_SCHEMA": False,
-    "COMPONENT_SPLIT_REQUEST": True,
-    "SWAGGER_UI_SETTINGS": {
-        "persistAuthorization": True,
-    },
-}
-
-
-# ============================================================
-# JWT
-# ============================================================
-
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": True,
-}
-
-
-# ============================================================
-# EMAIL — GOOGLE / GMAIL SMTP
-# ============================================================
-
-EMAIL_BACKEND = os.getenv(
-    "EMAIL_BACKEND",
-    "django.core.mail.backends.smtp.EmailBackend",
-)
-
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
-
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
-
-EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", default=True)
-
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
-
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-
-DEFAULT_FROM_EMAIL = os.getenv(
-    "DEFAULT_FROM_EMAIL",
-    "SokoMkononi <sokomkononi80@gmail.com>",
-)
-
-
-# ============================================================
-# NEXTSMS
-# ============================================================
-
-PYNEXTSMS_TOKEN = os.getenv("PYNEXTSMS_TOKEN")
-PYNEXTSMS_SENDER_ID = os.getenv("PYNEXTSMS_SENDER_ID")
-
-
-# ============================================================
-# SOFT DELETE / RECYCLE BIN
-# ============================================================
-
-SOFT_DELETE_RETENTION_DAYS = int(
-    os.getenv("SOFT_DELETE_RETENTION_DAYS", "90")
-)
-
-
-# ============================================================
-# CELERY
-# ============================================================
-
-CELERY_BROKER_URL = os.getenv(
-    "CELERY_BROKER_URL",
-    "redis://127.0.0.1:6379/1",
-)
-
-CELERY_RESULT_BACKEND = os.getenv(
-    "CELERY_RESULT_BACKEND",
-    "redis://127.0.0.1:6379/2",
-)
-
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_TIMEZONE = TIME_ZONE
-
-CELERY_BEAT_SCHEDULE = {
-    "purge-soft-deleted-daily": {
-        "task": "core.purge_soft_deleted",
-        "schedule": timedelta(hours=24),
-    },
-}
-
-
-# ============================================================
-# LOGGING
-# ============================================================
-
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "verbose": {
-            "format": "[{asctime}] {levelname} {name}: {message}",
-            "style": "{",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "verbose",
-        },
-    },
-    "root": {
-        "handlers": ["console"],
-        "level": "INFO",
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "django.request": {
-            "handlers": ["console"],
-            "level": "ERROR",
-            "propagate": False,
-        },
-    },
-}
-
-
-# ============================================================
+# ------------------------------------------------------------
 # CORS
-# ============================================================
-
+# ------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
-    default=[
-        "http://localhost:3000",
-        "https://sokomkononi.co.tz",
-    ],
+    "http://localhost:3000,http://localhost:5173,https://sokomkononi.co.tz,https://www.sokomkononi.co.tz",
 )
 
-CORS_ALLOW_CREDENTIALS = env_bool(
-    "CORS_ALLOW_CREDENTIALS",
-    default=False,
-)
+CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", False)
+
+CORS_PREFLIGHT_MAX_AGE = int(os.environ.get("CORS_PREFLIGHT_MAX_AGE", "86400"))
 
 CORS_ALLOW_HEADERS = [
     "accept",
+    "accept-encoding",
     "authorization",
     "content-type",
+    "dnt",
     "origin",
     "user-agent",
     "x-csrftoken",
@@ -500,6 +188,108 @@ CORS_ALLOW_METHODS = [
     "PUT",
 ]
 
-CORS_PREFLIGHT_MAX_AGE = int(
-    os.getenv("CORS_PREFLIGHT_MAX_AGE", "86400")
+CSRF_TRUSTED_ORIGINS = env_list(
+    "CSRF_TRUSTED_ORIGINS",
+    "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz,https://api.sokomkononi.co.tz",
 )
+
+# ------------------------------------------------------------
+# DRF
+# ------------------------------------------------------------
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+    ),
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+    "DEFAULT_FILTER_BACKENDS": (
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "UPDATE_LAST_LOGIN": False,
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": SECRET_KEY,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+    "TOKEN_BLACKLIST_ENABLED": True,
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "SokoMkononi API",
+    "DESCRIPTION": "SokoMkononi marketplace API",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+}
+
+# ------------------------------------------------------------
+# EMAIL  ← THIS WAS MISSING — CAUSES 500 ON REGISTER
+# ------------------------------------------------------------
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",   # safe default for dev
+)
+
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+
+DEFAULT_FROM_EMAIL = os.environ.get(
+    "DEFAULT_FROM_EMAIL",
+    "SokoMkononi <info@sokomkononi.co.tz>",
+)
+
+# ------------------------------------------------------------
+# SMS (NextSMS)
+# ------------------------------------------------------------
+PYNEXTSMS_TOKEN = os.environ.get("PYNEXTSMS_TOKEN", "")
+PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
+
+# ------------------------------------------------------------
+# CELERY
+# ------------------------------------------------------------
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+# ------------------------------------------------------------
+# SECURITY (production)
+# ------------------------------------------------------------
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
+
+# ------------------------------------------------------------
+# LOGGING
+# ------------------------------------------------------------
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}

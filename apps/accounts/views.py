@@ -1,10 +1,10 @@
+# ============================================================
+# apps/accounts/views.py
+# ============================================================
+
 import logging
 
-from drf_spectacular.utils import (
-    OpenApiExample,
-    OpenApiResponse,
-    extend_schema,
-)
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 from rest_framework import permissions, status
 from rest_framework.exceptions import ValidationError
@@ -53,39 +53,37 @@ class RegisterView(APIView):
     @extend_schema(
         request=RegisterSerializer,
         responses={
-            201: OpenApiResponse(
-                description="Usajili umeanzishwa na OTP imetumwa.",
-            ),
+            201: OpenApiResponse(description="Usajili umeanzishwa na OTP imetumwa."),
         },
     )
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        pending = create_pending_registration(
-            serializer.validated_data
-        )
+        pending = create_pending_registration(serializer.validated_data)
+        verification_type = "EMAIL" if pending.email else "PHONE"
 
-        verification_type = (
-            "EMAIL" if pending.email else "PHONE"
-        )
-
-        send_registration_otp(
-            pending,
-            verification_type,
-        )
+        # Do not let email/SMS failures break registration.
+        otp_sent = True
+        send_error = None
+        try:
+            send_registration_otp(pending, verification_type)
+        except Exception as exc:
+            otp_sent = False
+            send_error = str(exc)
+            logger.exception("Failed to send registration OTP for %s", pending.pk)
 
         return Response(
             {
                 "message": (
-                    "Usajili umeanzishwa. "
-                    "OTP imetumwa kwa njia uliyochagua."
+                    "Usajili umeanzishwa. OTP imetumwa kwa njia uliyochagua."
+                    if otp_sent
+                    else
+                    "Usajili umeanzishwa, lakini OTP haikutumwa. "
+                    "Tafadhali omba kutuma tena."
                 ),
-                "identifier": (
-                    pending.email
-                    if pending.email
-                    else pending.phone
-                ),
+                "otp_sent": otp_sent,
+                "identifier": pending.email if pending.email else pending.phone,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -101,11 +99,7 @@ class VerifyOTPView(APIView):
     @extend_schema(
         request=VerifyOTPSerializer,
         responses={
-            200: OpenApiResponse(
-                description=(
-                    "OTP imethibitishwa na JWT tokens zimetolewa."
-                ),
-            ),
+            200: OpenApiResponse(description="OTP imethibitishwa na JWT tokens zimetolewa."),
         },
     )
     def post(self, request):
@@ -115,9 +109,7 @@ class VerifyOTPView(APIView):
         user = verify_registration_otp(
             identifier=serializer.validated_data["identifier"],
             otp_code=serializer.validated_data["otp_code"],
-            verification_type=serializer.validated_data[
-                "verification_type"
-            ],
+            verification_type=serializer.validated_data["verification_type"],
         )
 
         refresh = RefreshToken.for_user(user)
@@ -142,18 +134,13 @@ class LoginView(APIView):
 
     @extend_schema(
         request=LoginSerializer,
-        responses={
-            200: OpenApiResponse(
-                description="Login imefanikiwa.",
-            ),
-        },
+        responses={200: OpenApiResponse(description="Login imefanikiwa.")},
     )
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         user = serializer.validated_data["user"]
-
         refresh = RefreshToken.for_user(user)
 
         return Response(
@@ -182,11 +169,7 @@ class LogoutView(APIView):
                 "required": ["refresh"],
             }
         },
-        responses={
-            205: OpenApiResponse(
-                description="Logout imefanikiwa.",
-            ),
-        },
+        responses={205: OpenApiResponse(description="Logout imefanikiwa.")},
     )
     def post(self, request):
         refresh_token = request.data.get("refresh")
@@ -200,15 +183,9 @@ class LogoutView(APIView):
         try:
             token = RefreshToken(refresh_token)
             token.blacklist()
-
         except Exception:
             return Response(
-                {
-                    "detail": (
-                        "Refresh token si sahihi "
-                        "au imekwisha muda."
-                    )
-                },
+                {"detail": "Refresh token si sahihi au imekwisha muda."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -250,16 +227,9 @@ class ProfileView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    @extend_schema(
-        request=ProfileSerializer,
-        responses={200: ProfileSerializer},
-    )
+    @extend_schema(request=ProfileSerializer, responses={200: ProfileSerializer})
     def patch(self, request):
-        serializer = ProfileSerializer(
-            request.user,
-            data=request.data,
-            partial=True,
-        )
+        serializer = ProfileSerializer(request.user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
@@ -281,11 +251,7 @@ class ChangePasswordView(APIView):
 
     @extend_schema(
         request=ChangePasswordSerializer,
-        responses={
-            200: OpenApiResponse(
-                description="Nenosiri limebadilishwa.",
-            ),
-        },
+        responses={200: OpenApiResponse(description="Nenosiri limebadilishwa.")},
     )
     def post(self, request):
         serializer = ChangePasswordSerializer(
@@ -294,22 +260,15 @@ class ChangePasswordView(APIView):
         )
         serializer.is_valid(raise_exception=True)
 
-        request.user.set_password(
-            serializer.validated_data["new_password"]
-        )
-        request.user.save(
-            update_fields=["password", "updated_at"]
-        )
+        request.user.set_password(serializer.validated_data["new_password"])
+        request.user.save(update_fields=["password", "updated_at"])
 
-        # Blacklist all outstanding refresh tokens.
         try:
             from rest_framework_simplejwt.token_blacklist.models import (
                 BlacklistedToken,
                 OutstandingToken,
             )
-            for token in OutstandingToken.objects.filter(
-                user=request.user
-            ):
+            for token in OutstandingToken.objects.filter(user=request.user):
                 BlacklistedToken.objects.get_or_create(token=token)
         except ImportError:
             pass
@@ -335,9 +294,7 @@ class DeleteAccountView(APIView):
             }
         },
         responses={
-            200: OpenApiResponse(
-                description="Akaunti imewekwa kwenye kikapu kwa siku 90.",
-            ),
+            200: OpenApiResponse(description="Akaunti imewekwa kwenye kikapu kwa siku 90."),
         },
     )
     def post(self, request):
@@ -348,12 +305,7 @@ class DeleteAccountView(APIView):
         )
 
         return Response(
-            {
-                "detail": (
-                    "Akaunti yako imewekwa kwenye kikapu. "
-                    "Itaondolewa kabisa baada ya siku 90."
-                )
-            },
+            {"detail": "Akaunti yako imewekwa kwenye kikapu. Itaondolewa kabisa baada ya siku 90."},
             status=status.HTTP_200_OK,
         )
 
@@ -367,9 +319,7 @@ class ForgotPasswordView(APIView):
 
     @extend_schema(
         request=ForgotPasswordSerializer,
-        responses={
-            200: OpenApiResponse(description="OTP imetumwa kama akaunti ipo."),
-        },
+        responses={200: OpenApiResponse(description="OTP imetumwa kama akaunti ipo.")},
     )
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)
@@ -378,10 +328,7 @@ class ForgotPasswordView(APIView):
         identifier = serializer.validated_data["identifier"]
 
         generic_response = {
-            "message": (
-                "Kama akaunti ipo, OTP imetumwa. "
-                "Angalia barua pepe au ujumbe wa simu."
-            )
+            "message": "Kama akaunti ipo, OTP imetumwa. Angalia barua pepe au ujumbe wa simu."
         }
 
         try:
@@ -417,11 +364,7 @@ class VerifyPasswordResetOTPView(APIView):
 
     @extend_schema(
         request=VerifyPasswordResetOTPSerializer,
-        responses={
-            200: OpenApiResponse(
-                description="OTP imethibitishwa. Tumia reset_token.",
-            ),
-        },
+        responses={200: OpenApiResponse(description="OTP imethibitishwa. Tumia reset_token.")},
     )
     def post(self, request):
         serializer = VerifyPasswordResetOTPSerializer(data=request.data)
@@ -430,19 +373,14 @@ class VerifyPasswordResetOTPView(APIView):
         user = verify_password_reset_otp(
             identifier=serializer.validated_data["identifier"],
             otp_code=serializer.validated_data["otp_code"],
-            verification_type=serializer.validated_data[
-                "verification_type"
-            ],
+            verification_type=serializer.validated_data["verification_type"],
         )
 
         reset_token = create_password_reset_token(user)
 
         return Response(
             {
-                "message": (
-                    "OTP imethibitishwa. Tumia reset_token "
-                    "kubadilisha nenosiri lako."
-                ),
+                "message": "OTP imethibitishwa. Tumia reset_token kubadilisha nenosiri lako.",
                 "reset_token": reset_token,
                 "expires_in_minutes": 15,
             },
@@ -459,11 +397,7 @@ class PasswordResetView(APIView):
 
     @extend_schema(
         request=PasswordResetSerializer,
-        responses={
-            200: OpenApiResponse(
-                description="Nenosiri limebadilishwa.",
-            ),
-        },
+        responses={200: OpenApiResponse(description="Nenosiri limebadilishwa.")},
     )
     def post(self, request):
         serializer = PasswordResetSerializer(data=request.data)
@@ -476,21 +410,11 @@ class PasswordResetView(APIView):
         try:
             user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
-            raise ValidationError(
-                {"reset_token": "Mtumiaji haipatikani."}
-            )
+            raise ValidationError({"reset_token": "Mtumiaji haipatikani."})
 
-        reset_user_password(
-            user,
-            serializer.validated_data["new_password"],
-        )
+        reset_user_password(user, serializer.validated_data["new_password"])
 
         return Response(
-            {
-                "message": (
-                    "Nenosiri limebadilishwa kwa mafanikio. "
-                    "Tafadhali ingia upya kwa nenosiri jipya."
-                )
-            },
+            {"message": "Nenosiri limebadilishwa kwa mafanikio. Tafadhali ingia upya kwa nenosiri jipya."},
             status=status.HTTP_200_OK,
         )

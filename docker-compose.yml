@@ -2,16 +2,64 @@ services:
   web:
     build: .
     restart: unless-stopped
-    volumes:
-      - static_files:/app/staticfiles
-      - media_files:/app/media
     env_file:
       - .env
     environment:
       DEBUG: "False"
+    expose:
+      - "8000"
     ports:
       - "8000:8000"
+    volumes:
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8000)); s.close()\""]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  celery_worker:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DEBUG: "False"
+    command: celery -A config worker -l info --concurrency=2
+    volumes:
+      - media_files:/app/media
+    depends_on:
+      - web
+      - redis
+
+  celery_beat:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DEBUG: "False"
+    command: celery -A config beat -l info
+    depends_on:
+      - web
+      - redis
 
 volumes:
   static_files:
   media_files:
+  redis_data:

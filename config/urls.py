@@ -48,6 +48,12 @@ urlpatterns = [
     path("api/system-settings/", include("apps.system_settings.urls")),
     path("api/admin/users/", include("apps.accounts.urls_admin")),
     path("api/admin/content/", include("apps.content.urls_admin")),
+    path("api/bundles/", include("apps.bundles.urls")),
+    path("api/credits/", include("apps.credits.urls")),
+    path("api/banners/", include("apps.banners.urls")),
+    path("api/leading-fees/", include("apps.leading_fees.urls")),
+    path("api/advertisement-fees/", include("apps.advertisement_fees.urls")),
+    path("api/reservation-rates/", include("apps.reservation_rates.urls")),
     path("api/trash/", include("apps.core.urls")),
 ]
 

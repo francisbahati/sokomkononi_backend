@@ -1,3 +1,14 @@
+"""
+Revenue aggregation for the admin dashboard and detailed reports.
+
+Sources:
+    - ListingFee     (listing_fee)
+    - ListingBoost   (boosting)
+    - Reservation    (reservation)
+    - BannerAd       (advertisement)
+    - BundlePurchase (bundle)
+"""
+
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 
@@ -5,13 +16,19 @@ from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from apps.banners.models import BannerAd
 from apps.boosting.models import ListingBoost
+from apps.bundles.models import BundlePurchase
 from apps.listings.models import ListingFee
 from apps.transactions.models import Reservation
 
 
 ZERO = Decimal("0.00")
 
+
+# ============================================================
+# PERIOD RANGE
+# ============================================================
 
 def get_period_range(period):
     now = timezone.localtime()
@@ -57,10 +74,14 @@ def _apply_date_filter(queryset, start, end, field="created_at"):
     })
 
 
+# ============================================================
+# DASHBOARD
+# ============================================================
+
 def calculate_financial_dashboard(period="all"):
     start, end = get_period_range(period)
 
-    # Listing Fees — use paid_at coalesced to created_at
+    # ---------------- Listing Fees ----------------
     listing_fees = ListingFee.objects.filter(payment_status="PAID").annotate(
         effective_paid=Coalesce("paid_at", "created_at"),
     )
@@ -73,7 +94,7 @@ def calculate_financial_dashboard(period="all"):
     )["total"] or ZERO
     paid_listing_fees = listing_fees.count()
 
-    # Reservations
+    # ---------------- Reservations ----------------
     reservations = Reservation.objects.filter(payment_status="PAID").annotate(
         effective_paid=Coalesce("paid_at", "created_at"),
     )
@@ -86,7 +107,7 @@ def calculate_financial_dashboard(period="all"):
     )["total"] or ZERO
     paid_reservations = reservations.count()
 
-    # Boosts
+    # ---------------- Boosts ----------------
     boosts = ListingBoost.objects.filter(payment_status="PAID").annotate(
         effective_paid=Coalesce("paid_at", "created_at"),
     )
@@ -97,7 +118,35 @@ def calculate_financial_dashboard(period="all"):
     boosting_revenue = boosts.aggregate(total=Sum("amount"))["total"] or ZERO
     paid_boosts = boosts.count()
 
-    # Refunds
+    # ---------------- Advertisement (banners) ----------------
+    banners = BannerAd.objects.all().annotate(
+        effective_paid=Coalesce("created_at", "created_at"),
+    )
+    if start and end:
+        banners = banners.filter(
+            effective_paid__gte=start, effective_paid__lt=end,
+        )
+    advertisement_revenue = banners.aggregate(
+        total=Sum("amount"),
+    )["total"] or ZERO
+    paid_banners = banners.count()
+
+    # ---------------- Bundles ----------------
+    bundle_purchases = BundlePurchase.objects.filter(
+        status=BundlePurchase.Status.PAID,
+    ).annotate(
+        effective_paid=Coalesce("paid_at", "created_at"),
+    )
+    if start and end:
+        bundle_purchases = bundle_purchases.filter(
+            effective_paid__gte=start, effective_paid__lt=end,
+        )
+    bundle_revenue = bundle_purchases.aggregate(
+        total=Sum("amount"),
+    )["total"] or ZERO
+    paid_bundles = bundle_purchases.count()
+
+    # ---------------- Refunds ----------------
     refunds = Reservation.objects.filter(payment_status="REFUNDED").annotate(
         effective_refund=Coalesce("refunded_at", "created_at"),
     )
@@ -110,15 +159,15 @@ def calculate_financial_dashboard(period="all"):
     )["total"] or ZERO
     refund_count = refunds.count()
 
-    # Placeholders for future revenue sources.
-    advertisement_revenue = ZERO
-    leading_revenue = ZERO
+    # ---------------- Totals ----------------
+    leading_revenue = ZERO  # No leading model — always zero.
 
     total_revenue = (
         listing_fee_revenue
         + reservation_revenue
         + boosting_revenue
         + advertisement_revenue
+        + bundle_revenue
         + leading_revenue
     )
     net_revenue = total_revenue - refund_amount
@@ -132,20 +181,28 @@ def calculate_financial_dashboard(period="all"):
         "reservation_revenue": reservation_revenue,
         "boosting_revenue": boosting_revenue,
         "advertisement_revenue": advertisement_revenue,
+        "bundle_revenue": bundle_revenue,
         "leading_revenue": leading_revenue,
         "refunds": refund_amount,
         "net_revenue": net_revenue,
         "paid_listing_fees": paid_listing_fees,
         "paid_reservations": paid_reservations,
         "paid_boosts": paid_boosts,
+        "paid_banners": paid_banners,
+        "paid_bundles": paid_bundles,
         "refund_count": refund_count,
     }
 
+
+# ============================================================
+# DETAILED RECORDS
+# ============================================================
 
 def get_revenue_records(period="all", source="all"):
     start, end = get_period_range(period)
     records = []
 
+    # ---------------- Listing Fees ----------------
     if source in {"all", "listing_fee"}:
         qs = ListingFee.objects.filter(
             payment_status="PAID",
@@ -175,6 +232,7 @@ def get_revenue_records(period="all", source="all"):
                 "created_at": item.created_at,
             })
 
+    # ---------------- Reservations ----------------
     if source in {"all", "reservation"}:
         qs = Reservation.objects.filter(
             payment_status="PAID",
@@ -213,6 +271,7 @@ def get_revenue_records(period="all", source="all"):
                 "created_at": item.created_at,
             })
 
+    # ---------------- Boosts ----------------
     if source in {"all", "boosting"}:
         qs = ListingBoost.objects.filter(
             payment_status="PAID",
@@ -242,6 +301,63 @@ def get_revenue_records(period="all", source="all"):
                 "created_at": item.created_at,
             })
 
+    # ---------------- Advertisements ----------------
+    if source in {"all", "advertisement"}:
+        qs = BannerAd.objects.all().select_related("seller", "listing")
+        if start and end:
+            qs = qs.filter(
+                created_at__gte=start, created_at__lt=end,
+            )
+        for item in qs:
+            records.append({
+                "id": item.id,
+                "source": "advertisement",
+                "source_label": "Advertisement Fee",
+                "amount": item.amount or ZERO,
+                "payment_status": "PAID",
+                "payment_reference": item.payment_reference or "",
+                "paid_at": item.created_at,
+                "refunded_at": None,
+                "seller_id": item.seller_id,
+                "seller_name": getattr(item.seller, "name", ""),
+                "seller_email": getattr(item.seller, "email", "") or "",
+                "listing_id": item.listing_id,
+                "listing_title": item.listing_title,
+                "status": "ACTIVE" if item.active else "INACTIVE",
+                "created_at": item.created_at,
+            })
+
+    # ---------------- Bundles ----------------
+    if source in {"all", "bundle"}:
+        qs = BundlePurchase.objects.filter(
+            status=BundlePurchase.Status.PAID,
+        ).select_related("user", "bundle").annotate(
+            effective_paid=Coalesce("paid_at", "created_at"),
+        )
+        if start and end:
+            qs = qs.filter(
+                effective_paid__gte=start, effective_paid__lt=end,
+            )
+        for item in qs:
+            records.append({
+                "id": item.id,
+                "source": "bundle",
+                "source_label": f"Bundle: {item.bundle.code}",
+                "amount": item.amount,
+                "payment_status": "PAID",
+                "payment_reference": item.payment_reference or "",
+                "paid_at": item.paid_at,
+                "refunded_at": None,
+                "seller_id": item.user_id,
+                "seller_name": getattr(item.user, "name", ""),
+                "seller_email": getattr(item.user, "email", "") or "",
+                "listing_id": None,
+                "listing_title": "",
+                "status": "PAID",
+                "created_at": item.created_at,
+            })
+
+    # ---------------- Refunds ----------------
     if source in {"all", "refund"}:
         qs = Reservation.objects.filter(
             payment_status="REFUNDED",

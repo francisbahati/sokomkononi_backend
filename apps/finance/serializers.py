@@ -16,6 +16,9 @@ class FinancialDashboardSerializer(serializers.Serializer):
     reservation_revenue = serializers.DecimalField(max_digits=20, decimal_places=2)
     boosting_revenue = serializers.DecimalField(max_digits=20, decimal_places=2)
     advertisement_revenue = serializers.DecimalField(max_digits=20, decimal_places=2)
+    bundle_revenue = serializers.DecimalField(
+        max_digits=20, decimal_places=2, required=False,
+    )
     leading_revenue = serializers.DecimalField(max_digits=20, decimal_places=2)
 
     refunds = serializers.DecimalField(max_digits=20, decimal_places=2)
@@ -24,6 +27,8 @@ class FinancialDashboardSerializer(serializers.Serializer):
     paid_listing_fees = serializers.IntegerField()
     paid_reservations = serializers.IntegerField()
     paid_boosts = serializers.IntegerField()
+    paid_banners = serializers.IntegerField(required=False)
+    paid_bundles = serializers.IntegerField(required=False)
     refund_count = serializers.IntegerField()
 
 
@@ -60,13 +65,6 @@ class RevenueRecordSerializer(serializers.Serializer):
 # ============================================================
 
 class MyTransactionSerializer(serializers.Serializer):
-    """
-    Row shape returned by /api/finance/my-transactions/.
-
-    Combines ListingFee, ListingBoost, and Reservation rows into a
-    single flat list for the authenticated user.
-    """
-
     id = serializers.CharField()
     source = serializers.CharField()
     ref = serializers.CharField()

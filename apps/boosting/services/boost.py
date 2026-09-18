@@ -292,3 +292,45 @@ def cancel_boost(*, boost, user):
     boost.status = ListingBoost.BoostStatus.CANCELLED
     boost.save(update_fields=["status", "updated_at"])
     return boost
+
+# ============================================================================
+# PAY BOOST WITH CREDITS
+# ============================================================================
+
+@db_transaction.atomic
+def pay_boost_with_credits(*, boost, user):
+    """
+    Pay a boost using one of the user's boost credits instead of cash.
+    """
+    from apps.credits.services import consume_credit
+
+    boost = (
+        ListingBoost.objects
+        .select_for_update()
+        .select_related("listing", "seller", "package")
+        .get(pk=boost.pk)
+    )
+
+    if boost.seller_id != user.id:
+        raise ValidationError("Huruhusiwi kulipia boost hii.")
+
+    if boost.payment_status == ListingBoost.PaymentStatus.PAID:
+        raise ValidationError("Boost hii tayari imelipiwa.")
+
+    if boost.status in [
+        ListingBoost.BoostStatus.CANCELLED,
+        ListingBoost.BoostStatus.EXPIRED,
+    ]:
+        raise ValidationError("Boost hii haiwezi kulipiwa.")
+
+    # Consume 1 boost credit (raises ValidationError if not enough)
+    consume_credit(user=user, service_key="boost", amount=1)
+
+    boost.payment_status = ListingBoost.PaymentStatus.PAID
+    boost.payment_reference = f"credits_{boost.pk}_{timezone.now().timestamp()}"
+    boost.paid_at = timezone.now()
+    boost.save(update_fields=[
+        "payment_status", "payment_reference", "paid_at", "updated_at",
+    ])
+
+    return boost

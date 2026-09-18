@@ -101,6 +101,12 @@ INSTALLED_APPS = [
     "apps.content",
     "apps.rbac",
     "apps.system_settings",
+    "apps.bundles",
+    "apps.credits",
+    "apps.banners",
+    "apps.leading_fees",
+    "apps.advertisement_fees",
+    "apps.reservation_rates",
 ]
 
 # ------------------------------------------------------------
@@ -425,6 +431,18 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-boosts": {
         "task": "boosting.expire_stale_boosts",
         "schedule": crontab(minute="*/15"),
+    },
+    "expire-stale-banners": {
+        "task": "banners.expire_stale_banners",
+        "schedule": crontab(minute="*/15"),
+    },
+    "expire-stale-credits": {
+        "task": "credits.expire_stale_credits",
+        "schedule": crontab(hour=2, minute=30),
+    },
+    "cleanup-stale-services": {
+        "task": "credits.cleanup_stale_services",
+        "schedule": crontab(hour=2, minute=45),
     },
 }
 

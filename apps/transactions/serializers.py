@@ -14,7 +14,9 @@ class TransactionUserSerializer(serializers.Serializer):
 class TransactionListingSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     title = serializers.CharField(read_only=True)
-    price = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    price = serializers.DecimalField(
+        max_digits=15, decimal_places=2, read_only=True,
+    )
     status = serializers.CharField(read_only=True)
     location = serializers.CharField(read_only=True)
 

@@ -83,9 +83,8 @@ class TransactionViewSet(viewsets.GenericViewSet):
 
     throttle_scope = "user"
 
-    # ------------------------------------------------------------------------
-    # QUERYSET
-    # ------------------------------------------------------------------------
+    # Placeholder for drf-spectacular; real filtering happens in get_queryset().
+    queryset = Transaction.objects.none()
 
     def get_queryset(self):
         user = self.request.user
@@ -101,10 +100,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             return queryset
 
         return queryset.filter(Q(buyer=user) | Q(seller=user))
-
-    # ------------------------------------------------------------------------
-    # SERIALIZERS
-    # ------------------------------------------------------------------------
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -127,10 +122,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             return TransactionCancelSerializer
         return TransactionDetailSerializer
 
-    # ------------------------------------------------------------------------
-    # LIST
-    # ------------------------------------------------------------------------
-
     def list(self, request, *args, **kwargs):
         transactions = self.get_queryset()
         page = self.paginate_queryset(transactions)
@@ -146,10 +137,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
 
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    # ------------------------------------------------------------------------
-    # RETRIEVE
-    # ------------------------------------------------------------------------
-
     def retrieve(self, request, pk=None):
         transaction = self._get_transaction(pk)
 
@@ -158,10 +145,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
         )
 
         return Response(serializer.data, status=status.HTTP_200_OK)
-
-    # ------------------------------------------------------------------------
-    # CREATE TRANSACTION
-    # ------------------------------------------------------------------------
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(
@@ -190,10 +173,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    # ------------------------------------------------------------------------
-    # MY TRANSACTIONS
-    # ------------------------------------------------------------------------
-
     @action(detail=False, methods=["get"], url_path="mine")
     def my_transactions(self, request):
         queryset = self.get_queryset()
@@ -209,10 +188,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             return self.get_paginated_response(serializer.data)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
-
-    # ------------------------------------------------------------------------
-    # CREATE RESERVATION
-    # ------------------------------------------------------------------------
 
     @action(detail=True, methods=["post"], url_path="reservation")
     def reservation(self, request, pk=None):
@@ -234,10 +209,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             serializer.data,
             status=status.HTTP_201_CREATED,
         )
-
-    # ------------------------------------------------------------------------
-    # CONFIRM RESERVATION PAYMENT (admin-only until webhook exists)
-    # ------------------------------------------------------------------------
 
     @action(detail=True, methods=["post"], url_path="reservation/pay")
     def reservation_pay(self, request, pk=None):
@@ -266,10 +237,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ------------------------------------------------------------------------
-    # START INSPECTION
-    # ------------------------------------------------------------------------
-
     @action(detail=True, methods=["post"], url_path="inspection")
     def inspection(self, request, pk=None):
         transaction = self._get_transaction(pk)
@@ -290,10 +257,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             serializer.data,
             status=status.HTTP_201_CREATED,
         )
-
-    # ------------------------------------------------------------------------
-    # BUYER DECISION
-    # ------------------------------------------------------------------------
 
     @action(detail=True, methods=["post"], url_path="decision")
     def decision(self, request, pk=None):
@@ -318,10 +281,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             ).data,
             status=status.HTTP_200_OK,
         )
-
-    # ------------------------------------------------------------------------
-    # FINAL PAYMENT PROOF
-    # ------------------------------------------------------------------------
 
     @action(detail=True, methods=["post"], url_path="final-payment")
     def final_payment(self, request, pk=None):
@@ -349,10 +308,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ------------------------------------------------------------------------
-    # SELLER CONFIRMS FINAL PAYMENT
-    # ------------------------------------------------------------------------
-
     @action(detail=True, methods=["post"], url_path="confirm-payment")
     def confirm_payment(self, request, pk=None):
         transaction = self._get_transaction(pk)
@@ -374,10 +329,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             ).data,
             status=status.HTTP_200_OK,
         )
-
-    # ------------------------------------------------------------------------
-    # CANCEL
-    # ------------------------------------------------------------------------
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
@@ -401,10 +352,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             ).data,
             status=status.HTTP_200_OK,
         )
-
-    # ------------------------------------------------------------------------
-    # RESOLVE DISPUTE (admin-only)
-    # ------------------------------------------------------------------------
 
     @action(detail=True, methods=["post"], url_path="resolve-dispute")
     def resolve_dispute_action(self, request, pk=None):
@@ -432,10 +379,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ------------------------------------------------------------------------
-    # EXPIRE RESERVATION
-    # ------------------------------------------------------------------------
-
     @action(detail=True, methods=["post"], url_path="expire-reservation")
     def expire_reservation(self, request, pk=None):
         transaction = self._get_transaction(pk)
@@ -458,10 +401,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ------------------------------------------------------------------------
-    # EXPIRE INSPECTION
-    # ------------------------------------------------------------------------
-
     @action(detail=True, methods=["post"], url_path="expire-inspection")
     def expire_inspection(self, request, pk=None):
         transaction = self._get_transaction(pk)
@@ -483,10 +422,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             ).data,
             status=status.HTTP_200_OK,
         )
-
-    # ------------------------------------------------------------------------
-    # INTERNAL OBJECT HELPER
-    # ------------------------------------------------------------------------
 
     def _get_transaction(self, pk):
         transaction = get_object_or_404(self.get_queryset(), pk=pk)

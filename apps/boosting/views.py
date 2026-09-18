@@ -32,9 +32,16 @@ class BoostPackageViewSet(
     serializer_class = BoostPackageSerializer
     permission_classes = [permissions.AllowAny]
 
+    queryset = BoostPackage.objects.none()
+
     def get_queryset(self):
+        # drf-spectacular calls get_queryset() during schema generation.
+        if getattr(self, "swagger_fake_view", False):
+            return BoostPackage.objects.none()
+
         qs = BoostPackage.objects.all()
-        if self.request.user.is_authenticated and self.request.user.is_staff:
+        user = self.request.user
+        if user.is_authenticated and user.is_staff:
             return qs
         return qs.filter(is_active=True)
 
@@ -56,8 +63,18 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
 
     http_method_names = ["get", "post", "head", "options"]
 
+    # Placeholder for drf-spectacular.
+    queryset = ListingBoost.objects.none()
+
     def get_queryset(self):
+        # drf-spectacular calls get_queryset() during schema generation.
+        if getattr(self, "swagger_fake_view", False):
+            return ListingBoost.objects.none()
+
         user = self.request.user
+        if not user.is_authenticated:
+            return ListingBoost.objects.none()
+
         qs = ListingBoost.objects.select_related(
             "listing", "seller", "package",
         )

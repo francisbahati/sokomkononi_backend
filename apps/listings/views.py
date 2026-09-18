@@ -69,8 +69,6 @@ from .services.listing_payment import mark_listing_fee_as_paid
 # ============================================================================
 # CATEGORY SLUGS
 # ============================================================================
-# Slug-based matching is resilient to category display-name changes.
-# ============================================================================
 
 CATEGORY_SLUGS = {
     "property": "nyumba-majengo",
@@ -274,12 +272,22 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
     created_message = "Maelezo yameongezwa."
     deleted_message = "Maelezo yamefutwa."
 
-    def get_queryset(self):
-        listing = self.get_listing()
-        return self.detail_model.objects.filter(listing=listing)
+    # Placeholder for drf-spectacular. Real data comes from get_queryset().
+    queryset = PropertyDetails.objects.none()
 
     def get_serializer_class(self):
         return self.detail_serializer
+
+    def get_queryset(self):
+        # drf-spectacular calls get_queryset() during schema generation
+        # without URL kwargs. Return an empty queryset in that case.
+        if getattr(self, "swagger_fake_view", False):
+            if self.detail_model is not None:
+                return self.detail_model.objects.none()
+            return PropertyDetails.objects.none()
+
+        listing = self.get_listing()
+        return self.detail_model.objects.filter(listing=listing)
 
     def get_permissions(self):
         if self.action == "retrieve":
@@ -440,6 +448,7 @@ class PropertyDetailsViewSet(CategoryDetailsViewSet):
     detail_model = PropertyDetails
     detail_serializer = PropertyDetailsSerializer
     required_category_slug = CATEGORY_SLUGS["property"]
+    queryset = PropertyDetails.objects.none()
 
     already_exists_message = (
         "Maelezo ya nyumba/jengo tayari yameongezwa kwenye tangazo hili."
@@ -455,6 +464,7 @@ class LandDetailsViewSet(CategoryDetailsViewSet):
     detail_model = LandDetails
     detail_serializer = LandDetailsSerializer
     required_category_slug = CATEGORY_SLUGS["land"]
+    queryset = LandDetails.objects.none()
 
     already_exists_message = (
         "Maelezo ya ardhi tayari yameongezwa kwenye tangazo hili."
@@ -470,6 +480,7 @@ class VehicleDetailsViewSet(CategoryDetailsViewSet):
     detail_model = VehicleDetails
     detail_serializer = VehicleDetailsSerializer
     required_category_slug = CATEGORY_SLUGS["vehicle"]
+    queryset = VehicleDetails.objects.none()
 
     already_exists_message = (
         "Maelezo ya gari tayari yameongezwa kwenye tangazo hili."
@@ -485,6 +496,7 @@ class BusinessDetailsViewSet(CategoryDetailsViewSet):
     detail_model = BusinessDetails
     detail_serializer = BusinessDetailsSerializer
     required_category_slug = CATEGORY_SLUGS["business"]
+    queryset = BusinessDetails.objects.none()
 
     already_exists_message = (
         "Maelezo ya biashara tayari yameongezwa kwenye tangazo hili."
@@ -500,6 +512,7 @@ class EquipmentDetailsViewSet(CategoryDetailsViewSet):
     detail_model = EquipmentDetails
     detail_serializer = EquipmentDetailsSerializer
     required_category_slug = CATEGORY_SLUGS["equipment"]
+    queryset = EquipmentDetails.objects.none()
 
     already_exists_message = (
         "Maelezo ya mashine tayari yameongezwa kwenye tangazo hili."
@@ -542,7 +555,14 @@ class ListingImageViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser]
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
+    # Placeholder for drf-spectacular.
+    queryset = ListingImage.objects.none()
+
     def get_queryset(self):
+        # drf-spectacular calls get_queryset() without URL kwargs.
+        if getattr(self, "swagger_fake_view", False):
+            return ListingImage.objects.none()
+
         listing_id = self.kwargs.get("listing_id")
         listing = get_object_or_404(Listing, pk=listing_id)
         user = self.request.user
@@ -863,7 +883,6 @@ class ListingFeePaymentView(APIView):
         serializer = ListingFeePaymentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # Ensure the fee record exists before marking it paid.
         create_listing_fee(listing)
 
         try:

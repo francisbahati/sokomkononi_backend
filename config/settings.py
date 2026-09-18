@@ -90,6 +90,10 @@ INSTALLED_APPS = [
     "apps.finance",
     "apps.notifications",
     "apps.waiting_list",
+    "apps.saved",
+    "apps.searches",
+    "apps.leads",
+    "apps.messaging",
 ]
 
 # ------------------------------------------------------------
@@ -315,8 +319,7 @@ SIMPLE_JWT = {
 # SPECTACULAR (Swagger / OpenAPI)
 # ------------------------------------------------------------
 # By default docs are admin-only in production. Set RESTRICT_DOCS=False
-# in the environment to make /api/docs/ and /api/schema/ public — useful
-# for testing or for exposing a public API reference.
+# in the environment to make /api/docs/ and /api/schema/ public.
 # ------------------------------------------------------------
 SPECTACULAR_SETTINGS = {
     "TITLE": "SokoMkononi API",

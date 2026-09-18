@@ -35,6 +35,10 @@ urlpatterns = [
     path("api/finance/", include("apps.finance.urls")),
     path("api/notifications/", include("apps.notifications.urls")),
     path("api/waiting-list/", include("apps.waiting_list.urls")),
+    path("api/saved/", include("apps.saved.urls")),
+    path("api/searches/", include("apps.searches.urls")),
+    path("api/leads/", include("apps.leads.urls")),
+    path("api/messaging/", include("apps.messaging.urls")),
     path("api/trash/", include("apps.core.urls")),
 ]
 

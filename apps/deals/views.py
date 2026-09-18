@@ -9,7 +9,10 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from drf_spectacular.utils import (
-    OpenApiExample, OpenApiResponse, extend_schema, extend_schema_view,
+    OpenApiExample,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
 )
 
 from apps.listings.models import Listing
@@ -108,6 +111,13 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
         notify_deal_room_created(deal_room=deal_room)
 
+        # Auto-create a Lead for the seller
+        try:
+            from apps.leads.services.lead import upsert_lead_from_deal_room
+            upsert_lead_from_deal_room(deal_room)
+        except Exception:
+            pass
+
         response_serializer = DealRoomDetailSerializer(
             deal_room, context={"request": request},
         )
@@ -193,6 +203,13 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             deal_room.save(update_fields=["status", "updated_at"])
 
         notify_new_offer(deal_room=deal_room, offer=new_offer)
+
+        # Update the lead message count for this buyer/listing pair
+        try:
+            from apps.leads.services.lead import upsert_lead_from_deal_room
+            upsert_lead_from_deal_room(deal_room)
+        except Exception:
+            pass
 
         return Response(
             NegotiationOfferSerializer(

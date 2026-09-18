@@ -27,10 +27,7 @@ for attempt in range(120):
     except OSError:
         time.sleep(0.5)
 
-print(
-    f"FATAL: PostgreSQL at {host}:{port} never became reachable",
-    file=sys.stderr,
-)
+print(f"FATAL: PostgreSQL at {host}:{port} never became reachable", file=sys.stderr)
 sys.exit(1)
 PY
 else
@@ -56,7 +53,6 @@ from urllib.parse import urlparse
 
 url = os.environ.get("CELERY_BROKER_URL", "")
 parsed = urlparse(url)
-
 host = parsed.hostname or "localhost"
 port = parsed.port or 6379
 
@@ -70,10 +66,7 @@ for attempt in range(120):
     except OSError:
         time.sleep(0.5)
 
-print(
-    f"FATAL: Redis at {host}:{port} never became reachable",
-    file=sys.stderr,
-)
+print(f"FATAL: Redis at {host}:{port} never became reachable", file=sys.stderr)
 sys.exit(1)
 PY
             ;;
@@ -90,6 +83,36 @@ fi
 # ------------------------------------------------------------
 echo "Applying database migrations..."
 python manage.py migrate --noinput
+
+# ------------------------------------------------------------
+# Auto-create superuser (if env vars are present)
+# ------------------------------------------------------------
+if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
+    echo "Ensuring superuser exists: $DJANGO_SUPERUSER_EMAIL"
+    python manage.py shell -c "
+import os
+from apps.accounts.models import User
+
+email = os.environ['sokomkononi@gmail.com']
+name = os.environ.get( 'Admin')
+password = os.environ['sokomkononi123']
+
+user = User.all_objects.filter(email=email).first()
+if user:
+    user.set_password(password)
+    user.is_staff = True
+    user.is_superuser = True
+    user.is_active = True
+    user.is_verified = True
+    user.save()
+    print(f'Updated existing superuser: {email}')
+else:
+    User.objects.create_superuser(email=email, name=name, password=password)
+    print(f'Created superuser: {email}')
+" || echo "WARNING: superuser creation failed (continuing)."
+else
+    echo "Skipping superuser creation — DJANGO_SUPERUSER_EMAIL or DJANGO_SUPERUSER_PASSWORD not set."
+fi
 
 # ------------------------------------------------------------
 # Static files

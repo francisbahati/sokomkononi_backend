@@ -39,6 +39,15 @@ urlpatterns = [
     path("api/searches/", include("apps.searches.urls")),
     path("api/leads/", include("apps.leads.urls")),
     path("api/messaging/", include("apps.messaging.urls")),
+    path("api/verifications/", include("apps.verifications.urls")),
+    path("api/tickets/", include("apps.tickets.urls")),
+    path("api/audit/", include("apps.audit.urls")),
+    path("api/announcements/", include("apps.announcements.urls")),
+    path("api/content/", include("apps.content.urls")),
+    path("api/rbac/", include("apps.rbac.urls")),
+    path("api/system-settings/", include("apps.system_settings.urls")),
+    path("api/admin/users/", include("apps.accounts.urls_admin")),
+    path("api/admin/content/", include("apps.content.urls_admin")),
     path("api/trash/", include("apps.core.urls")),
 ]
 

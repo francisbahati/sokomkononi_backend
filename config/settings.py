@@ -94,6 +94,13 @@ INSTALLED_APPS = [
     "apps.searches",
     "apps.leads",
     "apps.messaging",
+    "apps.verifications",
+    "apps.tickets",
+    "apps.audit",
+    "apps.announcements",
+    "apps.content",
+    "apps.rbac",
+    "apps.system_settings",
 ]
 
 # ------------------------------------------------------------

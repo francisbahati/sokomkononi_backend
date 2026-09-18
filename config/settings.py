@@ -217,10 +217,10 @@ STORAGES = {
 # ------------------------------------------------------------
 # CORS
 # ------------------------------------------------------------
-# We keep CSRF_TRUSTED_ORIGINS because the Django admin (which uses
-# session cookies + CSRF) is exposed under /admin/. The API itself
-# uses JWT in the Authorization header, so CSRF middleware is a
-# no-op for the API.
+# CSRF_TRUSTED_ORIGINS is required because the Django admin (which
+# uses session cookies + CSRF) is exposed under /admin/. The API
+# itself uses JWT in the Authorization header, so CSRF middleware is
+# a no-op for the API.
 # ------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
@@ -311,13 +311,24 @@ SIMPLE_JWT = {
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
 }
 
+# ------------------------------------------------------------
+# SPECTACULAR (Swagger / OpenAPI)
+# ------------------------------------------------------------
+# By default docs are admin-only in production. Set RESTRICT_DOCS=False
+# in the environment to make /api/docs/ and /api/schema/ public — useful
+# for testing or for exposing a public API reference.
+# ------------------------------------------------------------
 SPECTACULAR_SETTINGS = {
     "TITLE": "SokoMkononi API",
     "DESCRIPTION": "SokoMkononi marketplace API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAdminUser"],
 }
+
+if not DEBUG and env_bool("RESTRICT_DOCS", True):
+    SPECTACULAR_SETTINGS["SERVE_PERMISSIONS"] = [
+        "rest_framework.permissions.IsAdminUser",
+    ]
 
 # ------------------------------------------------------------
 # EMAIL

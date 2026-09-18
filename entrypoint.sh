@@ -39,20 +39,28 @@ else
 fi
 
 # ------------------------------------------------------------
-# Wait for Redis
+# Wait for Redis (only if CELERY_BROKER_URL points at Redis)
 # ------------------------------------------------------------
-REDIS_HOST="${REDIS_HOST:-redis}"
-REDIS_PORT="${REDIS_PORT:-6379}"
+BROKER_URL="${CELERY_BROKER_URL:-}"
 
-echo "Waiting for Redis at $REDIS_HOST:$REDIS_PORT ..."
-python - <<'PY'
+if [ -n "$BROKER_URL" ]; then
+    case "$BROKER_URL" in
+        redis://*|rediss://*)
+            echo "Detected Redis broker: $BROKER_URL"
+            python - <<'PY'
 import os
 import socket
 import sys
 import time
+from urllib.parse import urlparse
 
-host = os.environ.get("REDIS_HOST", "redis")
-port = int(os.environ.get("REDIS_PORT", "6379"))
+url = os.environ.get("CELERY_BROKER_URL", "")
+parsed = urlparse(url)
+
+host = parsed.hostname or "localhost"
+port = parsed.port or 6379
+
+print(f"Waiting for Redis at {host}:{port} ...")
 
 for attempt in range(120):
     try:
@@ -68,6 +76,14 @@ print(
 )
 sys.exit(1)
 PY
+            ;;
+        *)
+            echo "Skipping Redis wait — CELERY_BROKER_URL is not a redis:// URL."
+            ;;
+    esac
+else
+    echo "Skipping Redis wait — CELERY_BROKER_URL is not set."
+fi
 
 # ------------------------------------------------------------
 # Migrations

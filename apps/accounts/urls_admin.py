@@ -11,3 +11,8 @@ router.register(r"", AdminUserViewSet, basename="admin-user")
 urlpatterns = [
     path("", include(router.urls)),
 ]
+from django.urls import path as _p
+from .views_admin_extra import AdminUserFullView
+urlpatterns += [
+    _p("<int:pk>/full/", AdminUserFullView.as_view(), name="admin-user-full"),
+]

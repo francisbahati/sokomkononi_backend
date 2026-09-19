@@ -63,7 +63,7 @@ class RevenueReportView(APIView):
             ),
             OpenApiParameter(
                 name="source", type=str, required=False,
-                enum=["all", "listing_fee", "reservation", "boosting", "refund"],
+                enum=["all", "listing_fee", "reservation", "boosting", "advertisement", "bundle", "refund"],
             ),
         ],
         responses=RevenueRecordSerializer(many=True),
@@ -76,7 +76,8 @@ class RevenueReportView(APIView):
             return Response({"detail": "Invalid period."}, status=400)
 
         if source not in {
-            "all", "listing_fee", "reservation", "boosting", "refund",
+            "all", "listing_fee", "reservation", "boosting",
+            "advertisement", "bundle", "refund",
         }:
             return Response({"detail": "Invalid source."}, status=400)
 

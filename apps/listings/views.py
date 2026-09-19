@@ -930,8 +930,11 @@ class ListingFeePaymentView(APIView):
         ),
     },
 )
-class AdminPendingListingsView(APIView):
+from rest_framework.generics import GenericAPIView as _GAV
+
+class AdminPendingListingsView(_GAV):
     permission_classes = [permissions.IsAdminUser]
+    pagination_class = None
 
     def get(self, request):
         listings = (
@@ -942,16 +945,9 @@ class AdminPendingListingsView(APIView):
             .order_by("-created_at")
         )
 
-        page = self.paginate_queryset(listings)
         serializer = AdminPendingListingSerializer(
-            page if page is not None else listings,
-            many=True,
-            context={"request": request},
+            listings, many=True, context={"request": request},
         )
-
-        if page is not None:
-            return self.get_paginated_response(serializer.data)
-
         return Response(
             {"count": listings.count(), "results": serializer.data},
             status=status.HTTP_200_OK,

@@ -19,6 +19,7 @@ from apps.listings.models import Listing
 
 from .models import DealRoom, NegotiationOffer
 from .permissions import IsDealParticipant, IsVerifiedDealUser
+from .serializers_admin import AdminDealRoomSerializer
 from .serializers import (
     DealRoomAcceptOfferSerializer,
     DealRoomCancelSerializer,
@@ -66,7 +67,11 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         if self.action == "cancel":
             return DealRoomCancelSerializer
         if self.action == "retrieve":
+            if self.request.user.is_staff:
+                return AdminDealRoomSerializer
             return DealRoomDetailSerializer
+        if self.request.user.is_staff:
+            return AdminDealRoomSerializer
         return DealRoomListSerializer
 
     def get_permissions(self):

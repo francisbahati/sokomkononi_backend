@@ -1,3 +1,6 @@
+cd ~/StudioProjects/sokomkononi
+
+cat > entrypoint.sh << 'SHEOF'
 #!/bin/sh
 set -e
 
@@ -93,17 +96,22 @@ if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
 import os
 from apps.accounts.models import User
 
-email = os.environ['sokomkononi@gmail.com']
-name = os.environ.get( 'Admin')
-password = os.environ['sokomkononi123']
+email = os.environ.get('DJANGO_SUPERUSER_EMAIL', '').strip()
+name = os.environ.get('DJANGO_SUPERUSER_NAME', 'Admin').strip() or 'Admin'
+password = os.environ.get('DJANGO_SUPERUSER_PASSWORD', '')
 
 user = User.all_objects.filter(email=email).first()
 if user:
     user.set_password(password)
+    user.name = name
     user.is_staff = True
     user.is_superuser = True
     user.is_active = True
     user.is_verified = True
+    user.is_deleted = False
+    user.deleted_at = None
+    user.deleted_by = None
+    user.deletion_reason = ''
     user.save()
     print(f'Updated existing superuser: {email}')
 else:
@@ -125,3 +133,7 @@ python manage.py collectstatic --noinput
 # ------------------------------------------------------------
 echo "Starting application..."
 exec "$@"
+SHEOF
+
+chmod +x entrypoint.sh
+echo "✅ entrypoint.sh fixed — only admin block changed"

@@ -5,9 +5,6 @@ echo "============================================================"
 echo "SokoMkononi — entrypoint"
 echo "============================================================"
 
-# ------------------------------------------------------------
-# Wait for Postgres
-# ------------------------------------------------------------
 if [ -n "$DB_HOST" ] && [ -n "$DB_PORT" ]; then
     echo "Waiting for PostgreSQL at $DB_HOST:$DB_PORT ..."
     python - <<'PY'
@@ -35,9 +32,6 @@ else
     exit 1
 fi
 
-# ------------------------------------------------------------
-# Wait for Redis (only if CELERY_BROKER_URL points at Redis)
-# ------------------------------------------------------------
 BROKER_URL="${CELERY_BROKER_URL:-}"
 
 if [ -n "$BROKER_URL" ]; then
@@ -78,15 +72,9 @@ else
     echo "Skipping Redis wait — CELERY_BROKER_URL is not set."
 fi
 
-# ------------------------------------------------------------
-# Migrations
-# ------------------------------------------------------------
 echo "Applying database migrations..."
 python manage.py migrate --noinput
 
-# ------------------------------------------------------------
-# Auto-create superuser (if env vars are present)
-# ------------------------------------------------------------
 if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
     echo "Ensuring superuser exists: $DJANGO_SUPERUSER_EMAIL"
     python manage.py shell -c "
@@ -119,14 +107,8 @@ else
     echo "Skipping superuser creation — DJANGO_SUPERUSER_EMAIL or DJANGO_SUPERUSER_PASSWORD not set."
 fi
 
-# ------------------------------------------------------------
-# Static files
-# ------------------------------------------------------------
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# ------------------------------------------------------------
-# Start
-# ------------------------------------------------------------
 echo "Starting application..."
 exec "$@"

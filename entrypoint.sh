@@ -1,6 +1,3 @@
-cd ~/StudioProjects/sokomkononi
-
-cat > entrypoint.sh << 'SHEOF'
 #!/bin/sh
 set -e
 
@@ -133,7 +130,3 @@ python manage.py collectstatic --noinput
 # ------------------------------------------------------------
 echo "Starting application..."
 exec "$@"
-SHEOF
-
-chmod +x entrypoint.sh
-echo "✅ entrypoint.sh fixed — only admin block changed"

@@ -1,0 +1,33 @@
+# Force Unix line endings for shell scripts and config files
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+
+# Docker
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# Config
+*.yml text eol=lf
+*.yaml text eol=lf
+*.conf text eol=lf
+*.env text eol=lf
+
+# Python
+*.py text eol=lf
+
+# JS / TS
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+
+# JSON
+*.json text eol=lf
+
+# Markdown
+*.md text eol=lf
+
+# Windows-only (keep CRLF)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

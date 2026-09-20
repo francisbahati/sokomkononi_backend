@@ -206,6 +206,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         if deal_room.status == DealRoom.Status.OPEN:
             deal_room.status = DealRoom.Status.NEGOTIATING
             deal_room.save(update_fields=["status", "updated_at"])
+        else:
+            deal_room.save(update_fields=["updated_at"])
 
         notify_new_offer(deal_room=deal_room, offer=new_offer)
 
@@ -235,7 +237,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def accept_offer(self, request, pk=None):
         deal_room = get_object_or_404(
             DealRoom.objects
-            .select_for_update()
+            .select_for_update(of=("self",))
             .select_related("listing", "listing__category", "buyer", "seller"),
             pk=pk,
         )
@@ -318,7 +320,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         # Cancel sibling Deal Rooms for the same listing
         sibling_rooms = (
             DealRoom.objects
-            .select_for_update()
+            .select_for_update(of=("self",))
             .filter(
                 listing=deal_room.listing,
                 status__in=[
@@ -369,7 +371,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         deal_room = get_object_or_404(
             DealRoom.objects
-            .select_for_update()
+            .select_for_update(of=("self",))
             .select_related("listing", "listing__category", "buyer", "seller"),
             pk=pk,
         )

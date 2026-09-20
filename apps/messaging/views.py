@@ -119,7 +119,7 @@ class ConversationViewSet(viewsets.GenericViewSet):
             text=serializer.validated_data["text"],
         )
 
-        conv.last_message = message.text[:500]
+        conv.last_message = message.text
         conv.last_message_at = message.created_at
         conv.save(update_fields=["last_message", "last_message_at", "updated_at"])
 

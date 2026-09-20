@@ -83,20 +83,24 @@ def resolve_dispute(
             transaction=transaction,
             note=note,
             now=now,
+            admin_user=admin_user,
         )
     else:
         _resolve_as_cancelled(
             transaction=transaction,
             note=note,
             now=now,
+            admin_user=admin_user,
         )
 
     transaction.save()
     return transaction
 
 
-def _resolve_as_completed(*, transaction, note, now):
+def _resolve_as_completed(*, transaction, note, now, admin_user=None):
     transaction.status = Transaction.Status.COMPLETED
+    transaction.dispute_resolved_by = admin_user
+    transaction.dispute_resolution_note = note
     transaction.completed_at = now
     transaction.cancellation_reason = ""
 
@@ -151,8 +155,10 @@ def _resolve_as_completed(*, transaction, note, now):
         )
 
 
-def _resolve_as_cancelled(*, transaction, note, now):
+def _resolve_as_cancelled(*, transaction, note, now, admin_user=None):
     transaction.status = Transaction.Status.CANCELLED
+    transaction.dispute_resolved_by = admin_user
+    transaction.dispute_resolution_note = note
     transaction.cancelled_at = now
     transaction.cancellation_reason = (
         note or "Mgogoro umetatuliwa kwa kughairi muamala."

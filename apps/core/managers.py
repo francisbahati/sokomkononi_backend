@@ -4,6 +4,7 @@ from django.utils import timezone
 
 class SoftDeleteQuerySet(models.QuerySet):
     def delete(self):
+        """Bulk soft delete. Returns (count, {}) for parity with Django."""
         count = self.update(
             is_deleted=True,
             deleted_at=timezone.now(),
@@ -29,6 +30,13 @@ class SoftDeleteQuerySet(models.QuerySet):
 
 
 class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
+    """
+    Manager that filters out soft-deleted rows by default.
+
+    SoftDeleteManager()                     → filters is_deleted=False
+    SoftDeleteManager(include_deleted=True) → returns everything
+    """
+
     use_in_migrations = True
 
     def __init__(self, *args, include_deleted=False, **kwargs):
@@ -36,10 +44,11 @@ class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
         super().__init__(*args, **kwargs)
 
     def deconstruct(self):
-        path, args, kwargs = super().deconstruct()
+        # NOTE: Django's Manager.deconstruct() returns 5-tuple.
+        as_manager, manager_path, qs_path, args, kwargs = super().deconstruct()
         if self.include_deleted:
             kwargs["include_deleted"] = True
-        return path, args, kwargs
+        return as_manager, manager_path, qs_path, args, kwargs
 
     def get_queryset(self):
         qs = super().get_queryset()

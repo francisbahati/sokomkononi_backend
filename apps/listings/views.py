@@ -21,6 +21,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.generics import GenericAPIView
 
 from apps.core.mixins import SoftDeleteViewSetMixin
 
@@ -930,9 +931,8 @@ class ListingFeePaymentView(APIView):
         ),
     },
 )
-from rest_framework.generics import GenericAPIView as _GAV
 
-class AdminPendingListingsView(_GAV):
+class AdminPendingListingsView(GenericAPIView):
     permission_classes = [permissions.IsAdminUser]
     pagination_class = None
 

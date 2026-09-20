@@ -3,6 +3,8 @@ Auto-create/update a Lead when a DealRoom is created or updated.
 Called from apps.deals.services (or via a signal).
 """
 
+from django.db import models
+
 from apps.deals.models import DealRoom
 
 from ..models import Lead
@@ -45,10 +47,9 @@ def upsert_lead_from_deal_room(deal_room: DealRoom):
     )
 
     if not created:
-        # Update message + count on subsequent activity
         Lead.objects.filter(pk=lead.pk).update(
             message=initial_message or lead.message,
-            message_count=Lead.objects.get(pk=lead.pk).message_count + 1,
+            message_count=models.F("message_count") + 1,
         )
         lead.refresh_from_db()
 

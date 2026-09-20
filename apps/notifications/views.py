@@ -56,12 +56,10 @@ class NotificationViewSet(
     def get_queryset(self):
         user = self.request.user
 
-        if user.is_staff:
-            return self.queryset
-
-        return self.queryset.filter(
-            recipient=user,
-        )
+        # Notifications are private. Even staff only see their own here.
+        # Admins needing global views must use Django admin or a dedicated
+        # audit endpoint.
+        return self.queryset.filter(recipient=user)
 
     def list(self, request, *args, **kwargs):
         notifications = self.get_queryset()

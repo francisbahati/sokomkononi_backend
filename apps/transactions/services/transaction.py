@@ -48,9 +48,12 @@ def create_transaction_from_deal_room(*, deal_room, user):
         pk=deal_room.listing_id,
     )
 
-    if listing.status != Listing.Status.AVAILABLE:
+    if listing.status not in [
+        Listing.Status.AVAILABLE,
+        Listing.Status.RESERVED,   # accept_offer already reserved it
+    ]:
         raise ValidationError(
-            "Tangazo hili halipo kwenye hali ya AVAILABLE."
+            "Tangazo hili halipo kwenye hali ya AVAILABLE au RESERVED."
         )
 
     transaction = Transaction.objects.create(

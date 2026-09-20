@@ -6,7 +6,13 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.listings.models import Listing
-from apps.notifications.services.notification import create_notification
+
+
+try:
+    from apps.notifications.services.notification import create_notification
+except (ImportError, LookupError):
+    def create_notification(**kwargs):
+        return None
 
 from ..models import BoostPackage, ListingBoost
 

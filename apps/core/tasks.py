@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 
 # Names of models that must never be auto-purged.
 AUDIT_PROTECTED_MODEL_NAMES = {
-    "Listing",            # cascades to ListingFee (financial)
-    "ListingFee",         # financial
-    "ListingBoost",       # financial
-    "Reservation",        # financial
-    "InspectionPeriod",   # financial/audit
-    "Transaction",        # financial
-    "OTPVerification",    # security audit trail
+    ("listings", "Listing"),
+    ("listings", "ListingFee"),
+    ("boosting", "ListingBoost"),
+    ("transactions", "Reservation"),
+    ("transactions", "InspectionPeriod"),
+    ("transactions", "Transaction"),
+    ("accounts", "OTPVerification"),
 }
 
 
@@ -53,7 +53,7 @@ def purge_soft_deleted():
         ):
             continue
 
-        if model.__name__ in AUDIT_PROTECTED_MODEL_NAMES:
+        if (model._meta.app_label, model.__name__) in AUDIT_PROTECTED_MODEL_NAMES:
             continue
 
         qs = model.all_objects.filter(

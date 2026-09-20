@@ -23,7 +23,10 @@ def grant_bundle_credits(*, user, credits, services, expires_at,
         - a dict     → { "listing": 10, "boost": 3, ... }
     """
     if isinstance(credits, int):
-        credits = {"default": credits}
+        raise ValidationError(
+            "Credits lazima ziwe dict (mfano {\"boost\": 3}). "
+            "Integer hairuhusiwi."
+        )
 
     for service_key, amount in (credits or {}).items():
         try:

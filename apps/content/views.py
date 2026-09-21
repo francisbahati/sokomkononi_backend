@@ -1,18 +1,7 @@
-from rest_framework import permissions, status, viewsets
+from rest_framework import permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-
-
-class IsAdminOrReadOnly(permissions.BasePermission):
-    def has_permission(self, request, view):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
-
+from rest_framework.viewsets import GenericViewSet
 
 from .models import Banner, FAQ, SiteContent, Testimonial
 from .serializers import (
@@ -23,22 +12,22 @@ from .serializers import (
 )
 
 
-class ContentViewSet(viewsets.GenericViewSet):
-    """
-    A single endpoint that returns all public content blocks.
+KEY_MAP = {
+    "about": "ABOUT",
+    "terms": "TERMS",
+    "privacy": "PRIVACY",
+    "help": "HELP",
+}
 
-        GET /api/content/                       all content
-        GET /api/content/about/
-        GET /api/content/terms/
-        GET /api/content/privacy/
-        GET /api/content/help/
+
+class ContentViewSet(GenericViewSet):
+    """
+        GET     /api/content/                   all public content
+        GET     /api/content/<key>/             one section
+        PATCH   /api/content/<key>/             admin update
     """
 
     permission_classes = [permissions.AllowAny]
-
-    @action(detail=False, methods=["get"], url_path="(?P<key>[a-z]+)")
-    def by_key(self, request, key=None):
-        return self._key_response(key)
 
     def list(self, request):
         return Response({
@@ -57,20 +46,8 @@ class ContentViewSet(viewsets.GenericViewSet):
             "help": self._site_content("HELP"),
         })
 
-    def _site_content(self, key):
-        obj = SiteContent.objects.filter(key=key).first()
-        if not obj:
-            return None
-        return SiteContentSerializer(obj).data
-
-    def _key_response(self, key):
-        mapping = {
-            "about": "ABOUT",
-            "terms": "TERMS",
-            "privacy": "PRIVACY",
-            "help": "HELP",
-        }
-        upper = mapping.get((key or "").lower())
+    def by_key(self, request, key=None):
+        upper = KEY_MAP.get((key or "").lower())
         if not upper:
             return Response(
                 {"detail": "Sehemu haipatikani."},
@@ -83,3 +60,29 @@ class ContentViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(data)
+
+    def update_key(self, request, key=None):
+        if not (request.user and request.user.is_authenticated and request.user.is_staff):
+            return Response(
+                {"detail": "Huna ruhusa."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        upper = KEY_MAP.get((key or "").lower())
+        if not upper:
+            return Response(
+                {"detail": "Sehemu haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        obj, _ = SiteContent.objects.get_or_create(key=upper)
+        serializer = SiteContentSerializer(
+            obj, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(SiteContentSerializer(obj).data)
+
+    def _site_content(self, key):
+        obj = SiteContent.objects.filter(key=key).first()
+        if not obj:
+            return None
+        return SiteContentSerializer(obj).data

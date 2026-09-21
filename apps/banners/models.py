@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 
@@ -59,3 +61,51 @@ class BannerAd(models.Model):
 
     def __str__(self):
         return f"Banner #{self.pk} — {self.listing_title}"
+
+
+class Campaign(models.Model):
+    """
+    Admin-managed promotional campaign. Not to be confused with a
+    seller's BannerAd — this is a platform-level marketing push.
+    """
+
+    class Type(models.TextChoices):
+        DISCOUNT = "DISCOUNT", "Discount"
+        BANNER = "BANNER", "Banner"
+        FEATURE = "FEATURE", "Feature"
+        OTHER = "OTHER", "Other"
+
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+
+    type = models.CharField(
+        max_length=20, choices=Type.choices, default=Type.OTHER,
+    )
+
+    start_date = models.DateTimeField(null=True, blank=True)
+    end_date = models.DateTimeField(null=True, blank=True)
+
+    budget = models.DecimalField(
+        max_digits=15, decimal_places=2,
+        null=True, blank=True,
+        default=Decimal("0.00"),
+    )
+    spent = models.DecimalField(
+        max_digits=15, decimal_places=2,
+        null=True, blank=True,
+        default=Decimal("0.00"),
+    )
+
+    active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "campaigns"
+        ordering = ["-created_at"]
+        verbose_name = "Kampeni"
+        verbose_name_plural = "Kampeni"
+
+    def __str__(self):
+        return self.title

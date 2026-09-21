@@ -23,14 +23,6 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 
 
 class BundleViewSet(viewsets.ModelViewSet):
-    """
-        GET     /api/bundles/                  list active bundles (public)
-        POST    /api/bundles/                  admin create
-        GET     /api/bundles/{id}/
-        PATCH   /api/bundles/{id}/             admin
-        DELETE  /api/bundles/{id}/             admin
-    """
-
     serializer_class = BundleSerializer
     permission_classes = [IsAdminOrReadOnly]
 
@@ -53,14 +45,15 @@ class BundleViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["post"], url_path="toggle")
+    def toggle(self, request, pk=None):
+        obj = self.get_object()
+        obj.active = not obj.active
+        obj.save(update_fields=["active", "updated_at"])
+        return Response(BundleSerializer(obj).data)
+
 
 class BundlePurchaseViewSet(viewsets.GenericViewSet):
-    """
-        GET     /api/bundles/purchases/           my purchases
-        POST    /api/bundles/purchases/           create { bundle, payment_reference? }
-        POST    /api/bundles/purchases/{id}/pay/  confirm payment
-    """
-
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):

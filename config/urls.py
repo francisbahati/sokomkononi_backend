@@ -1,7 +1,3 @@
-# ============================================================
-# config/urls.py
-# ============================================================
-
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
@@ -14,7 +10,6 @@ from drf_spectacular.views import (
 
 
 urlpatterns = [
-    # Admin
     path("admin/", admin.site.urls),
 
     # Schema / docs
@@ -25,7 +20,7 @@ urlpatterns = [
         name="docs",
     ),
 
-    # Apps
+    # Auth & apps
     path("api/auth/", include("apps.accounts.urls")),
     path("api/categories/", include("apps.categories.urls")),
     path("api/listings/", include("apps.listings.urls")),
@@ -46,11 +41,20 @@ urlpatterns = [
     path("api/content/", include("apps.content.urls")),
     path("api/rbac/", include("apps.rbac.urls")),
     path("api/system-settings/", include("apps.system_settings.urls")),
+
+    # Admin routes
     path("api/admin/users/", include("apps.accounts.urls_admin")),
     path("api/admin/content/", include("apps.content.urls_admin")),
+    path(
+        "api/admin/reports/",
+        include("apps.finance.urls_admin_reports"),
+    ),
+
+    # Commerce
     path("api/bundles/", include("apps.bundles.urls")),
     path("api/credits/", include("apps.credits.urls")),
     path("api/banners/", include("apps.banners.urls")),
+    path("api/promotions/", include("apps.banners.urls_promotions")),
     path("api/leading-fees/", include("apps.leading_fees.urls")),
     path("api/advertisement-fees/", include("apps.advertisement_fees.urls")),
     path("api/reservation-rates/", include("apps.reservation_rates.urls")),

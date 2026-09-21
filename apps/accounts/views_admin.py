@@ -20,9 +20,12 @@ class IsAdminUser(permissions.BasePermission):
 class AdminUserViewSet(viewsets.GenericViewSet):
     """
         GET     /api/admin/users/               list with filters
-        GET     /api/admin/users/{id}/
+        GET     /api/admin/users/{id}/          retrieve
+        PATCH   /api/admin/users/{id}/          partial update
+        DELETE  /api/admin/users/{id}/          soft delete
         POST    /api/admin/users/{id}/suspend/
         POST    /api/admin/users/{id}/activate/
+        POST    /api/admin/users/{id}/verify/
     """
 
     serializer_class = ProfileSerializer
@@ -50,6 +53,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             qs = qs.filter(is_active=False)
         return qs
 
+    def _get_user(self, pk):
+        return User.all_objects.filter(pk=pk).first()
+
     def list(self, request):
         qs = self.get_queryset()
         page = self.paginate_queryset(qs)
@@ -61,7 +67,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     def retrieve(self, request, pk=None):
-        user = User.all_objects.filter(pk=pk).first()
+        user = self._get_user(pk)
         if not user:
             return Response(
                 {"detail": "Haipatikani."},
@@ -69,9 +75,49 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             )
         return Response(ProfileSerializer(user).data)
 
+    def partial_update(self, request, pk=None):
+        user = self._get_user(pk)
+        if not user:
+            return Response(
+                {"detail": "Haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        data = request.data or {}
+        allowed = {
+            "name", "phone", "account_type",
+            "is_active", "is_verified", "is_staff",
+        }
+        updates = []
+        for field in allowed:
+            if field in data:
+                setattr(user, field, data[field])
+                updates.append(field)
+        if updates:
+            updates.append("updated_at")
+            user.save(update_fields=updates)
+        return Response(ProfileSerializer(user).data)
+
+    def destroy(self, request, pk=None):
+        user = self._get_user(pk)
+        if not user:
+            return Response(
+                {"detail": "Haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if user.id == request.user.id:
+            return Response(
+                {"detail": "Huwezi kujifuta mwenyewe."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.delete(by=request.user, reason="Admin deleted")
+        return Response(
+            {"detail": "Mtumiaji amewekwa kwenye kikapu."},
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=True, methods=["post"], url_path="suspend")
     def suspend(self, request, pk=None):
-        user = User.all_objects.filter(pk=pk).first()
+        user = self._get_user(pk)
         if not user:
             return Response(
                 {"detail": "Haipatikani."},
@@ -83,7 +129,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=["post"], url_path="activate")
     def activate(self, request, pk=None):
-        user = User.all_objects.filter(pk=pk).first()
+        user = self._get_user(pk)
         if not user:
             return Response(
                 {"detail": "Haipatikani."},
@@ -92,3 +138,15 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user.is_active = True
         user.save(update_fields=["is_active", "updated_at"])
         return Response({"detail": "Mtumiaji amewashwa."})
+
+    @action(detail=True, methods=["post"], url_path="verify")
+    def verify(self, request, pk=None):
+        user = self._get_user(pk)
+        if not user:
+            return Response(
+                {"detail": "Haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        user.is_verified = True
+        user.save(update_fields=["is_verified", "updated_at"])
+        return Response({"detail": "Mtumiaji amethibitishwa."})

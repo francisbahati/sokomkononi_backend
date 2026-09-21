@@ -14,6 +14,27 @@ class Category(SoftDeleteModel):
 
     description = models.TextField(blank=True, verbose_name="Maelezo")
 
+    icon_key = models.CharField(
+        max_length=50, blank=True,
+        verbose_name="Ufunguo wa icon",
+        help_text="Mfano: home, car, briefcase",
+    )
+
+    image_url = models.URLField(
+        blank=True,
+        verbose_name="URL ya picha",
+    )
+
+    is_popular = models.BooleanField(
+        default=False,
+        verbose_name="Maarufu",
+    )
+
+    extra = models.JSONField(
+        default=dict, blank=True,
+        verbose_name="Data ya ziada",
+    )
+
     is_active = models.BooleanField(default=True, verbose_name="Lipo hai")
 
     ordering = models.PositiveIntegerField(

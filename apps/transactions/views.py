@@ -214,10 +214,13 @@ class TransactionViewSet(viewsets.GenericViewSet):
     def reservation_pay(self, request, pk=None):
         transaction = self._get_transaction(pk)
 
-        if not request.user.is_staff:
+        if (
+            not request.user.is_staff
+            and request.user.id != transaction.buyer_id
+        ):
             raise PermissionDenied(
-                "Malipo yanathibitishwa na mfumo. "
-                "Wasiliana na msimamizi."
+                "Ni mnunuzi au msimamizi pekee anayeweza "
+                "kulipia reservation hii."
             )
 
         reservation = getattr(transaction, "reservation", None)

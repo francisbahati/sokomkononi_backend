@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.response import Response
@@ -18,22 +16,31 @@ class IsAdminUser(permissions.BasePermission):
         )
 
 
-class CampaignSerializerMixin:
-    @staticmethod
-    def serialize(obj):
-        return {
-            "id": obj.id,
-            "title": obj.title,
-            "description": obj.description,
-            "type": obj.type,
-            "startDate": obj.start_date,
-            "endDate": obj.end_date,
-            "budget": float(obj.budget or 0),
-            "spent": float(obj.spent or 0),
-            "active": obj.active,
-            "created_at": obj.created_at,
-            "updated_at": obj.updated_at,
-        }
+class IsAdminOrReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_staff
+        )
+
+
+def _serialize_campaign(obj):
+    return {
+        "id": obj.id,
+        "title": obj.title,
+        "description": obj.description,
+        "type": obj.type,
+        "startDate": obj.start_date,
+        "endDate": obj.end_date,
+        "budget": float(obj.budget or 0),
+        "spent": float(obj.spent or 0),
+        "active": obj.active,
+        "created_at": obj.created_at,
+        "updated_at": obj.updated_at,
+    }
 
 
 class PromotionsAnalyticsView(viewsets.ViewSet):
@@ -44,7 +51,10 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
 
         boosts = (
             ListingBoost.objects
-            .filter(status=ListingBoost.BoostStatus.ACTIVE, expires_at__gt=now)
+            .filter(
+                status=ListingBoost.BoostStatus.ACTIVE,
+                expires_at__gt=now,
+            )
             .select_related("listing", "seller")
         )
         boosted = []
@@ -78,20 +88,18 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
                 "amount": float(b.amount or 0),
             })
 
-        leading = []
-
         boost_revenue = sum(b["amount"] for b in boosted)
         ads_revenue = sum(a["amount"] for a in advertised)
 
         return Response({
             "counts": {
                 "boosted": len(boosted),
-                "leading": len(leading),
+                "leading": 0,
                 "advertised": len(advertised),
                 "campaigns": Campaign.objects.filter(active=True).count(),
             },
             "boostedListings": boosted,
-            "leadingListings": leading,
+            "leadingListings": [],
             "advertisedListings": advertised,
             "revenueByType": {
                 "boost": boost_revenue,
@@ -102,14 +110,21 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
         })
 
 
-class CampaignViewSet(CampaignSerializerMixin, viewsets.GenericViewSet):
-    permission_classes = [IsAdminUser]
-
-    def get_queryset(self):
-        return Campaign.objects.all().order_by("-created_at")
+class CampaignViewSet(viewsets.ViewSet):
+    permission_classes = [IsAdminOrReadOnly]
 
     def list(self, request):
-        return Response([self.serialize(c) for c in self.get_queryset()])
+        qs = Campaign.objects.all().order_by("-created_at")
+        return Response([_serialize_campaign(c) for c in qs])
+
+    def retrieve(self, request, pk=None):
+        obj = Campaign.objects.filter(pk=pk).first()
+        if not obj:
+            return Response(
+                {"detail": "Haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(_serialize_campaign(obj))
 
     def create(self, request):
         data = request.data or {}
@@ -123,7 +138,10 @@ class CampaignViewSet(CampaignSerializerMixin, viewsets.GenericViewSet):
             spent=data.get("spent", 0) or 0,
             active=data.get("active", True),
         )
-        return Response(self.serialize(obj), status=status.HTTP_201_CREATED)
+        return Response(
+            _serialize_campaign(obj),
+            status=status.HTTP_201_CREATED,
+        )
 
     def partial_update(self, request, pk=None):
         obj = Campaign.objects.filter(pk=pk).first()
@@ -149,7 +167,7 @@ class CampaignViewSet(CampaignSerializerMixin, viewsets.GenericViewSet):
             if src in data:
                 setattr(obj, dst, data[src])
         obj.save()
-        return Response(self.serialize(obj))
+        return Response(_serialize_campaign(obj))
 
     def destroy(self, request, pk=None):
         obj = Campaign.objects.filter(pk=pk).first()

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views_reports import ReportsView
+from .views_success_fee import SuccessFeeView
 from .views import (
     FinancialDashboardView,
     MyTransactionsView,
@@ -24,5 +25,10 @@ urlpatterns = [
         "my-transactions/",
         MyTransactionsView.as_view(),
         name="my-transactions",
+    ),
+    path(
+        "success-fee/",
+        SuccessFeeView.as_view(),
+        name="success-fee",
     ),
 ]

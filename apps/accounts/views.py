@@ -8,6 +8,7 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 from rest_framework import permissions, status
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -454,5 +455,54 @@ class PasswordResetView(APIView):
                     "Tafadhali ingia upya kwa nenosiri jipya."
                 ),
             },
+            status=status.HTTP_200_OK,
+        )
+
+# ============================================================
+# AVATAR UPLOAD / REMOVE
+# ============================================================
+
+class AvatarUploadView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        f = request.FILES.get("avatar")
+        if not f:
+            return Response(
+                {"detail": "Picha inahitajika."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        allowed = ["image/jpeg", "image/png", "image/webp"]
+        if f.content_type not in allowed:
+            return Response(
+                {"detail": "Aina ya picha hairuhusiwi. Tumia JPG, PNG au WEBP."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if f.size > 3 * 1024 * 1024:
+            return Response(
+                {"detail": "Picha haiwezi kuzidi 3 MB."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        request.user.avatar = f
+        request.user.save(update_fields=["avatar", "updated_at"])
+
+        url = None
+        if request.user.avatar:
+            url = request.build_absolute_uri(request.user.avatar.url)
+
+        return Response(
+            {"detail": "Picha imepakiwa.", "avatar": url},
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request):
+        if request.user.avatar:
+            request.user.avatar.delete(save=False)
+            request.user.avatar = None
+            request.user.save(update_fields=["avatar", "updated_at"])
+        return Response(
+            {"detail": "Picha imeondolewa."},
             status=status.HTTP_200_OK,
         )

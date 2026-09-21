@@ -68,12 +68,16 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
         )
 
     # Lock and validate the listing.
+    # accept_offer() may have already set it to RESERVED.
     listing = Listing.objects.select_for_update().get(
         pk=transaction.listing_id,
     )
-    if listing.status != Listing.Status.AVAILABLE:
+    if listing.status not in [
+        Listing.Status.AVAILABLE,
+        Listing.Status.RESERVED,
+    ]:
         raise ValidationError(
-            "Tangazo hili halipo kwenye hali ya AVAILABLE."
+            "Tangazo hili halipo kwenye hali ya AVAILABLE au RESERVED."
         )
 
     try:
@@ -148,9 +152,13 @@ def confirm_reservation_payment(*, reservation, payment_reference):
         pk=transaction.listing_id,
     )
 
-    if listing.status != Listing.Status.AVAILABLE:
+    if listing.status not in [
+        Listing.Status.AVAILABLE,
+        Listing.Status.RESERVED,
+    ]:
         raise ValidationError(
-            "Tangazo hili halipo tena kwenye hali ya AVAILABLE."
+            "Tangazo hili halipo tena kwenye hali ya "
+            "AVAILABLE au RESERVED."
         )
 
     now = timezone.now()

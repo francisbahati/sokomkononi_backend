@@ -57,6 +57,13 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
         verbose_name="Imethibitishwa",
     )
 
+    avatar = models.ImageField(
+        upload_to="avatars/",
+        null=True,
+        blank=True,
+        verbose_name="Picha ya wasifu",
+    )
+
     is_active = models.BooleanField(
         default=True,
         verbose_name="Ipo hai",

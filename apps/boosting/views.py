@@ -2,7 +2,6 @@ from django.shortcuts import get_object_or_404
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
@@ -25,17 +24,27 @@ from .services.boost import (
 )
 
 
+class IsAdminOrReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_staff
+        )
+
+
 class BoostPackageViewSet(
     SoftDeleteViewSetMixin,
-    viewsets.ReadOnlyModelViewSet,
+    viewsets.ModelViewSet,
 ):
     serializer_class = BoostPackageSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsAdminOrReadOnly]
 
     queryset = BoostPackage.objects.none()
 
     def get_queryset(self):
-        # drf-spectacular calls get_queryset() during schema generation.
         if getattr(self, "swagger_fake_view", False):
             return BoostPackage.objects.none()
 
@@ -63,11 +72,9 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
 
     http_method_names = ["get", "post", "head", "options"]
 
-    # Placeholder for drf-spectacular.
     queryset = ListingBoost.objects.none()
 
     def get_queryset(self):
-        # drf-spectacular calls get_queryset() during schema generation.
         if getattr(self, "swagger_fake_view", False):
             return ListingBoost.objects.none()
 
@@ -108,9 +115,7 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    @extend_schema(
-        responses=ListingBoostSerializer(many=True),
-    )
+    @extend_schema(responses=ListingBoostSerializer(many=True))
     @action(detail=False, methods=["get"], url_path="my")
     def my_boosts(self, request):
         qs = (

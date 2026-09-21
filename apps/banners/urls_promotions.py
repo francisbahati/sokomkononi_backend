@@ -20,7 +20,7 @@ urlpatterns = [
     path(
         "campaigns/<int:pk>/",
         CampaignViewSet.as_view({
-            "get": "list",
+            "get": "retrieve",
             "patch": "partial_update",
             "delete": "destroy",
         }),

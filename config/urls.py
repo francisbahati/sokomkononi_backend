@@ -22,6 +22,7 @@ urlpatterns = [
 
     # Auth & apps
     path("api/auth/", include("apps.accounts.urls")),
+    path("api/contact/", include("apps.contact.urls")),
     path("api/categories/", include("apps.categories.urls")),
     path("api/listings/", include("apps.listings.urls")),
     path("api/boosting/", include("apps.boosting.urls")),

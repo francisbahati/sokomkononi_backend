@@ -180,21 +180,17 @@ class LogoutView(APIView):
         responses={205: OpenApiResponse(description="Logout imefanikiwa.")},
     )
     def post(self, request):
-        refresh_token = request.data.get("refresh")
+        # Logout is idempotent — client-side token deletion is what
+        # matters. Blacklist the refresh token only if one is supplied.
+        refresh_token = None
+        if isinstance(request.data, dict):
+            refresh_token = request.data.get("refresh")
 
-        if not refresh_token:
-            return Response(
-                {"detail": "Refresh token inahitajika."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            RefreshToken(refresh_token).blacklist()
-        except TokenError:
-            return Response(
-                {"detail": "Refresh token si sahihi au imekwisha muda."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if refresh_token:
+            try:
+                RefreshToken(refresh_token).blacklist()
+            except TokenError:
+                pass
 
         return Response(
             {"message": "Umetoka kwenye akaunti."},

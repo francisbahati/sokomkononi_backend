@@ -25,6 +25,10 @@ urlpatterns = [
     path("api/contact/", include("apps.contact.urls")),
     path("api/categories/", include("apps.categories.urls")),
     path("api/listings/", include("apps.listings.urls")),
+    path(
+        "api/admin/listings/",
+        include("apps.listings.urls_admin_moderation"),
+    ),
     path("api/boosting/", include("apps.boosting.urls")),
     path("api/deals/", include("apps.deals.urls")),
     path("api/transactions/", include("apps.transactions.urls")),

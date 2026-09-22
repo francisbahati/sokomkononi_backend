@@ -115,8 +115,8 @@ urlpatterns = [
     path("<int:listing_id>/images/<int:pk>/", listing_image_detail,
          name="listing-image-detail"),
 
-    path("<int:listing_id>/fee/", listing_fee_view, name="listing-fee"),
-    path("<int:listing_id>/fee/pay/", listing_fee_payment_view,
+    path("<str:listing_id>/fee/", listing_fee_view, name="listing-fee"),
+    path("<str:listing_id>/fee/pay/", listing_fee_payment_view,
          name="listing-fee-pay"),
 
     path("<int:listing_id>/approve/", admin_approve_listing,

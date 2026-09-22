@@ -65,6 +65,7 @@ from .services.listing_moderation import (
 )
 
 from .services.listing_payment import mark_listing_fee_as_paid
+from .views_helpers import require_int_listing_id
 
 
 # ============================================================================
@@ -820,6 +821,9 @@ class ListingFeeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, listing_id):
+        listing_id, err = require_int_listing_id(listing_id)
+        if err:
+            return err
         listing = get_object_or_404(Listing, id=listing_id)
 
         if (
@@ -870,6 +874,9 @@ class ListingFeePaymentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, listing_id):
+        listing_id, err = require_int_listing_id(listing_id)
+        if err:
+            return err
         listing = get_object_or_404(Listing, id=listing_id)
 
         if (

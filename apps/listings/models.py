@@ -47,7 +47,7 @@ class Listing(SoftDeleteModel):
     price = models.DecimalField(
         max_digits=15,
         decimal_places=2,
-        validators=[MinValueValidator(0)],
+        validators=[MinValueValidator(Decimal("0"))],
         verbose_name="Bei",
     )
 
@@ -262,7 +262,7 @@ class PropertyDetails(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(0)],
+        validators=[MinValueValidator(Decimal("0"))],
         verbose_name="Ukubwa (m²)",
     )
 
@@ -336,7 +336,7 @@ class LandDetails(models.Model):
     size = models.DecimalField(
         max_digits=15,
         decimal_places=2,
-        validators=[MinValueValidator(0)],
+        validators=[MinValueValidator(Decimal("0"))],
         verbose_name="Ukubwa",
     )
 
@@ -557,7 +557,7 @@ class BusinessDetails(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(0)],
+        validators=[MinValueValidator(Decimal("0"))],
         verbose_name="Mapato ya mwezi",
     )
 
@@ -566,7 +566,7 @@ class BusinessDetails(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(0)],
+        validators=[MinValueValidator(Decimal("0"))],
         verbose_name="Gharama za mwezi",
     )
 
@@ -674,7 +674,7 @@ class EquipmentDetails(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(0)],
+        validators=[MinValueValidator(Decimal("0"))],
         verbose_name="Uzito (kg)",
     )
 

@@ -211,6 +211,19 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         return [permission() for permission in permission_classes]
 
+    def create(self, request, *args, **kwargs):
+        """
+        Override create to return ListingDetailSerializer (with id) instead
+        of ListingWriteSerializer (no id). Frontend needs the id to
+        upload images, pay fees, etc.
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        instance = serializer.instance
+        output = ListingDetailSerializer(instance, context={"request": request})
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
     def perform_create(self, serializer):
         serializer.save(
             seller=self.request.user,
@@ -598,7 +611,10 @@ class ListingImageViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def create(self, request, *args, **kwargs):
-        listing = get_object_or_404(Listing, pk=kwargs["listing_id"])
+        listing_id, err = require_int_listing_id(kwargs.get("listing_id"))
+        if err:
+            return err
+        listing = get_object_or_404(Listing, pk=listing_id)
 
         if (
             not request.user.is_staff

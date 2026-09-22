@@ -110,9 +110,9 @@ urlpatterns = [
     path("<int:listing_id>/equipment-details/detail/", equipment_detail,
          name="equipment-details"),
 
-    path("<int:listing_id>/images/", listing_image_list,
+    path("<str:listing_id>/images/", listing_image_list,
          name="listing-image-list"),
-    path("<int:listing_id>/images/<int:pk>/", listing_image_detail,
+    path("<str:listing_id>/images/<int:pk>/", listing_image_detail,
          name="listing-image-detail"),
 
     path("<str:listing_id>/fee/", listing_fee_view, name="listing-fee"),

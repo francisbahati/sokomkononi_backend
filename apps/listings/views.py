@@ -158,7 +158,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         "views_count",
     ]
 
-    ordering = ["-created_at"]
+    ordering = ["-leading_until", "-created_at"]
 
     queryset = Listing.objects.select_related(
         "seller",
@@ -957,7 +957,6 @@ class ListingFeePaymentView(APIView):
 
 class AdminPendingListingsView(GenericAPIView):
     permission_classes = [permissions.IsAdminUser]
-    pagination_class = None
 
     def get(self, request):
         listings = (
@@ -968,9 +967,15 @@ class AdminPendingListingsView(GenericAPIView):
             .order_by("-created_at")
         )
 
+        page = self.paginate_queryset(listings)
         serializer = AdminPendingListingSerializer(
-            listings, many=True, context={"request": request},
+            page if page is not None else listings,
+            many=True,
+            context={"request": request},
         )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+
         return Response(
             {"count": listings.count(), "results": serializer.data},
             status=status.HTTP_200_OK,

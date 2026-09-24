@@ -2,6 +2,7 @@ from django.urls import path
 
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from .social_views import SocialLoginView
 from .views import (
     AvatarUploadView,
     ChangePasswordView,
@@ -30,6 +31,7 @@ urlpatterns = [
     path("verify-otp/", VerifyOTPView.as_view(), name="verify-otp"),
 
     path("login/", LoginView.as_view(), name="login"),
+    path("social/", SocialLoginView.as_view(), name="social-login"),
     path(
         "token/refresh/",
         ThrottledTokenRefreshView.as_view(),

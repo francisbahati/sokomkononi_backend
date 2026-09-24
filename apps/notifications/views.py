@@ -150,6 +150,28 @@ class NotificationViewSet(
     @action(
         detail=False,
         methods=["get"],
+        url_path="trash",
+    )
+    def trash(self, request):
+        # Only the owner's deleted notifications, unless the caller is
+        # an admin who explicitly wants the global view (?scope=all).
+        if request.user.is_staff and request.query_params.get("scope") == "all":
+            qs = Notification.all_objects.filter(is_deleted=True)
+        else:
+            qs = Notification.all_objects.filter(
+                recipient=request.user, is_deleted=True,
+            )
+        page = self.paginate_queryset(qs)
+        serializer = NotificationSerializer(
+            page if page is not None else qs, many=True,
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=["get"],
         url_path="unread-count",
     )
     def unread_count(self, request):

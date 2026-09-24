@@ -49,10 +49,17 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key-change-me")
 DEBUG = env_bool("DEBUG", False)
 
 # Fail loudly if production is running with the dev key.
-if not DEBUG and SECRET_KEY == "insecure-dev-key-change-me":
-    raise ImproperlyConfigured(
-        "SECRET_KEY must be set to a secure value when DEBUG=False."
-    )
+if not DEBUG:
+    if SECRET_KEY == "insecure-dev-key-change-me":
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be set to a secure value when DEBUG=False."
+        )
+    if len(SECRET_KEY) < 50:
+        raise ImproperlyConfigured(
+            "SECRET_KEY must be at least 50 characters in production. "
+            "Generate one with: python -c "
+            "'from django.core.management.utils import get_random_secret_key as g; print(g())'"
+        )
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
@@ -259,6 +266,7 @@ CORS_ALLOW_HEADERS = [
     "user-agent",
     "x-csrftoken",
     "x-requested-with",
+    "x-access-token",
 ]
 
 CORS_ALLOW_METHODS = [
@@ -381,6 +389,12 @@ ADMINS = [
 MANAGERS = ADMINS
 
 # ------------------------------------------------------------
+# SOCIAL LOGIN
+# ------------------------------------------------------------
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+APPLE_CLIENT_ID = os.environ.get("APPLE_CLIENT_ID", "")
+
+# ------------------------------------------------------------
 # SMS (NextSMS)
 # ------------------------------------------------------------
 PYNEXTSMS_TOKEN = os.environ.get("PYNEXTSMS_TOKEN", "")
@@ -465,7 +479,6 @@ if not DEBUG:
     SECURE_HSTS_PRELOAD = True
 
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_BROWSER_XSS_FILTER = True
     X_FRAME_OPTIONS = "DENY"
 
     SECURE_REFERRER_POLICY = "same-origin"

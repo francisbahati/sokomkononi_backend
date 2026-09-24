@@ -3,6 +3,8 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.banners.views_admin import AdminPromotionsView
+
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -53,6 +55,13 @@ urlpatterns = [
     path(
         "api/admin/reports/",
         include("apps.finance.urls_admin_reports"),
+    ),
+
+    # Admin promotions alias (frontend calls /api/admin/promotions/)
+    path(
+        "api/admin/promotions/",
+        AdminPromotionsView.as_view(),
+        name="admin-promotions-alias",
     ),
 
     # Commerce

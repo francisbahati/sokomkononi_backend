@@ -12,6 +12,7 @@ from .services import consume_credit, get_credit, has_service
 
 
 class UserCreditViewSet(viewsets.GenericViewSet):
+    serializer_class = UserCreditSerializer
     """
         GET     /api/credits/                my credits (dict summary)
         GET     /api/credits/all/            flat list

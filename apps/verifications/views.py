@@ -169,6 +169,21 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 {"detail": "Faili linahitajika."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        allowed = {
+            "image/jpeg", "image/png", "image/webp", "application/pdf",
+        }
+        if f.content_type not in allowed:
+            return Response(
+                {"detail": "Aina ya faili hairuhusiwi. Tumia JPG, PNG, WEBP au PDF."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if f.size > 10 * 1024 * 1024:
+            return Response(
+                {"detail": "Faili haliwezi kuzidi 10 MB."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         doc = VerificationDocument.objects.create(
             request=obj,
             file=f,

@@ -4,11 +4,10 @@ Flexible JWT authentication.
 Reads the access token from any of:
   1. Authorization: Bearer <token>
   2. Cookie:         access_token=<token>
-  3. Query string:   ?token=<token>
-  4. Header:         X-Access-Token: <token>
+  3. Header:         X-Access-Token: <token>
 
-Security is unchanged — the token must still be a valid, unexpired
-JWT and the user must still pass every permission check.
+NOTE: The ?token= query-string source was removed for security — it
+leaks into server logs, browser history, and Referer headers.
 """
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
@@ -22,7 +21,6 @@ class FlexibleJWTAuthentication(JWTAuthentication):
 
         raw = (
             request.COOKIES.get("access_token")
-            or request.query_params.get("token")
             or request.META.get("HTTP_X_ACCESS_TOKEN")
         )
         if not raw:

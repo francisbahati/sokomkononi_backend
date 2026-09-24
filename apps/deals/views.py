@@ -237,7 +237,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def accept_offer(self, request, pk=None):
         deal_room = get_object_or_404(
             DealRoom.objects
-            .select_for_update(of=("self",))
+            .select_for_update()
             .select_related("listing", "listing__category", "buyer", "seller"),
             pk=pk,
         )
@@ -320,7 +320,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         # Cancel sibling Deal Rooms for the same listing
         sibling_rooms = (
             DealRoom.objects
-            .select_for_update(of=("self",))
+            .select_for_update()
             .filter(
                 listing=deal_room.listing,
                 status__in=[
@@ -371,7 +371,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         deal_room = get_object_or_404(
             DealRoom.objects
-            .select_for_update(of=("self",))
+            .select_for_update()
             .select_related("listing", "listing__category", "buyer", "seller"),
             pk=pk,
         )

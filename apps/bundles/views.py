@@ -54,6 +54,7 @@ class BundleViewSet(viewsets.ModelViewSet):
 
 
 class BundlePurchaseViewSet(viewsets.GenericViewSet):
+    serializer_class = BundlePurchaseSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):

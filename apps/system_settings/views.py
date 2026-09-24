@@ -90,12 +90,6 @@ class PlatformPolicyView(viewsets.ViewSet):
 
 
 class SubAdminViewSet(viewsets.GenericViewSet):
-    """
-        GET     /api/system-settings/sub-admins/           list
-        POST    /api/system-settings/sub-admins/           create
-        DELETE  /api/system-settings/sub-admins/{id}/      remove
-    """
-
     serializer_class = StaffAssignmentSerializer
     permission_classes = [IsAdminUser]
 
@@ -121,17 +115,13 @@ class SubAdminViewSet(viewsets.GenericViewSet):
         user = get_object_or_404(User, pk=user_id)
         role = get_object_or_404(Role, key=role_key)
 
-        # Make sure the user is flagged as staff so IsAdminUser works.
         if not user.is_staff:
             user.is_staff = True
             user.save(update_fields=["is_staff", "updated_at"])
 
         obj, _ = StaffAssignment.objects.update_or_create(
             user=user,
-            defaults={
-                "role": role,
-                "active": data.get("active", True),
-            },
+            defaults={"role": role, "active": data.get("active", True)},
         )
         return Response(
             StaffAssignmentSerializer(obj).data,
@@ -139,11 +129,9 @@ class SubAdminViewSet(viewsets.GenericViewSet):
         )
 
     def destroy(self, request, pk=None):
+        # Only the RBAC assignment is removed. `is_staff` is NOT cleared
+        # here because the user may still be a superuser or an admin via
+        # another path. Revoke is_staff explicitly if you need to.
         obj = get_object_or_404(StaffAssignment, pk=pk)
-        user = obj.user
         obj.delete()
-        # Optionally revoke staff status if no other assignment remains.
-        if not StaffAssignment.objects.filter(user=user).exists():
-            user.is_staff = False
-            user.save(update_fields=["is_staff", "updated_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)

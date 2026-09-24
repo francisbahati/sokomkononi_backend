@@ -159,6 +159,20 @@ class TrashEmptyAllView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request):
+        # Require an explicit confirmation phrase so a stray click
+        # cannot wipe every soft-deleted row across every app.
+        body = request.data if isinstance(request.data, dict) else {}
+        if body.get("confirm") != "DELETE ALL":
+            return Response(
+                {
+                    "detail": (
+                        'Tuma {"confirm": "DELETE ALL"} ili kuthibitisha. '
+                        "Operesheni hii haiwezi kurudishwa."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         deleted = 0
         skipped = 0
         for model in apps.get_models():

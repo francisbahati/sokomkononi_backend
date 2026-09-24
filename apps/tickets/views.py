@@ -33,7 +33,7 @@ class IsAdminUser(permissions.BasePermission):
 
 
 def generate_ticket_code():
-    return f"TKT-{secrets.token_hex(3).upper()}"
+    return f"TKT-{secrets.token_hex(5).upper()}"
 
 
 class TicketViewSet(viewsets.GenericViewSet):

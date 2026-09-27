@@ -71,6 +71,12 @@ class RegisterView(APIView):
         otp_sent = True
         try:
             send_registration_otp(pending, verification_type)
+        except ValidationError as exc:
+            # Rate limit ("subiri sekunde 60") — return 429 so the client can wait.
+            return Response(
+                getattr(exc, "detail", {"detail": str(exc)}),
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
         except Exception:
             otp_sent = False
             logger.exception(

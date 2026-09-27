@@ -32,7 +32,7 @@ def mark_listing_fee_as_paid(listing, payment_reference):
     # process the same listing simultaneously.
     listing = (
         Listing.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("seller", "category")
         .get(pk=listing.pk)
     )

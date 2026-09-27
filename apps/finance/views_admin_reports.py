@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.db.models import Count, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.response import Response
@@ -41,19 +42,16 @@ def _listings_growth(now):
     return out
 
 
+from dateutil.relativedelta import relativedelta
+
+
 def _revenue_by_month(now):
     qs = Transaction.objects.filter(status=Transaction.Status.COMPLETED)
+    anchor = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     out = []
     for i in range(5, -1, -1):
-        month_start = (now - timedelta(days=30 * i)).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0,
-        )
-        if month_start.month == 12:
-            month_end = month_start.replace(
-                year=month_start.year + 1, month=1,
-            )
-        else:
-            month_end = month_start.replace(month=month_start.month + 1)
+        month_start = anchor - relativedelta(months=i)
+        month_end = month_start + relativedelta(months=1)
         total = qs.filter(
             completed_at__gte=month_start, completed_at__lt=month_end,
         ).aggregate(s=Sum("agreed_price"))["s"] or 0
@@ -155,7 +153,7 @@ class TopSellersView(APIView):
     def get(self, request):
         qs = (
             Listing.objects.values("seller__id", "seller__name")
-            .annotate(views=Sum("views_count"), listings=Count("id"))
+            .annotate(views=Coalesce(Sum("views_count"), 0), listings=Count("id"))
             .order_by("-views")[:5]
         )
         return Response([

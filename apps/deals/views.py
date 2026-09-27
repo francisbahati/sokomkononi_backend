@@ -114,7 +114,9 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 })
             raise
 
-        notify_deal_room_created(deal_room=deal_room)
+        transaction.on_commit(
+            lambda: notify_deal_room_created(deal_room=deal_room)
+        )
 
         # Auto-create a Lead for the seller
         try:
@@ -209,7 +211,9 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         else:
             deal_room.save(update_fields=["updated_at"])
 
-        notify_new_offer(deal_room=deal_room, offer=new_offer)
+        transaction.on_commit(
+            lambda: notify_new_offer(deal_room=deal_room, offer=new_offer)
+        )
 
         # Update the lead message count for this buyer/listing pair
         try:
@@ -237,7 +241,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def accept_offer(self, request, pk=None):
         deal_room = get_object_or_404(
             DealRoom.objects
-            .select_for_update()
+            .select_for_update(of=("self",))
             .select_related("listing", "listing__category", "buyer", "seller"),
             pk=pk,
         )
@@ -265,7 +269,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         offer_id = serializer.validated_data["offer_id"]
         offer = (
             NegotiationOffer.objects
-            .select_for_update()
+            .select_for_update(of=("self",))
             .select_related("offered_by")
             .filter(pk=offer_id, deal_room=deal_room)
             .first()
@@ -344,16 +348,24 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 status=NegotiationOffer.Status.CANCELLED,
                 updated_at=timezone.now(),
             )
-            notify_deal_room_cancelled(
-                deal_room=sib,
-                cancelled_by=request.user,
-                reason="Tangazo limeshachukuliwa na mnunuzi mwingine.",
+            transaction.on_commit(
+                lambda sib=sib: notify_deal_room_cancelled(
+                    deal_room=sib,
+                    cancelled_by=request.user,
+                    reason="Tangazo limeshachukuliwa na mnunuzi mwingine.",
+                )
             )
 
-        notify_offer_accepted(deal_room=deal_room, offer=offer)
+        transaction.on_commit(
+            lambda: notify_offer_accepted(deal_room=deal_room, offer=offer)
+        )
 
         for rejected in sibling_list:
-            notify_offer_rejected(deal_room=deal_room, offer=rejected)
+            transaction.on_commit(
+                lambda rejected=rejected: notify_offer_rejected(
+                    deal_room=deal_room, offer=rejected
+                )
+            )
 
         return Response(
             DealRoomDetailSerializer(
@@ -371,7 +383,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         deal_room = get_object_or_404(
             DealRoom.objects
-            .select_for_update()
+            .select_for_update(of=("self",))
             .select_related("listing", "listing__category", "buyer", "seller"),
             pk=pk,
         )
@@ -409,10 +421,12 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             updated_at=timezone.now(),
         )
 
-        notify_deal_room_cancelled(
-            deal_room=deal_room,
-            cancelled_by=request.user,
-            reason=cancellation_reason,
+        transaction.on_commit(
+            lambda: notify_deal_room_cancelled(
+                deal_room=deal_room,
+                cancelled_by=request.user,
+                reason=cancellation_reason,
+            )
         )
 
         return Response(

@@ -5,7 +5,6 @@ Bundle purchase flow:
     3. After payment confirmation, mark_purchase_paid() is called
     4. Credits + services are added to the user via apps.credits
 """
-
 from datetime import timedelta
 
 from django.db import transaction
@@ -22,7 +21,21 @@ def create_purchase(*, user, bundle, payment_reference=""):
     if not bundle.active:
         raise ValidationError("Kifurushi hiki hakipo active.")
 
-    purchase = BundlePurchase.objects.create(
+    # Prevent duplicate open PENDING for the same (user, bundle).
+    existing_pending = (
+        BundlePurchase.objects
+        .select_for_update()
+        .filter(
+            user=user,
+            bundle=bundle,
+            status=BundlePurchase.Status.PENDING,
+        )
+        .first()
+    )
+    if existing_pending:
+        return existing_pending
+
+    return BundlePurchase.objects.create(
         user=user,
         bundle=bundle,
         amount=bundle.price,
@@ -31,19 +44,37 @@ def create_purchase(*, user, bundle, payment_reference=""):
         status=BundlePurchase.Status.PENDING,
         payment_reference=(payment_reference or "").strip() or None,
     )
-    return purchase
 
 
 @transaction.atomic
 def mark_purchase_paid(*, purchase, payment_reference=""):
-    if purchase.status == BundlePurchase.Status.PAID:
+    purchase = (
+        BundlePurchase.objects
+        .select_for_update()
+        .select_related("bundle")
+        .get(pk=purchase.pk)
+    )
+
+    # Idempotent retry: same reference → return existing.
+    if (purchase.status == BundlePurchase.Status.PAID
+            and purchase.payment_reference == (payment_reference or "").strip()):
         return purchase
+
+    if purchase.status == BundlePurchase.Status.PAID:
+        raise ValidationError("Purchase hii tayari imelipiwa.")
+
+    if purchase.status in (
+        BundlePurchase.Status.FAILED,
+        BundlePurchase.Status.REFUNDED,
+    ):
+        raise ValidationError("Purchase hii haiwezi kulipiwa.")
 
     now = timezone.now()
     expires_at = now + timedelta(days=purchase.bundle.validity_days)
 
-    if payment_reference:
-        purchase.payment_reference = payment_reference.strip()
+    ref = (payment_reference or "").strip()
+    if ref:
+        purchase.payment_reference = ref
     purchase.status = BundlePurchase.Status.PAID
     purchase.paid_at = now
     purchase.expires_at = expires_at
@@ -51,7 +82,6 @@ def mark_purchase_paid(*, purchase, payment_reference=""):
         "status", "payment_reference", "paid_at", "expires_at",
     ])
 
-    # Grant credits + services
     from apps.credits.services import grant_bundle_credits
     grant_bundle_credits(
         user=purchase.user,

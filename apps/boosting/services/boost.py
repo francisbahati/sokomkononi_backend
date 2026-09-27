@@ -68,7 +68,7 @@ def validate_boost_request(*, listing, user, package):
 def create_boost(*, listing, user, package):
     listing = (
         Listing.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("seller")
         .get(pk=listing.pk)
     )
@@ -102,7 +102,7 @@ def mark_boost_as_paid(*, boost, payment_reference):
 
     boost = (
         ListingBoost.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "seller", "package")
         .get(pk=boost.pk)
     )
@@ -147,7 +147,7 @@ def mark_boost_as_paid(*, boost, payment_reference):
 def activate_boost(*, boost):
     boost = (
         ListingBoost.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "seller", "package")
         .get(pk=boost.pk)
     )
@@ -238,7 +238,7 @@ def activate_boost(*, boost):
 def expire_boost(*, boost):
     boost = (
         ListingBoost.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing")
         .get(pk=boost.pk)
     )
@@ -271,7 +271,7 @@ def expire_boost(*, boost):
 def cancel_boost(*, boost, user):
     boost = (
         ListingBoost.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "seller")
         .get(pk=boost.pk)
     )
@@ -312,7 +312,7 @@ def pay_boost_with_credits(*, boost, user):
 
     boost = (
         ListingBoost.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "seller", "package")
         .get(pk=boost.pk)
     )

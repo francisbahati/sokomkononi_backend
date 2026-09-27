@@ -148,6 +148,9 @@ class StaffViewSet(viewsets.GenericViewSet):
         return Response(StaffAssignmentSerializer(obj).data)
 
     def destroy(self, request, pk=None):
+        # Removes the RBAC assignment ONLY. is_staff is intentionally
+        # preserved — a user may still be a superuser or admin via
+        # another path. Revoke is_staff explicitly if you need to.
         obj = get_object_or_404(StaffAssignment, pk=pk)
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

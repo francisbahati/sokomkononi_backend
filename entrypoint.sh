@@ -56,6 +56,12 @@ else
     echo "Skipping Redis wait — CELERY_BROKER_URL is not set."
 fi
 
+if [ "${SOKO_SKIP_INIT:-0}" = "1" ]; then
+    echo "SOKO_SKIP_INIT=1 — skipping migrate/collectstatic/superuser."
+    echo "Starting application..."
+    exec "$@"
+fi
+
 echo "Applying database migrations..."
 python manage.py migrate --noinput
 

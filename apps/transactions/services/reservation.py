@@ -18,6 +18,7 @@ from .notifications import (
 )
 
 
+RESERVATION_PAYMENT_WINDOW_HOURS = 24  # buyer must pay within 24h
 DEFAULT_RESERVATION_HOURS = 48
 DEFAULT_INSPECTION_HOURS = 24
 RESERVATION_DEPOSIT_PERCENTAGE = Decimal("10.00")
@@ -43,7 +44,7 @@ def calculate_reservation_deposit(*, agreed_price):
 def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_HOURS):
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "buyer", "seller")
         .get(pk=transaction.pk)
     )
@@ -94,12 +95,15 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
         agreed_price=transaction.agreed_price,
     )
 
+    now = timezone.now()
     reservation = Reservation.objects.create(
         transaction=transaction,
         deposit_amount=deposit_amount,
         duration_hours=duration_hours,
         payment_status=Reservation.PaymentStatus.PENDING,
         status=Reservation.Status.PENDING_PAYMENT,
+        # Reservation expires if not paid within the window.
+        expires_at=now + timedelta(hours=RESERVATION_PAYMENT_WINDOW_HOURS),
     )
 
     db_transaction.on_commit(
@@ -112,7 +116,7 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
 def confirm_reservation_payment(*, reservation, payment_reference):
     reservation = (
         Reservation.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related(
             "transaction",
             "transaction__listing",
@@ -124,7 +128,7 @@ def confirm_reservation_payment(*, reservation, payment_reference):
 
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "buyer", "seller")
         .get(pk=reservation.transaction_id)
     )
@@ -191,7 +195,7 @@ def confirm_reservation_payment(*, reservation, payment_reference):
 def start_inspection_period(*, transaction, user, duration_hours=DEFAULT_INSPECTION_HOURS):
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "buyer", "seller")
         .get(pk=transaction.pk)
     )
@@ -256,7 +260,7 @@ def start_inspection_period(*, transaction, user, duration_hours=DEFAULT_INSPECT
 def expire_reservation(*, reservation):
     reservation = (
         Reservation.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related(
             "transaction",
             "transaction__listing",
@@ -269,7 +273,7 @@ def expire_reservation(*, reservation):
 
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "buyer", "seller")
         .get(pk=reservation.transaction_id)
     )
@@ -329,7 +333,7 @@ def expire_reservation(*, reservation):
 def expire_inspection_period(*, inspection):
     inspection = (
         InspectionPeriod.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related(
             "transaction",
             "transaction__buyer",
@@ -341,7 +345,7 @@ def expire_inspection_period(*, inspection):
 
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("buyer", "seller", "listing")
         .get(pk=inspection.transaction_id)
     )

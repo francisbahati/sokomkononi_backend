@@ -205,5 +205,8 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 {"detail": "Huna ruhusa."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        obj.delete(by=request.user, reason="Verification request removed")
+        return Response(
+            {"detail": "Ombi limewekwa kwenye kikapu."},
+            status=status.HTTP_200_OK,
+        )

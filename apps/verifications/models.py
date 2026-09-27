@@ -1,8 +1,10 @@
 from django.conf import settings
 from django.db import models
 
+from apps.core.models import SoftDeleteModel
 
-class VerificationRequest(models.Model):
+
+class VerificationRequest(SoftDeleteModel):
     """
     One verification request. Covers sellers, buyers, properties,
     vehicles and businesses. Admin reviews and approves/rejects.
@@ -92,6 +94,8 @@ class VerificationRequest(models.Model):
     class Meta:
         db_table = "verification_requests"
         ordering = ["-created_at"]
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
         verbose_name = "Ombi la uthibitisho"
         verbose_name_plural = "Maombi ya uthibitisho"
 

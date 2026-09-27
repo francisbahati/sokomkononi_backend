@@ -3,12 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 
-class IsAdminUser(permissions.BasePermission):
+class IsSuperUser(permissions.BasePermission):
     def has_permission(self, request, view):
         return bool(
             request.user
             and request.user.is_authenticated
-            and request.user.is_staff
+            and request.user.is_superuser
         )
 
 
@@ -18,14 +18,17 @@ from .serializers import AuditLogSerializer
 
 class AuditLogViewSet(viewsets.GenericViewSet):
     """
-        GET     /api/audit/                   admin: list
-        GET     /api/audit/{id}/
-        DELETE  /api/audit/{id}/
-        POST    /api/audit/clear/             wipe all
+        GET /api/audit/            staff: list (read-only)
+        GET /api/audit/{id}/       staff: retrieve
+
+    Deletion and clearing are DELIBERATELY DISABLED via the API.
+    Audit logs are append-only. Use Django admin (superuser) if you
+    absolutely must intervene, and note that intervention elsewhere.
     """
 
     serializer_class = AuditLogSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [permissions.IsAdminUser]
+    http_method_names = ["get", "head", "options"]
 
     def get_queryset(self):
         qs = AuditLog.objects.select_related("admin_user")
@@ -37,9 +40,7 @@ class AuditLogViewSet(viewsets.GenericViewSet):
     def list(self, request):
         qs = self.get_queryset()
         page = self.paginate_queryset(qs)
-        serializer = AuditLogSerializer(
-            page if page is not None else qs, many=True,
-        )
+        serializer = AuditLogSerializer(page if page is not None else qs, many=True)
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
@@ -47,13 +48,3 @@ class AuditLogViewSet(viewsets.GenericViewSet):
     def retrieve(self, request, pk=None):
         obj = self.get_object()
         return Response(AuditLogSerializer(obj).data)
-
-    def destroy(self, request, pk=None):
-        obj = self.get_object()
-        obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @action(detail=False, methods=["post"], url_path="clear")
-    def clear(self, request):
-        AuditLog.objects.all().delete()
-        return Response({"detail": "Kumbukumbu zote zimefutwa."})

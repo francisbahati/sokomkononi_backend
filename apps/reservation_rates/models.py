@@ -42,3 +42,10 @@ class ReservationRate(models.Model):
 
     def __str__(self):
         return f"{self.tier} — TZS {self.fee}"
+
+
+# NOTE (2026): This model is currently NOT consulted by the
+# reservation flow. The active pricing is
+# apps/transactions/services/reservation.py:RESERVATION_DEPOSIT_PERCENTAGE
+# (10% of agreed_price). Either wire this model into create_reservation
+# or delete the app. See audit report M5.

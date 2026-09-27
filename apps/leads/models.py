@@ -1,10 +1,12 @@
 from django.conf import settings
 from django.db import models
 
+from apps.core.models import SoftDeleteModel
+
 from apps.listings.models import Listing
 
 
-class Lead(models.Model):
+class Lead(SoftDeleteModel):
     """
     A buyer's enquiry about a listing. Created automatically when a
     DealRoom is opened between a buyer and seller for that listing.
@@ -22,19 +24,19 @@ class Lead(models.Model):
 
     listing = models.ForeignKey(
         Listing,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="leads",
         verbose_name="Tangazo",
     )
     seller = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="received_leads",
         verbose_name="Muuzaji",
     )
     buyer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="sent_leads",
         verbose_name="Mnunuzi",
     )
@@ -100,6 +102,8 @@ class Lead(models.Model):
     class Meta:
         db_table = "leads"
         ordering = ["-created_at"]
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
         verbose_name = "Lead"
         verbose_name_plural = "Leads"
 

@@ -53,6 +53,7 @@ services:
       - .env
     environment:
       DEBUG: "False"
+      SOKO_SKIP_INIT: "1"
     command: celery -A config worker -l info --concurrency=2
     volumes:
       - media_files:/app/media
@@ -74,6 +75,7 @@ services:
       - .env
     environment:
       DEBUG: "False"
+      SOKO_SKIP_INIT: "1"
     command: celery -A config beat -l info
     volumes:
       - beat_data:/app/celerybeat

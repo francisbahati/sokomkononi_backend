@@ -47,9 +47,11 @@ def upsert_lead_from_deal_room(deal_room: DealRoom):
     )
 
     if not created:
+        from django.utils import timezone
         Lead.objects.filter(pk=lead.pk).update(
             message=initial_message or lead.message,
             message_count=models.F("message_count") + 1,
+            updated_at=timezone.now(),
         )
         lead.refresh_from_db()
 

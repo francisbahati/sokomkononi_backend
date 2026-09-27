@@ -75,7 +75,7 @@ def create_transaction_from_deal_room(*, deal_room, user):
 def submit_buyer_decision(*, transaction, buyer, decision, note=""):
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "buyer", "seller")
         .get(pk=transaction.pk)
     )
@@ -147,7 +147,7 @@ def upload_final_payment_proof(
 ):
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "buyer", "seller")
         .get(pk=transaction.pk)
     )
@@ -183,7 +183,7 @@ def upload_final_payment_proof(
 def seller_confirm_final_payment(*, transaction, seller):
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "deal_room", "buyer", "seller")
         .get(pk=transaction.pk)
     )
@@ -249,25 +249,33 @@ def seller_confirm_final_payment(*, transaction, seller):
     return transaction
 
 
+import logging
+logger = logging.getLogger(__name__)
+
+
 def _fire_completion_side_effects(*, transaction, listing):
     try:
         notify_payment_confirmed(transaction=transaction)
         notify_transaction_completed(transaction=transaction)
     except Exception:
-        pass
+        logger.exception(
+            "Completion notifications failed for transaction %s",
+            transaction.pk,
+        )
 
-    # Waiting-list hook (only if listing has entries)
     try:
         notify_waiting_buyers(listing=listing)
     except Exception:
-        pass
+        logger.exception(
+            "Waiting-list notification failed for listing %s", listing.pk
+        )
 
 
 @db_transaction.atomic
 def cancel_transaction(*, transaction, user, reason):
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("listing", "deal_room", "buyer", "seller")
         .get(pk=transaction.pk)
     )

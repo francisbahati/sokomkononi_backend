@@ -6,19 +6,19 @@ from .views_admin import AdminContentViewSet
 
 urlpatterns = [
     # Root content
-    path("", ContentViewSet.as_view({"get": "list"}), name="content-list"),
+    path("", ContentViewSet.as_view({"get": "list_content"}), name="content-list"),
 
     # Banners
     path(
         "banners/",
-        AdminContentViewSet.as_view({"get": "_list", "post": "_create"}),
+        AdminContentViewSet.as_view({"get": "list_content", "post": "create_content"}),
         {"kind": "banners"},
         name="content-banners",
     ),
     path(
         "banners/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "_detail", "patch": "_detail", "delete": "_detail",
+            "get": "detail_content", "patch": "detail_content", "delete": "detail_content",
         }),
         {"kind": "banners"},
         name="content-banner-detail",
@@ -27,14 +27,14 @@ urlpatterns = [
     # Testimonials
     path(
         "testimonials/",
-        AdminContentViewSet.as_view({"get": "_list", "post": "_create"}),
+        AdminContentViewSet.as_view({"get": "list_content", "post": "create_content"}),
         {"kind": "testimonials"},
         name="content-testimonials",
     ),
     path(
         "testimonials/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "_detail", "patch": "_detail", "delete": "_detail",
+            "get": "detail_content", "patch": "detail_content", "delete": "detail_content",
         }),
         {"kind": "testimonials"},
         name="content-testimonial-detail",
@@ -43,14 +43,14 @@ urlpatterns = [
     # FAQs
     path(
         "faqs/",
-        AdminContentViewSet.as_view({"get": "_list", "post": "_create"}),
+        AdminContentViewSet.as_view({"get": "list_content", "post": "create_content"}),
         {"kind": "faqs"},
         name="content-faqs",
     ),
     path(
         "faqs/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "_detail", "patch": "_detail", "delete": "_detail",
+            "get": "detail_content", "patch": "detail_content", "delete": "detail_content",
         }),
         {"kind": "faqs"},
         name="content-faq-detail",

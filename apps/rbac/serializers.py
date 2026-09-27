@@ -3,14 +3,37 @@ from rest_framework import serializers
 from .models import Role, StaffAssignment
 
 
-class RoleSerializer(serializers.ModelSerializer):
+class BilingualMixin:
+    BILINGUAL_FIELDS = {}
+
+    def to_internal_value(self, data):
+        data = dict(data)
+        for src, prefix in self.BILINGUAL_FIELDS.items():
+            val = data.pop(src, None)
+            if isinstance(val, dict):
+                if "sw" in val:
+                    data[f"{prefix}_sw"] = val["sw"]
+                if "en" in val:
+                    data[f"{prefix}_en"] = val["en"]
+        return super().to_internal_value(data)
+
+
+class RoleSerializer(BilingualMixin, serializers.ModelSerializer):
+    BILINGUAL_FIELDS = {"label": "label", "description": "description"}
+
     label = serializers.SerializerMethodField()
     description = serializers.SerializerMethodField()
+
+    label_sw = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    label_en = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    description_sw = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    description_en = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model = Role
         fields = [
             "id", "key", "label", "description",
+            "label_sw", "label_en", "description_sw", "description_en",
             "permissions", "is_system", "created_at",
         ]
         read_only_fields = ["id", "is_system", "created_at"]

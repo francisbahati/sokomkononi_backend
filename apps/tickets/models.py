@@ -1,8 +1,10 @@
 from django.conf import settings
 from django.db import models
 
+from apps.core.models import SoftDeleteModel
 
-class Ticket(models.Model):
+
+class Ticket(SoftDeleteModel):
     class Category(models.TextChoices):
         PAYMENT = "PAYMENT", "Payment"
         VERIFICATION = "VERIFICATION", "Verification"
@@ -79,6 +81,8 @@ class Ticket(models.Model):
     class Meta:
         db_table = "tickets"
         ordering = ["-created_at"]
+        base_manager_name = "all_objects"
+        default_manager_name = "objects"
         indexes = [
             models.Index(
                 fields=["status", "created_at"],

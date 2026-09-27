@@ -24,16 +24,6 @@ from .models import SoftDeleteModel
 logger = logging.getLogger(__name__)
 
 
-# Names of models that must never be auto-purged.
-AUDIT_PROTECTED_MODEL_NAMES = {
-    ("listings", "Listing"),
-    ("listings", "ListingFee"),
-    ("boosting", "ListingBoost"),
-    ("transactions", "Reservation"),
-    ("transactions", "InspectionPeriod"),
-    ("transactions", "Transaction"),
-    ("accounts", "OTPVerification"),
-}
 
 
 @shared_task(name="core.purge_soft_deleted")
@@ -66,6 +56,7 @@ def purge_soft_deleted():
 
         for obj in qs.iterator():
             try:
+                _audit_purge(model, obj)
                 obj.hard_delete()
                 deleted += 1
             except ProtectedError:
@@ -84,3 +75,19 @@ def purge_soft_deleted():
 
     logger.info("purge_soft_deleted: %s", report)
     return report
+
+def _audit_purge(model, obj):
+    """Write an AuditLog entry before a hard-delete via the purge task."""
+    try:
+        from apps.audit.models import AuditLog
+        AuditLog.objects.create(
+            action="core.purge_soft_deleted",
+            admin_user=None,
+            admin_name="system",
+            target=model.__name__,
+            target_id=obj.pk,
+            details=f"Hard-deleted after {SOFT_DELETE_RETENTION_DAYS} days in trash.",
+        )
+    except Exception:
+        logger.exception("Failed to write audit log for purge of %s#%s",
+                         model.__name__, obj.pk)

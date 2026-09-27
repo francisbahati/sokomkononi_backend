@@ -21,6 +21,7 @@ class Category(SoftDeleteModel):
     )
 
     image_url = models.URLField(
+        max_length=2000,
         blank=True,
         verbose_name="URL ya picha",
     )

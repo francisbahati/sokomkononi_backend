@@ -296,10 +296,11 @@ def send_registration_otp(pending, verification_type):
     )
 
     try:
+        from .tasks import send_email_otp_task, send_sms_otp_task
         if verification_type == "EMAIL":
-            send_email_otp(identifier, otp)
+            send_email_otp_task.delay(identifier, otp)
         else:
-            send_sms_otp(identifier, otp)
+            send_sms_otp_task.delay(identifier, otp)
     except Exception:
         otp_record.delete()
         raise
@@ -420,10 +421,11 @@ def send_password_reset_otp(user, base_type):
     )
 
     try:
+        from .tasks import send_password_reset_email_task, send_password_reset_sms_task
         if base_type == "EMAIL":
-            send_password_reset_email(identifier, otp)
+            send_password_reset_email_task.delay(identifier, otp)
         else:
-            send_password_reset_sms(identifier, otp)
+            send_password_reset_sms_task.delay(identifier, otp)
     except Exception:
         otp_record.delete()
         raise

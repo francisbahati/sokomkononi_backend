@@ -81,6 +81,13 @@ class Listing(SoftDeleteModel):
         verbose_name="Boost inaisha",
     )
 
+    leading_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Leading inaisha",
+    )
+
     views_count = models.PositiveIntegerField(
         default=0,
         verbose_name="Idadi ya kutazamwa",

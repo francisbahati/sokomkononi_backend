@@ -1,3 +1,4 @@
+from django.db import transaction as db_transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -57,10 +58,22 @@ class ConversationViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     def retrieve(self, request, pk=None):
-        conv = get_object_or_404(self.get_queryset(), pk=pk)
-        return Response(
-            ConversationSerializer(conv, context={"request": request}).data,
+        conv = get_object_or_404(
+            Conversation.objects
+            .select_related("listing", "buyer", "seller")
+            .prefetch_related("messages__sender"),
+            pk=pk,
         )
+        if (request.user.id not in (conv.buyer_id, conv.seller_id)
+                and not request.user.is_staff):
+            return Response({"detail": "Haipatikani."}, status=404)
+
+        data = ConversationSerializer(conv, context={"request": request}).data
+        # Cap the message list — paginate separately if needed.
+        if isinstance(data.get("messages"), list) and len(data["messages"]) > 100:
+            data["messages"] = data["messages"][-100:]
+            data["messages_truncated"] = True
+        return Response(data)
 
     @extend_schema(
         request=ConversationCreateSerializer,
@@ -73,6 +86,16 @@ class ConversationViewSet(viewsets.GenericViewSet):
         listing = get_object_or_404(
             Listing, pk=serializer.validated_data["listing"],
         )
+
+        if listing.status not in (
+            Listing.Status.AVAILABLE,
+            Listing.Status.RESERVED,
+            Listing.Status.SOLD,
+        ):
+            return Response(
+                {"detail": "Tangazo halipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         if listing.seller_id == request.user.id:
             return Response(
@@ -122,6 +145,11 @@ class ConversationViewSet(viewsets.GenericViewSet):
         conv.last_message = message.text
         conv.last_message_at = message.created_at
         conv.save(update_fields=["last_message", "last_message_at", "updated_at"])
+
+        from .services import notify_new_message
+        db_transaction.on_commit(
+            lambda: notify_new_message(conversation=conv, message=message)
+        )
 
         return Response(
             MessageSerializer(message).data,

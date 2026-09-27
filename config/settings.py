@@ -216,7 +216,11 @@ R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 R2_MEDIA_LOCATION = os.environ.get("R2_MEDIA_LOCATION", "media")
-R2_CUSTOM_DOMAIN = os.environ.get("R2_CUSTOM_DOMAIN", "") or None
+R2_CUSTOM_DOMAIN = (os.environ.get("R2_CUSTOM_DOMAIN", "") or "").strip() or None
+# Normalize: fix "https//..." → "https://..." and strip trailing slash
+if R2_CUSTOM_DOMAIN:
+    R2_CUSTOM_DOMAIN = R2_CUSTOM_DOMAIN.replace("https//", "https://").replace("http//", "http://")
+    R2_CUSTOM_DOMAIN = R2_CUSTOM_DOMAIN.rstrip("/")
 
 R2_ENABLED = bool(
     R2_BUCKET_NAME
@@ -322,6 +326,7 @@ REST_FRAMEWORK = {
         "password_reset": "5/hour",
         "anon": "100/min",
         "user": "1000/hour",
+        "support_ticket": "5/hour",
     },
 }
 
@@ -440,6 +445,10 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-inspections": {
         "task": "transactions.expire_stale_inspections",
         "schedule": crontab(minute="*/15"),
+    },
+    "expire-unpaid-reservations": {
+        "task": "transactions.expire_unpaid_reservations",
+        "schedule": crontab(minute="*/10"),
     },
     "warn-expiring-reservations": {
         "task": "transactions.warn_expiring_reservations",

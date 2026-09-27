@@ -82,12 +82,22 @@ class RevenueReportView(APIView):
             return Response({"detail": "Invalid source."}, status=400)
 
         records = get_revenue_records(period=period, source=source)
+
+        # Cap the response — paginate further if needed.
+        try:
+            limit = min(int(request.query_params.get("limit", 500)), 2000)
+        except ValueError:
+            limit = 500
+        truncated = len(records) > limit
+        records = records[:limit]
+
         serializer = RevenueRecordSerializer(records, many=True)
 
         return Response({
             "period": period,
             "source": source,
             "count": len(records),
+            "truncated": truncated,
             "results": serializer.data,
         })
 

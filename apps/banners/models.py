@@ -35,6 +35,18 @@ class BannerAd(models.Model):
         max_digits=15, decimal_places=2, null=True, blank=True,
         verbose_name="Kiasi kilicholipwa",
     )
+    payment_status = models.CharField(
+        max_length=20,
+        choices=[
+            ("PENDING", "Pending"),
+            ("PAID", "Paid"),
+            ("FAILED", "Failed"),
+            ("REFUNDED", "Refunded"),
+        ],
+        default="PENDING",
+        verbose_name="Hali ya malipo",
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
     payment_reference = models.CharField(max_length=255, blank=True)
 
     active = models.BooleanField(default=True, verbose_name="Hai")

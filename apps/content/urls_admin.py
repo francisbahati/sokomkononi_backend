@@ -4,7 +4,7 @@ from .views_admin import AdminContentViewSet
 
 
 def _dispatch(request, kind, pk=None):
-    view = AdminContentViewSet.as_view({"get": "list", "post": "create"})
+    view = AdminContentViewSet.as_view({"get": "list_content", "post": "create_content"})
     return view(request, kind=kind)
 
 
@@ -12,16 +12,16 @@ urlpatterns = [
     # Banners
     path(
         "banners/",
-        AdminContentViewSet.as_view({"get": "_list", "post": "_create"}),
+        AdminContentViewSet.as_view({"get": "list_content", "post": "create_content"}),
         {"kind": "banners"},
         name="admin-banners",
     ),
     path(
         "banners/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "_detail",
-            "patch": "_detail",
-            "delete": "_detail",
+            "get": "detail_content",
+            "patch": "detail_content",
+            "delete": "detail_content",
         }),
         {"kind": "banners"},
         name="admin-banner-detail",
@@ -30,16 +30,16 @@ urlpatterns = [
     # Testimonials
     path(
         "testimonials/",
-        AdminContentViewSet.as_view({"get": "_list", "post": "_create"}),
+        AdminContentViewSet.as_view({"get": "list_content", "post": "create_content"}),
         {"kind": "testimonials"},
         name="admin-testimonials",
     ),
     path(
         "testimonials/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "_detail",
-            "patch": "_detail",
-            "delete": "_detail",
+            "get": "detail_content",
+            "patch": "detail_content",
+            "delete": "detail_content",
         }),
         {"kind": "testimonials"},
         name="admin-testimonial-detail",
@@ -48,16 +48,16 @@ urlpatterns = [
     # FAQs
     path(
         "faqs/",
-        AdminContentViewSet.as_view({"get": "_list", "post": "_create"}),
+        AdminContentViewSet.as_view({"get": "list_content", "post": "create_content"}),
         {"kind": "faqs"},
         name="admin-faqs",
     ),
     path(
         "faqs/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "_detail",
-            "patch": "_detail",
-            "delete": "_detail",
+            "get": "detail_content",
+            "patch": "detail_content",
+            "delete": "detail_content",
         }),
         {"kind": "faqs"},
         name="admin-faq-detail",

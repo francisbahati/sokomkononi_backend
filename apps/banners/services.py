@@ -23,8 +23,11 @@ def _get_ad_fee_config():
 def create_banner_ad(*, listing_id, seller, payment_reference=""):
     config = _get_ad_fee_config()
 
-    listing = Listing.objects.select_for_update().filter(pk=listing_id).first()
-    if not listing:
+    # Lock the listing row — serializes concurrent banner creation for
+    # the same listing (prevents the "one active banner" race).
+    try:
+        listing = Listing.objects.select_for_update().get(pk=listing_id)
+    except Listing.DoesNotExist:
         raise ValidationError({"listing": "Tangazo halipatikani."})
     if listing.seller_id != seller.id:
         raise ValidationError({"listing": "Huruhusiwi kutangaza tangazo ambalo si lako."})
@@ -50,7 +53,8 @@ def create_banner_ad(*, listing_id, seller, payment_reference=""):
         seller_name=seller.name,
         amount=config.price,
         payment_reference=(payment_reference or "").strip(),
-        active=True,
+        active=False,
+        payment_status="PENDING",
         expires_at=now + timedelta(days=config.days),
     )
     return banner

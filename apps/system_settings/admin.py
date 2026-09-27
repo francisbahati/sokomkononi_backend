@@ -15,7 +15,19 @@ class WebhookAdmin(admin.ModelAdmin):
 class AppStoreLinksAdmin(admin.ModelAdmin):
     list_display = ("play", "appstore", "updated_at")
 
+    def has_add_permission(self, request):
+        return not AppStoreLinks.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(PlatformPolicy)
 class PlatformPolicyAdmin(admin.ModelAdmin):
     list_display = ("listing_lifetime_days", "updated_at")
+
+    def has_add_permission(self, request):
+        return not PlatformPolicy.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False

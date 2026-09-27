@@ -31,4 +31,10 @@ class FlexibleJWTAuthentication(JWTAuthentication):
         except (InvalidToken, TokenError):
             return None
 
+        # Reject any token whose type is not "access" (e.g. password reset).
+        if validated.get("token_type") not in (None, "access"):
+            return None
+        if validated.get("purpose"):
+            return None
+
         return (self.get_user(validated), validated)

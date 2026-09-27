@@ -3,6 +3,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db.models import Count, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.response import Response
@@ -43,16 +44,28 @@ class ReportsView(APIView):
         total_buyers = max(0, total_users - total_sellers)
 
         # Growth: cumulative users per day for last 30 days
+        from django.db.models.functions import TruncDate
+        start_day = (now - timedelta(days=29)).date()
+        growth_rows = dict(
+            User.all_objects
+            .filter(is_deleted=False, date_joined__date__gte=start_day)
+            .annotate(d=TruncDate("date_joined"))
+            .values_list("d")
+            .annotate(c=Count("id"))
+            .values_list("d", "c")
+        )
+        baseline = User.all_objects.filter(
+            is_deleted=False,
+            date_joined__date__lt=start_day,
+        ).count()
         users_growth = []
+        running = baseline
         for i in range(29, -1, -1):
             day = (now - timedelta(days=i)).date()
-            cumulative = User.all_objects.filter(
-                is_deleted=False,
-                date_joined__date__lte=day,
-            ).count()
+            running += growth_rows.get(day, 0)
             users_growth.append({
                 "label": day.strftime("%d/%m"),
-                "cumulative": cumulative,
+                "cumulative": running,
             })
 
         # ---------- Listings ----------
@@ -109,17 +122,12 @@ class ReportsView(APIView):
             revenue_qs.aggregate(s=Sum("agreed_price"))["s"] or 0
         )
 
+        from dateutil.relativedelta import relativedelta
         revenue_by_month = []
+        _anchor = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         for i in range(5, -1, -1):
-            month_start = (now - timedelta(days=30 * i)).replace(
-                day=1, hour=0, minute=0, second=0, microsecond=0,
-            )
-            if month_start.month == 12:
-                month_end = month_start.replace(
-                    year=month_start.year + 1, month=1,
-                )
-            else:
-                month_end = month_start.replace(month=month_start.month + 1)
+            month_start = _anchor - relativedelta(months=i)
+            month_end = month_start + relativedelta(months=1)
             total = (
                 revenue_qs.filter(
                     completed_at__gte=month_start,
@@ -139,7 +147,7 @@ class ReportsView(APIView):
         top_sellers_qs = (
             Listing.objects.values("seller__id", "seller__name")
             .annotate(
-                views=Sum("views_count"),
+                views=Coalesce(Sum("views_count"), 0),
                 listings=Count("id"),
             )
             .order_by("-views")[:5]

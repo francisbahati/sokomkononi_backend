@@ -1,5 +1,6 @@
 import secrets
 
+from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -50,10 +51,15 @@ class TicketViewSet(viewsets.GenericViewSet):
 
     serializer_class = TicketSerializer
     permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "support_ticket"
 
     def get_queryset(self):
         user = self.request.user
-        qs = Ticket.objects.select_related("user", "assigned_to").prefetch_related("messages")
+        qs = (
+            Ticket.objects
+            .select_related("user", "assigned_to")
+            .prefetch_related("messages")
+        )
         if user.is_staff:
             return qs
         return qs.filter(user=user)
@@ -87,21 +93,22 @@ class TicketViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Ensure unique code
-        code = generate_ticket_code()
-        while Ticket.objects.filter(code=code).exists():
-            code = generate_ticket_code()
+        def _make_ticket(ticket_code):
+            return Ticket.objects.create(
+                code=ticket_code,
+                subject=data["subject"],
+                description=data.get("description", ""),
+                category=data["category"],
+                priority=data["priority"],
+                user=request.user,
+                user_name=request.user.name,
+                user_email=request.user.email or "",
+            )
 
-        ticket = Ticket.objects.create(
-            code=code,
-            subject=data["subject"],
-            description=data.get("description", ""),
-            category=data["category"],
-            priority=data["priority"],
-            user=request.user,
-            user_name=request.user.name,
-            user_email=request.user.email or "",
-        )
+        try:
+            ticket = _make_ticket(generate_ticket_code())
+        except IntegrityError:
+            ticket = _make_ticket(generate_ticket_code())
 
         if data.get("description"):
             TicketMessage.objects.create(
@@ -206,5 +213,8 @@ class TicketViewSet(viewsets.GenericViewSet):
                 {"detail": "Huna ruhusa."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        obj.delete(by=request.user, reason="Ticket deleted by owner/admin")
+        return Response(
+            {"detail": "Ticket imewekwa kwenye kikapu."},
+            status=status.HTTP_200_OK,
+        )

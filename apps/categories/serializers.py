@@ -4,11 +4,11 @@ from .models import Category
 
 
 class CategorySerializer(serializers.ModelSerializer):
-    # Accept both a normal URL and a data: base64 payload.
-    image_url = serializers.CharField(
+    # A normal URL. Binary uploads use POST /api/categories/upload-image/.
+    image_url = serializers.URLField(
         required=False,
         allow_blank=True,
-        max_length=5_000_000,
+        max_length=2000,
     )
 
     class Meta:

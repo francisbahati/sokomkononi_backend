@@ -115,10 +115,10 @@ class SubAdminViewSet(viewsets.GenericViewSet):
         user = get_object_or_404(User, pk=user_id)
         role = get_object_or_404(Role, key=role_key)
 
-        if not user.is_staff:
-            user.is_staff = True
-            user.save(update_fields=["is_staff", "updated_at"])
-
+        # NOTE: Deliberately DO NOT flip is_staff=True here.
+        # RBAC role assignment is informational until Role.permissions is
+        # enforced by permission classes. Flip is_staff only via superuser
+        # or Django admin.
         obj, _ = StaffAssignment.objects.update_or_create(
             user=user,
             defaults={"role": role, "active": data.get("active", True)},

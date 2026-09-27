@@ -13,19 +13,19 @@ class Conversation(models.Model):
 
     listing = models.ForeignKey(
         Listing,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="conversations",
         verbose_name="Tangazo",
     )
     buyer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="buyer_conversations",
         verbose_name="Mnunuzi",
     )
     seller = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="seller_conversations",
         verbose_name="Muuzaji",
     )
@@ -79,12 +79,12 @@ class Conversation(models.Model):
 class Message(models.Model):
     conversation = models.ForeignKey(
         Conversation,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="messages",
     )
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="sent_messages",
     )
     text = models.TextField()

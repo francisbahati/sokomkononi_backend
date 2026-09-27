@@ -39,7 +39,7 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     def _resolve(self, kind):
         return MODEL_MAP.get(kind)
 
-    def _list(self, request, kind=None):
+    def list_content(self, request, kind=None):
         pair = self._resolve(kind)
         if not pair:
             return Response(
@@ -49,7 +49,7 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         Model, Serializer = pair
         return Response(Serializer(Model.objects.all(), many=True).data)
 
-    def _create(self, request, kind=None):
+    def create_content(self, request, kind=None):
         pair = self._resolve(kind)
         if not pair:
             return Response(
@@ -62,7 +62,7 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    def _detail(self, request, kind=None, pk=None):
+    def detail_content(self, request, kind=None, pk=None):
         pair = self._resolve(kind)
         if not pair:
             return Response(

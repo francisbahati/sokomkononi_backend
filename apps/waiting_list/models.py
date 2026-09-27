@@ -51,7 +51,13 @@ class WaitingListEntry(models.Model):
                 name="wait_status_joined_idx",
             ),
         ]
-        # No unique constraint — allows re-joining after CANCELLED.
+        constraints = [
+            models.UniqueConstraint(
+                fields=["listing", "buyer"],
+                condition=models.Q(status__in=["WAITING", "NOTIFIED"]),
+                name="unique_active_waiting_entry",
+            ),
+        ]
 
     def __str__(self):
         return (

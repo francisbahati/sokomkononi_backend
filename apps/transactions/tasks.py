@@ -21,7 +21,8 @@ from django.utils import timezone
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
-from .models import InspectionPeriod, Reservation
+from apps.listings.models import Listing
+from .models import InspectionPeriod, Reservation, Transaction
 from .services.reservation import (
     expire_inspection_period,
     expire_reservation,
@@ -179,3 +180,52 @@ def warn_expiring_reservations():
 
     logger.info("warn_expiring_reservations: warned=%s", warned)
     return {"warned": warned}
+
+@shared_task(name="transactions.expire_unpaid_reservations")
+def expire_unpaid_reservations():
+    """Cancel PENDING_PAYMENT reservations whose payment window closed."""
+    now = timezone.now()
+    reservation_ids = list(
+        Reservation.objects
+        .filter(
+            status=Reservation.Status.PENDING_PAYMENT,
+            expires_at__lt=now,
+            payment_status=Reservation.PaymentStatus.PENDING,
+        )
+        .values_list("pk", flat=True)
+    )
+    cancelled = 0
+    failed = 0
+    for rid in reservation_ids:
+        try:
+            reservation = Reservation.objects.get(pk=rid)
+            transaction = reservation.transaction
+
+            reservation.status = Reservation.Status.CANCELLED
+            reservation.save(update_fields=["status", "updated_at"])
+
+            if transaction.status in (
+                Transaction.Status.RESERVATION_PENDING,
+                Transaction.Status.RESERVED,
+                Transaction.Status.INSPECTION,
+            ):
+                transaction.status = Transaction.Status.CANCELLED
+                transaction.cancelled_at = now
+                transaction.cancellation_reason = (
+                    "Reservation payment window expired."
+                )
+                transaction.save(update_fields=[
+                    "status", "cancelled_at", "cancellation_reason", "updated_at",
+                ])
+
+            listing = Listing.objects.filter(pk=transaction.listing_id).first()
+            if listing and listing.status == Listing.Status.RESERVED:
+                listing.status = Listing.Status.AVAILABLE
+                listing.save(update_fields=["status", "updated_at"])
+
+            cancelled += 1
+        except Exception:
+            failed += 1
+            logger.exception("Failed to expire unpaid reservation %s", rid)
+    logger.info("expire_unpaid_reservations: cancelled=%s failed=%s", cancelled, failed)
+    return {"cancelled": cancelled, "failed": failed}

@@ -19,7 +19,7 @@ def approve_listing(listing_id, admin_user):
 
     listing = (
         Listing.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("seller", "category")
         .get(pk=listing_id)
     )
@@ -98,7 +98,7 @@ def reject_listing(listing_id, admin_user, rejection_reason):
 
     listing = (
         Listing.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related("seller", "category")
         .get(pk=listing_id)
     )

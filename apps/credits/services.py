@@ -36,11 +36,14 @@ def grant_bundle_credits(*, user, credits, services, expires_at,
         if amount <= 0:
             continue
 
-        obj, _ = UserCredit.objects.select_for_update().get_or_create(
+        # get_or_create first (no lock), then lock the row (avoids
+        # select_for_update being a no-op on INSERT).
+        obj, _ = UserCredit.objects.get_or_create(
             user=user,
             service_key=service_key,
             defaults={"remaining": 0, "total": 0},
         )
+        obj = UserCredit.objects.select_for_update().get(pk=obj.pk)
         obj.remaining += amount
         obj.total += amount
         if expires_at and (not obj.expires_at or expires_at > obj.expires_at):

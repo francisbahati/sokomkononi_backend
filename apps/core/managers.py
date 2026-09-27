@@ -3,13 +3,14 @@ from django.utils import timezone
 
 
 class SoftDeleteQuerySet(models.QuerySet):
-    def delete(self):
+    def delete(self, *, by=None, reason=""):
         """Bulk soft delete. Returns (count, {}) for parity with Django."""
-        count = self.update(
+        return (self.update(
             is_deleted=True,
             deleted_at=timezone.now(),
-        )
-        return (count, {})
+            deleted_by=by,
+            deletion_reason=reason or "",
+        ), {})
 
     def hard_delete(self):
         return super().delete()
@@ -21,22 +22,11 @@ class SoftDeleteQuerySet(models.QuerySet):
         return self.filter(is_deleted=True)
 
     def restore(self):
-        return self.update(
-            is_deleted=False,
-            deleted_at=None,
-            deleted_by=None,
-            deletion_reason="",
-        )
+        # Preserve deleted_by / deletion_reason for forensic record.
+        return self.update(is_deleted=False, deleted_at=None)
 
 
 class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
-    """
-    Manager that filters out soft-deleted rows by default.
-
-    SoftDeleteManager()                     → filters is_deleted=False
-    SoftDeleteManager(include_deleted=True) → returns everything
-    """
-
     use_in_migrations = True
 
     def __init__(self, *args, include_deleted=False, **kwargs):
@@ -44,7 +34,6 @@ class SoftDeleteManager(models.Manager.from_queryset(SoftDeleteQuerySet)):
         super().__init__(*args, **kwargs)
 
     def deconstruct(self):
-        # NOTE: Django's Manager.deconstruct() returns 5-tuple.
         as_manager, manager_path, qs_path, args, kwargs = super().deconstruct()
         if self.include_deleted:
             kwargs["include_deleted"] = True

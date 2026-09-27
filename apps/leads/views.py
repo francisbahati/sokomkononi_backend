@@ -60,9 +60,7 @@ class LeadViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="new")
     def new(self, request):
-        qs = self.get_queryset().filter(
-            seller=request.user, status=Lead.Status.NEW,
-        )
+        qs = self.get_queryset().filter(status=Lead.Status.NEW)
         page = self.paginate_queryset(qs)
         serializer = LeadSerializer(
             page if page is not None else qs, many=True,
@@ -74,7 +72,7 @@ class LeadViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get"], url_path="new-count")
     def new_count(self, request):
         count = self.get_queryset().filter(
-            seller=request.user, status=Lead.Status.NEW,
+            status=Lead.Status.NEW,
         ).count()
         return Response({"count": count})
 
@@ -114,8 +112,8 @@ class LeadViewSet(viewsets.GenericViewSet):
                 {"detail": "Huna ruhusa."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        lead.delete()
+        lead.delete(by=request.user, reason="Lead removed by owner")
         return Response(
-            {"detail": "Lead imeondolewa."},
+            {"detail": "Lead imewekwa kwenye kikapu."},
             status=status.HTTP_200_OK,
         )

@@ -61,7 +61,7 @@ def resolve_dispute(
 
     transaction = (
         Transaction.objects
-        .select_for_update()
+        .select_for_update(of=("self",))
         .select_related(
             "listing",
             "deal_room",
@@ -124,7 +124,10 @@ def _resolve_as_completed(*, transaction, note, now, admin_user=None):
     deal_room.save(update_fields=["status", "updated_at"])
 
     reservation = getattr(transaction, "reservation", None)
-    if reservation:
+    if reservation and reservation.status in (
+        Reservation.Status.PENDING_PAYMENT,
+        Reservation.Status.ACTIVE,
+    ):
         reservation.status = Reservation.Status.COMPLETED
         reservation.save(update_fields=["status", "updated_at"])
 
@@ -136,13 +139,15 @@ def _resolve_as_completed(*, transaction, note, now, admin_user=None):
             update_fields=["status", "completed_at", "updated_at"]
         )
 
-    for recipient in (transaction.buyer, transaction.seller):
-        create_notification(
-            recipient=recipient,
-            notification_type=(
-                Notification.NotificationType.TRANSACTION_COMPLETED
-            ),
-            title="Mgogoro umetatuliwa — Transaction imekamilika",
+    recipients = [transaction.buyer, transaction.seller]
+    for recipient in recipients:
+        db_transaction.on_commit(
+            lambda recipient=recipient: create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.TRANSACTION_COMPLETED
+                ),
+                title="Mgogoro umetatuliwa — Transaction imekamilika",
             message=(
                 f"Mgogoro wa Transaction #{transaction.id} "
                 f"umetatuliwa na msimamizi. Transaction imekamilika "
@@ -151,7 +156,8 @@ def _resolve_as_completed(*, transaction, note, now, admin_user=None):
             priority=Notification.Priority.URGENT,
             related_object_type="Transaction",
             related_object_id=transaction.id,
-            action_url=f"/transactions/{transaction.id}",
+                action_url=f"/transactions/{transaction.id}",
+            )
         )
 
 

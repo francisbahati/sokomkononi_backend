@@ -48,7 +48,6 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key-change-me")
 
 DEBUG = env_bool("DEBUG", False)
 
-# Fail loudly if production is running with the dev key.
 if not DEBUG:
     if SECRET_KEY == "insecure-dev-key-change-me":
         raise ImproperlyConfigured(
@@ -85,6 +84,7 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "storages",
+    "csp",                            # django-csp for Content Security Policy
 
     # Local apps
     "apps.core",
@@ -130,6 +130,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "csp.middleware.CSPMiddleware",   # Must be near the end
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -199,28 +200,27 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Hard caps on uploads.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024       # 10 MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024       # 10 MB
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
 
 # ------------------------------------------------------------
-# STORAGE
+# R2 (S3-compatible) STORAGE
 # ------------------------------------------------------------
-# R2 (S3-compatible) for media; WhiteNoise with compression+manifest
-# for static files. Falls back to local FileSystemStorage when the
-# R2 env vars are not configured (dev / CI).
-# ------------------------------------------------------------
+# NOTE: R2_CUSTOM_DOMAIN must be a BARE domain (no https://).
+# django-storages prepends the scheme itself.
 R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "")
 R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 R2_MEDIA_LOCATION = os.environ.get("R2_MEDIA_LOCATION", "media")
-R2_CUSTOM_DOMAIN = (os.environ.get("R2_CUSTOM_DOMAIN", "") or "").strip() or None
-# Normalize: fix "https//..." → "https://..." and strip trailing slash
-if R2_CUSTOM_DOMAIN:
-    R2_CUSTOM_DOMAIN = R2_CUSTOM_DOMAIN.replace("https//", "https://").replace("http//", "http://")
-    R2_CUSTOM_DOMAIN = R2_CUSTOM_DOMAIN.rstrip("/")
+
+# Normalize: strip scheme and trailing slash if present.
+_raw_domain = (os.environ.get("R2_CUSTOM_DOMAIN", "") or "").strip().rstrip("/")
+for _prefix in ("https://", "http://"):
+    if _raw_domain.startswith(_prefix):
+        _raw_domain = _raw_domain[len(_prefix):]
+R2_CUSTOM_DOMAIN = _raw_domain or None
 
 R2_ENABLED = bool(
     R2_BUCKET_NAME
@@ -246,18 +246,12 @@ STORAGES = {
 # ------------------------------------------------------------
 # CORS
 # ------------------------------------------------------------
-# CSRF_TRUSTED_ORIGINS is required because the Django admin (which
-# uses session cookies + CSRF) is exposed under /admin/. The API
-# itself uses JWT in the Authorization header, so CSRF middleware is
-# a no-op for the API.
-# ------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:3000,http://localhost:5173,https://sokomkononi.co.tz,https://www.sokomkononi.co.tz",
 )
 
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", False)
-
 CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
 
 CORS_ALLOW_HEADERS = [
@@ -288,12 +282,45 @@ CSRF_TRUSTED_ORIGINS = env_list(
 )
 
 # ------------------------------------------------------------
-# DRF
+# CONTENT SECURITY POLICY (django-csp)
 # ------------------------------------------------------------
-# Global default is IsAuthenticated for safety. Public endpoints
-# (categories, listing list/retrieve, auth) explicitly override with
-# AllowAny at the view level. This keeps "secure by default" while
-# still allowing public reads.
+# The public R2 domain MUST be in img-src and media-src, otherwise the
+# browser refuses to load images even if the URL is technically correct.
+R2_PUBLIC_ORIGIN = (
+    f"https://{R2_CUSTOM_DOMAIN}" if R2_CUSTOM_DOMAIN else None
+)
+
+_CSP_IMG_SRC = ["'self'", "data:", "blob:"]
+_CSP_MEDIA_SRC = ["'self'"]
+if R2_PUBLIC_ORIGIN:
+    _CSP_IMG_SRC.append(R2_PUBLIC_ORIGIN)
+    _CSP_MEDIA_SRC.append(R2_PUBLIC_ORIGIN)
+
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "img-src": _CSP_IMG_SRC,
+        "media-src": _CSP_MEDIA_SRC,
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "font-src": ["'self'", "data:"],
+        "connect-src": ["'self'"] + [
+            o for o in [
+                "https://api.sokomkononi.co.tz",
+                R2_PUBLIC_ORIGIN,
+            ] if o
+        ],
+        "frame-ancestors": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+    },
+    # Start in report-only mode: violations are logged but NOT blocked.
+    # Once you confirm the console is clean, set this to False to enforce.
+    "REPORT_ONLY": env_bool("CSP_REPORT_ONLY", True),
+}
+
+# ------------------------------------------------------------
+# DRF
 # ------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -313,8 +340,6 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 
-    # Scoped throttle class. Views opt-in by setting
-    # `throttle_scope = "<key>"`.
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.ScopedRateThrottle",
     ),
@@ -347,9 +372,6 @@ SIMPLE_JWT = {
 # ------------------------------------------------------------
 # SPECTACULAR (Swagger / OpenAPI)
 # ------------------------------------------------------------
-# By default docs are admin-only in production. Set RESTRICT_DOCS=False
-# in the environment to make /api/docs/ and /api/schema/ public.
-# ------------------------------------------------------------
 SPECTACULAR_SETTINGS = {
     "TITLE": "SokoMkononi API",
     "DESCRIPTION": "SokoMkononi marketplace API",
@@ -381,13 +403,11 @@ DEFAULT_FROM_EMAIL = os.environ.get(
     "SokoMkononi <info@sokomkononi.co.tz>",
 )
 
-# Fail loudly if production has no working mailer.
 if not DEBUG and not EMAIL_HOST:
     raise ImproperlyConfigured(
         "EMAIL_HOST must be set when DEBUG=False."
     )
 
-# ADMINS / MANAGERS so mail_admins() works.
 ADMINS = [
     ("SokoMkononi Admin", os.environ.get("ADMIN_EMAIL", DEFAULT_FROM_EMAIL)),
 ]
@@ -408,7 +428,6 @@ PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
 # ------------------------------------------------------------
 # CELERY
 # ------------------------------------------------------------
-# Default to localhost so bare-metal dev works without .env.
 CELERY_BROKER_URL = os.environ.get(
     "CELERY_BROKER_URL",
     "redis://localhost:6379/0",
@@ -423,16 +442,14 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
-# Production robustness for tasks.
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 10 * 60          # 10 min hard limit
-CELERY_TASK_SOFT_TIME_LIMIT = 8 * 60      # 8 min soft limit
-CELERY_RESULT_EXPIRES = 60 * 60 * 24      # 24 hours
+CELERY_TASK_TIME_LIMIT = 10 * 60
+CELERY_TASK_SOFT_TIME_LIMIT = 8 * 60
+CELERY_RESULT_EXPIRES = 60 * 60 * 24
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
-# Beat schedule — drives the whole lifecycle.
 CELERY_BEAT_SCHEDULE = {
     "purge-soft-deleted": {
         "task": "core.purge_soft_deleted",
@@ -442,13 +459,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "transactions.expire_stale_reservations",
         "schedule": crontab(minute="*/15"),
     },
-    "expire-stale-inspections": {
-        "task": "transactions.expire_stale_inspections",
-        "schedule": crontab(minute="*/15"),
-    },
     "expire-unpaid-reservations": {
         "task": "transactions.expire_unpaid_reservations",
         "schedule": crontab(minute="*/10"),
+    },
+    "expire-stale-inspections": {
+        "task": "transactions.expire_stale_inspections",
+        "schedule": crontab(minute="*/15"),
     },
     "warn-expiring-reservations": {
         "task": "transactions.warn_expiring_reservations",
@@ -483,7 +500,7 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
-    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30      # 30 days
+    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
 
@@ -523,11 +540,14 @@ LOGGING = {
             "level": "ERROR",
             "propagate": False,
         },
-        # Security events (suspicious auth, CSRF failures,
-        # disallowed hosts, etc.) at WARNING and above.
         "django.security": {
             "handlers": ["console"],
             "level": "WARNING",
+            "propagate": False,
+        },
+        "csp": {
+            "handlers": ["console"],
+            "level": "INFO",
             "propagate": False,
         },
         "celery": {

@@ -54,7 +54,8 @@ INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
     "rest_framework", "rest_framework_simplejwt", "rest_framework_simplejwt.token_blacklist",
-    "corsheaders", "django_filters", "drf_spectacular", "storages", "csp",
+    "corsheaders", "django_filters", "drf_spectacular",
+    "drf_spectacular_sidecar", "storages", "csp",
     "apps.core", "apps.contact", "apps.accounts", "apps.categories", "apps.listings",
     "apps.boosting", "apps.deals", "apps.transactions", "apps.finance",
     "apps.notifications", "apps.waiting_list", "apps.saved", "apps.searches",
@@ -169,8 +170,9 @@ _CSP_DIRECTIVES = {
     "default-src": ["'self'"],
     "img-src": _CSP_IMG_SRC,
     "media-src": _CSP_MEDIA_SRC,
-    "script-src": ["'self'", "'unsafe-inline'"],
-    "style-src": ["'self'", "'unsafe-inline'"],
+    "script-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
+    "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+    "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
     "font-src": ["'self'", "data:"],
     "connect-src": _connect_src,
     "frame-ancestors": ["'none'"],
@@ -260,10 +262,10 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "SokoMkononi marketplace API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    # Serve Swagger UI / Redoc assets from our own origin (sidecar)
     "SWAGGER_UI_DIST": "SIDECAR",
     "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
     "REDOC_DIST": "SIDECAR",
+    # Serve Swagger UI / Redoc assets from our own origin (sidecar)
     "COMPONENT_SPLIT_REQUEST": True,
     "SORT_OPERATIONS": False,
 }

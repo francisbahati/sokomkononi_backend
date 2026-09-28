@@ -5,8 +5,12 @@ from .views_admin import AdminContentViewSet
 
 
 urlpatterns = [
-    # Root content
-    path("", ContentViewSet.as_view({"get": "list_content"}), name="content-list"),
+    # Root content (aggregated) — ContentViewSet.list
+    path(
+        "",
+        ContentViewSet.as_view({"get": "list"}),
+        name="content-list",
+    ),
 
     # Banners
     path(
@@ -18,7 +22,9 @@ urlpatterns = [
     path(
         "banners/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "detail_content", "patch": "detail_content", "delete": "detail_content",
+            "get": "detail_content",
+            "patch": "detail_content",
+            "delete": "detail_content",
         }),
         {"kind": "banners"},
         name="content-banner-detail",
@@ -34,7 +40,9 @@ urlpatterns = [
     path(
         "testimonials/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "detail_content", "patch": "detail_content", "delete": "detail_content",
+            "get": "detail_content",
+            "patch": "detail_content",
+            "delete": "detail_content",
         }),
         {"kind": "testimonials"},
         name="content-testimonial-detail",
@@ -50,7 +58,9 @@ urlpatterns = [
     path(
         "faqs/<int:pk>/",
         AdminContentViewSet.as_view({
-            "get": "detail_content", "patch": "detail_content", "delete": "detail_content",
+            "get": "detail_content",
+            "patch": "detail_content",
+            "delete": "detail_content",
         }),
         {"kind": "faqs"},
         name="content-faq-detail",

@@ -1,6 +1,14 @@
 from rest_framework import permissions, status, viewsets
 from rest_framework.response import Response
 
+from .models import Banner, FAQ, SiteContent, Testimonial
+from .serializers import (
+    BannerSerializer,
+    FAQSerializer,
+    SiteContentSerializer,
+    TestimonialSerializer,
+)
+
 
 class IsAdminUser(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -9,15 +17,6 @@ class IsAdminUser(permissions.BasePermission):
             and request.user.is_authenticated
             and request.user.is_staff
         )
-
-
-from .models import Banner, FAQ, SiteContent, Testimonial
-from .serializers import (
-    BannerSerializer,
-    FAQSerializer,
-    SiteContentSerializer,
-    TestimonialSerializer,
-)
 
 
 MODEL_MAP = {
@@ -29,17 +28,18 @@ MODEL_MAP = {
 
 
 class AdminContentViewSet(viewsets.GenericViewSet):
-    """Admin-only writes; public reads."""
     """
-    Admin-only management of content blocks. `kind` is passed via
-    URL kwargs by urls_admin.py.
+    Admin management of content blocks. Reads are public so the
+    frontend can fetch banners/testimonials/faqs without auth.
     """
 
+    serializer_class = BannerSerializer  # default for drf-spectacular
     permission_classes = [IsAdminUser]
 
     def get_permissions(self):
         # Public reads on /banners/, /testimonials/, /faqs/.
-        if getattr(self, "request", None) and self.request.method in ("GET", "HEAD", "OPTIONS"):
+        method = getattr(self.request, "method", "")
+        if method in ("GET", "HEAD", "OPTIONS"):
             return [permissions.AllowAny()]
         return [IsAdminUser()]
 
@@ -89,7 +89,9 @@ class AdminContentViewSet(viewsets.GenericViewSet):
 
         if request.method in ("PATCH", "PUT"):
             serializer = Serializer(
-                obj, data=request.data, partial=(request.method == "PATCH"),
+                obj,
+                data=request.data,
+                partial=(request.method == "PATCH"),
             )
             serializer.is_valid(raise_exception=True)
             serializer.save()

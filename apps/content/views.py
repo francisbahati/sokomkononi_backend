@@ -1,5 +1,4 @@
 from rest_framework import permissions, status
-from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
@@ -28,6 +27,7 @@ class ContentViewSet(GenericViewSet):
     """
 
     permission_classes = [permissions.AllowAny]
+    serializer_class = SiteContentSerializer
 
     def list(self, request):
         return Response({
@@ -62,7 +62,11 @@ class ContentViewSet(GenericViewSet):
         return Response(data)
 
     def update_key(self, request, key=None):
-        if not (request.user and request.user.is_authenticated and request.user.is_staff):
+        if not (
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_staff
+        ):
             return Response(
                 {"detail": "Huna ruhusa."},
                 status=status.HTTP_403_FORBIDDEN,

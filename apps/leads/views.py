@@ -10,7 +10,6 @@ from drf_spectacular.utils import extend_schema
 from .models import Lead
 from .serializers import (
     LeadSerializer,
-    LeadStatusUpdateSerializer,
 )
 
 

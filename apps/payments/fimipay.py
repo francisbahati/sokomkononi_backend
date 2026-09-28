@@ -13,6 +13,16 @@ from django.conf import settings
 from rest_framework.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_test_outcome():
+    """
+    Read the SOKO_FIMIPAY_TEST_OUTCOME env var (default empty).
+    When set to 'success', every create_order in test mode
+    immediately succeeds — perfect for end-to-end QA.
+    """
+    import os
+    return os.environ.get("SOKO_FIMIPAY_TEST_OUTCOME", "").strip() or None
 REQUEST_TIMEOUT = 30
 
 
@@ -85,8 +95,10 @@ def create_order(*, order_id, amount, buyer_phone, buyer_email="", buyer_name=""
         payload["buyer_name"] = buyer_name
     if redirect_url:
         payload["redirect_url"] = redirect_url
-    if test_outcome and settings.FIMIPAY_SECRET_KEY.startswith("sk_test_"):
-        payload["test_outcome"] = test_outcome
+    # Allow env-var override for automated QA.
+    resolved_outcome = test_outcome or _resolve_test_outcome()
+    if resolved_outcome and settings.FIMIPAY_SECRET_KEY.startswith("sk_test_"):
+        payload["test_outcome"] = resolved_outcome
 
     response = _post("/payment/create_order", payload)
     data = response.get("data") or {}

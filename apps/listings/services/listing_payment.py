@@ -28,6 +28,25 @@ def initiate_listing_fee_payment(*, listing, user):
     if listing_fee.payment_status == ListingFee.PaymentStatus.PAID:
         raise ValidationError("Ada ya tangazo hili tayari imelipwa.")
 
+    # ---- Reuse an existing FimiPay order if we already created one ----
+    from apps.payments.fimipay import get_order_status
+
+    existing_ref = (listing_fee.payment_reference or "").strip()
+    if existing_ref:
+        try:
+            status_data = get_order_status(existing_ref)
+            ps = (status_data.get("payment_status") or "").upper()
+            if ps in ("PENDING", "INPROGRESS"):
+                # Order still alive at FimiPay — return the same reference so
+                # the frontend continues polling instead of re-creating.
+                return status_data
+            if ps == "SUCCESS":
+                # Already paid — nothing to do here (webhook will have fired).
+                return status_data
+        except Exception:
+            # If we can't fetch the old order, fall through and create a new one.
+            pass
+
     order_id = f"LSF-{listing.id}"
     data = create_order(
         order_id=order_id,

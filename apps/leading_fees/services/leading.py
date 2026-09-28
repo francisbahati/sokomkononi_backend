@@ -160,6 +160,17 @@ def initiate_leading_payment(*, leading, user):
     if leading.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia leading hii.")
 
+    from apps.payments.fimipay import get_order_status as _fp_get_status
+
+    existing_ref = (leading.payment_reference or "").strip()
+    if existing_ref:
+        try:
+            sd = _fp_get_status(existing_ref)
+            if (sd.get("payment_status") or "").upper() in ("PENDING", "INPROGRESS", "SUCCESS"):
+                return sd
+        except Exception:
+            pass
+
     order_id = f"LDS-{leading.pk}"
     data = _fp_create_order(
         order_id=order_id,

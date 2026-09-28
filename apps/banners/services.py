@@ -103,6 +103,17 @@ from apps.payments.fimipay import create_order as _fp_create_order
 def initiate_banner_payment(*, banner, user):
     if banner.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia banner hii.")
+    from apps.payments.fimipay import get_order_status as _fp_get_status
+
+    existing_ref = (banner.payment_reference or "").strip()
+    if existing_ref:
+        try:
+            sd = _fp_get_status(existing_ref)
+            if (sd.get("payment_status") or "").upper() in ("PENDING", "INPROGRESS", "SUCCESS"):
+                return sd
+        except Exception:
+            pass
+
     order_id = f"ADV-{banner.pk}"
     data = _fp_create_order(
         order_id=order_id,

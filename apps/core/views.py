@@ -101,7 +101,7 @@ class TrashPermanentDeleteView(APIView):
                             status=status.HTTP_404_NOT_FOUND)
         if _is_protected(model):
             return Response(
-                {"detail": "Aina hii ya rekodi hailindwi dhidi ya kufutwa kabisa."},
+                {"detail": "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         obj = model.all_objects.filter(pk=pk, is_deleted=True).first()

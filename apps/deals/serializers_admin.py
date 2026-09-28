@@ -45,10 +45,13 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     messages = serializers.SerializerMethodField()
     reservationFee = serializers.SerializerMethodField()
     reservationHours = serializers.SerializerMethodField()
-    reservationMethod = serializers.CharField(
-        source="transaction.reservation.payment_method",
-        read_only=True, allow_null=True,
-    )
+    reservationMethod = serializers.SerializerMethodField()
+
+    def get_reservationMethod(self, obj):
+        try:
+            return obj.transaction.reservation.payment_method
+        except Exception:
+            return None
     reservationExpiresAt = serializers.SerializerMethodField()
     paymentProof = serializers.SerializerMethodField()
     disputeNote = serializers.SerializerMethodField()

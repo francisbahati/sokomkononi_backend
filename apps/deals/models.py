@@ -80,7 +80,8 @@ class DealRoom(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["listing", "buyer"],
-                name="unique_deal_room_listing_buyer",
+                condition=models.Q(status__in=["OPEN", "NEGOTIATING", "AGREED"]),
+                name="unique_active_deal_room_listing_buyer",
             ),
         ]
 

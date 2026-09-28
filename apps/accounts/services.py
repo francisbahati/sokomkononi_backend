@@ -12,6 +12,10 @@ from rest_framework.exceptions import ValidationError
 from .models import OTPVerification, PendingRegistration, User
 
 
+class OTPThrottled(ValidationError):
+    """Raised when a resend is attempted too soon."""
+
+
 OTP_EXPIRY_MINUTES = 10
 OTP_RESEND_SECONDS = 60
 OTP_MAX_ATTEMPTS = 5
@@ -86,7 +90,7 @@ def _create_otp_record(identifier, verification_type):
     )
 
     if not can_resend_otp(normalized, verification_type):
-        raise ValidationError({
+        raise OTPThrottled({
             "detail": (
                 "Subiri sekunde 60 kabla ya kuomba OTP nyingine."
             )

@@ -493,13 +493,8 @@ class ListingFeeSerializer(serializers.ModelSerializer):
         ]
 
     def get_fee_percentage(self, obj):
-        try:
-            result = calculate_listing_fee(
-                obj.listing.price
-            )
-            return result["percentage"]
-        except Exception:
-            return None
+        # Return the SNAPSHOT — not the current rule.
+        return obj.percentage
 
 
 # ============================================================================

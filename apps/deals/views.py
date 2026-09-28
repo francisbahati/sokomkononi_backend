@@ -134,7 +134,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         deal_room = self.get_object()
-        serializer = DealRoomDetailSerializer(
+        serializer = self.get_serializer_class()(
             deal_room, context={"request": request},
         )
         return Response(serializer.data)
@@ -333,6 +333,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 ],
             )
             .exclude(pk=deal_room.pk)
+            .order_by("pk")
         )
 
         sibling_room_list = list(sibling_rooms)

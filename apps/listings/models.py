@@ -25,7 +25,7 @@ class Listing(SoftDeleteModel):
 
     seller = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="listings",
         verbose_name="Muuzaji",
     )
@@ -729,14 +729,14 @@ class ListingFee(models.Model):
 
     listing = models.OneToOneField(
         Listing,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="listing_fee",
         verbose_name="Tangazo",
     )
 
     seller = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="listing_fees",
         verbose_name="Muuzaji",
     )

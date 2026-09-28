@@ -7,7 +7,7 @@ Bundle purchase flow:
 """
 from datetime import timedelta
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -21,29 +21,31 @@ def create_purchase(*, user, bundle, payment_reference=""):
     if not bundle.active:
         raise ValidationError("Kifurushi hiki hakipo active.")
 
-    # Prevent duplicate open PENDING for the same (user, bundle).
-    existing_pending = (
-        BundlePurchase.objects
-        .select_for_update()
-        .filter(
+    existing_pending = BundlePurchase.objects.filter(
+        user=user,
+        bundle=bundle,
+        status=BundlePurchase.Status.PENDING,
+    ).first()
+    if existing_pending:
+        return existing_pending
+
+    try:
+        return BundlePurchase.objects.create(
+            user=user,
+            bundle=bundle,
+            amount=bundle.price,
+            credits_snapshot=bundle.credits,
+            services_snapshot=bundle.services,
+            status=BundlePurchase.Status.PENDING,
+            payment_reference=(payment_reference or "").strip() or None,
+        )
+    except IntegrityError:
+        # Concurrent create — fetch the winner.
+        return BundlePurchase.objects.get(
             user=user,
             bundle=bundle,
             status=BundlePurchase.Status.PENDING,
         )
-        .first()
-    )
-    if existing_pending:
-        return existing_pending
-
-    return BundlePurchase.objects.create(
-        user=user,
-        bundle=bundle,
-        amount=bundle.price,
-        credits_snapshot=bundle.credits,
-        services_snapshot=bundle.services,
-        status=BundlePurchase.Status.PENDING,
-        payment_reference=(payment_reference or "").strip() or None,
-    )
 
 
 @transaction.atomic
@@ -55,7 +57,6 @@ def mark_purchase_paid(*, purchase, payment_reference=""):
         .get(pk=purchase.pk)
     )
 
-    # Idempotent retry: same reference → return existing.
     if (purchase.status == BundlePurchase.Status.PAID
             and purchase.payment_reference == (payment_reference or "").strip()):
         return purchase

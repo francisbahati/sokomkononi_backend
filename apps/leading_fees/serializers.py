@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import LeadingFeeConfig
+from .models import LeadingFeeConfig, ListingLeading
 
 
 class LeadingFeeConfigSerializer(serializers.ModelSerializer):
@@ -19,7 +19,7 @@ class LeadingFeeConfigSerializer(serializers.ModelSerializer):
         return {"sw": obj.desc_sw, "en": obj.desc_en}
 
     def to_internal_value(self, data):
-        # Accept both flat + bilingual input
+        data = dict(data)
         out = {}
         if "price" in data:
             out["price"] = data["price"]
@@ -59,3 +59,29 @@ class LeadingFeeConfigSerializer(serializers.ModelSerializer):
             setattr(instance, k, v)
         instance.save()
         return instance
+
+
+class ListingLeadingSerializer(serializers.ModelSerializer):
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
+    seller_name = serializers.CharField(source="seller.name", read_only=True)
+
+    class Meta:
+        model = ListingLeading
+        fields = [
+            "id", "listing", "listing_title", "seller", "seller_name",
+            "days", "price", "payment_status", "payment_reference",
+            "paid_at", "status", "starts_at", "expires_at",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class LeadingApplySerializer(serializers.Serializer):
+    listing = serializers.IntegerField()
+    payment_reference = serializers.CharField(
+        max_length=255, required=False, allow_blank=True,
+    )
+
+
+class LeadingPaymentSerializer(serializers.Serializer):
+    payment_reference = serializers.CharField(max_length=255)

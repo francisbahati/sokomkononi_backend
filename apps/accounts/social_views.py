@@ -7,6 +7,7 @@ import logging
 
 import requests
 from django.conf import settings
+from django.db.models import Q
 from rest_framework import permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -45,7 +46,11 @@ class SocialLoginView(APIView):
             email, name = self._verify_apple(id_token)
 
         email = email.strip().lower()
-        user = User.all_objects.filter(email__iexact=email).first()
+        user = (
+            User.all_objects
+            .filter(Q(email__iexact=email) | Q(deleted_email__iexact=email))
+            .first()
+        )
 
         if user and user.is_deleted:
             user.restore()

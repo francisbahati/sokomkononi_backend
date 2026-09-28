@@ -52,10 +52,7 @@ urlpatterns = [
     # Admin routes
     path("api/admin/users/", include("apps.accounts.urls_admin")),
     path("api/admin/content/", include("apps.content.urls_admin")),
-    path(
-        "api/admin/reports/",
-        include("apps.finance.urls_admin_reports"),
-    ),
+    # Admin reports live at /api/finance/reports/
 
     # Admin promotions alias (frontend calls /api/admin/promotions/)
     path(

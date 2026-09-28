@@ -21,7 +21,7 @@ class FlexibleJWTAuthenticationScheme(OpenApiAuthenticationExtension):
             "bearerFormat": "JWT",
             "description": (
                 "JWT access token. Provide as 'Authorization: Bearer <token>'. "
-                "Alternate sources accepted: cookie 'access_token', "
-                "query '?token=<jwt>', or header 'X-Access-Token'."
+                "Alternate sources accepted: cookie 'access_token' "
+                "or header 'X-Access-Token'."
             ),
         }

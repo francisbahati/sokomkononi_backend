@@ -1,0 +1,143 @@
+"""Leading purchase flow. Mirrors boosting's state machine."""
+from datetime import timedelta
+
+from django.db import transaction
+from django.utils import timezone
+from rest_framework.exceptions import ValidationError
+
+from apps.listings.models import Listing
+
+from ..models import LeadingFeeConfig, ListingLeading
+
+
+def _get_config():
+    obj, _ = LeadingFeeConfig.objects.get_or_create(pk=1)
+    return obj
+
+
+def _validate_seller(listing, user):
+    if not user or not user.is_authenticated:
+        raise ValidationError("Lazima uwe umeingia kwenye akaunti.")
+    if not user.is_active:
+        raise ValidationError("Akaunti yako haipo active.")
+    if not user.is_verified:
+        raise ValidationError("Akaunti yako lazima iwe imethibitishwa.")
+    if listing.seller_id != user.id and not user.is_staff:
+        raise ValidationError("Huruhusiwi kupandisha tangazo ambalo si lako.")
+    if listing.status != Listing.Status.AVAILABLE:
+        raise ValidationError("Tangazo lazima liwe AVAILABLE.")
+
+
+@transaction.atomic
+def create_leading(*, listing_id, user, payment_reference=""):
+    """Create a PENDING leading purchase. Does NOT touch the listing yet."""
+    try:
+        listing = Listing.objects.select_for_update(of=("self",)).get(pk=listing_id)
+    except Listing.DoesNotExist:
+        raise ValidationError({"listing": "Tangazo halipatikani."})
+
+    _validate_seller(listing, user)
+    config = _get_config()
+
+    now = timezone.now()
+    leading = ListingLeading.objects.create(
+        listing=listing,
+        seller=user,
+        days=config.days,
+        price=config.price,
+        payment_status=ListingLeading.PaymentStatus.PENDING,
+        status=ListingLeading.Status.PENDING,
+        payment_reference=(payment_reference or "").strip() or None,
+        expires_at=None,
+    )
+    return leading
+
+
+@transaction.atomic
+def mark_leading_paid(*, leading, payment_reference):
+    if not payment_reference:
+        raise ValidationError("Payment reference inahitajika.")
+    ref = payment_reference.strip()
+    if not ref:
+        raise ValidationError("Payment reference haiwezi kuwa tupu.")
+
+    leading = (
+        ListingLeading.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "seller")
+        .get(pk=leading.pk)
+    )
+
+    if (leading.payment_status == ListingLeading.PaymentStatus.PAID
+            and leading.payment_reference == ref):
+        return leading
+    if leading.payment_status == ListingLeading.PaymentStatus.PAID:
+        raise ValidationError("Leading hii tayari imelipiwa.")
+    if leading.status in (ListingLeading.Status.CANCELLED, ListingLeading.Status.EXPIRED):
+        raise ValidationError("Leading hii haiwezi kulipiwa.")
+
+    if ListingLeading.objects.filter(payment_reference=ref).exclude(pk=leading.pk).exists():
+        raise ValidationError("Payment reference hii tayari imetumika.")
+
+    leading.payment_status = ListingLeading.PaymentStatus.PAID
+    leading.payment_reference = ref
+    leading.paid_at = timezone.now()
+    leading.save(update_fields=["payment_status", "payment_reference", "paid_at", "updated_at"])
+
+    return _activate(leading)
+
+
+@transaction.atomic
+def _activate(leading):
+    leading = (
+        ListingLeading.objects
+        .select_for_update(of=("self",))
+        .select_related("listing")
+        .get(pk=leading.pk)
+    )
+    if leading.status == ListingLeading.Status.ACTIVE:
+        return leading
+
+    listing = Listing.objects.select_for_update().get(pk=leading.listing_id)
+    if listing.status != Listing.Status.AVAILABLE:
+        raise ValidationError("Tangazo lazima liwe AVAILABLE wakati leading ina-activate.")
+
+    now = timezone.now()
+    base = listing.leading_until if (listing.leading_until and listing.leading_until > now) else now
+    expires_at = base + timedelta(days=leading.days)
+
+    leading.status = ListingLeading.Status.ACTIVE
+    leading.starts_at = now
+    leading.expires_at = expires_at
+    leading.save(update_fields=["status", "starts_at", "expires_at", "updated_at"])
+
+    listing.leading_until = expires_at
+    listing.save(update_fields=["leading_until", "updated_at"])
+
+    return leading
+
+
+@transaction.atomic
+def expire_stale_leading():
+    """Move ACTIVE leadings past expiry -> EXPIRED and clear listing flag
+    only if no other active leading exists for the listing."""
+    now = timezone.now()
+    qs = ListingLeading.objects.select_for_update().filter(
+        status=ListingLeading.Status.ACTIVE, expires_at__lt=now,
+    )
+    count = 0
+    for leading in qs:
+        leading.status = ListingLeading.Status.EXPIRED
+        leading.save(update_fields=["status", "updated_at"])
+        count += 1
+
+        still_active = ListingLeading.objects.filter(
+            listing_id=leading.listing_id,
+            status=ListingLeading.Status.ACTIVE,
+            expires_at__gt=now,
+        ).exists()
+        if not still_active:
+            Listing.objects.filter(pk=leading.listing_id).update(
+                leading_until=None,
+            )
+    return count

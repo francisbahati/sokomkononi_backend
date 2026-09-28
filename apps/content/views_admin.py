@@ -29,12 +29,19 @@ MODEL_MAP = {
 
 
 class AdminContentViewSet(viewsets.GenericViewSet):
+    """Admin-only writes; public reads."""
     """
     Admin-only management of content blocks. `kind` is passed via
     URL kwargs by urls_admin.py.
     """
 
     permission_classes = [IsAdminUser]
+
+    def get_permissions(self):
+        # Public reads on /banners/, /testimonials/, /faqs/.
+        if getattr(self, "request", None) and self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [permissions.AllowAny()]
+        return [IsAdminUser()]
 
     def _resolve(self, kind):
         return MODEL_MAP.get(kind)

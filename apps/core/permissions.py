@@ -32,12 +32,8 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 
 
 class IsVerifiedUser(permissions.BasePermission):
-    message = (
-        "Akaunti yako lazima iwe active na imethibitishwa."
-    )
+    message = "Akaunti yako lazima iwe active na imethibitishwa."
 
     def has_permission(self, request, view):
         u = request.user
-        return bool(
-            u and u.is_authenticated and u.is_active and u.is_verified
-        )
+        return bool(u and u.is_authenticated and u.is_active and u.is_verified)

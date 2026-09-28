@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 from .models import BannerAd
 from .serializers import BannerAdCreateSerializer, BannerAdSerializer
-from .services import create_banner_ad
+from .services import create_banner_ad, mark_banner_paid_and_activate
 
 
 class BannerAdViewSet(viewsets.GenericViewSet):
@@ -16,6 +16,7 @@ class BannerAdViewSet(viewsets.GenericViewSet):
         GET     /api/banners/mine/           seller's own banners
         GET     /api/banners/all/            admin: all banners
         POST    /api/banners/                create { listing, payment_reference? }
+        POST    /api/banners/{id}/pay/       mark paid + activate
         DELETE  /api/banners/{id}/           seller or admin
     """
 
@@ -61,6 +62,25 @@ class BannerAdViewSet(viewsets.GenericViewSet):
             BannerAdSerializer(banner).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=["post"], url_path="pay")
+    def pay(self, request, pk=None):
+        banner = BannerAd.objects.filter(pk=pk).first()
+        if not banner:
+            return Response(
+                {"detail": "Haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if banner.seller_id != request.user.id and not request.user.is_staff:
+            return Response(
+                {"detail": "Huna ruhusa."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        ref = (request.data.get("payment_reference") or "").strip()
+        banner = mark_banner_paid_and_activate(
+            banner=banner, payment_reference=ref,
+        )
+        return Response(BannerAdSerializer(banner).data)
 
     def destroy(self, request, pk=None):
         banner = BannerAd.objects.filter(pk=pk).first()

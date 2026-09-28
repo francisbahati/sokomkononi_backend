@@ -4,7 +4,7 @@
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Q, F
 from django.shortcuts import get_object_or_404
 
 from django_filters.rest_framework import DjangoFilterBackend
@@ -158,7 +158,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         "views_count",
     ]
 
-    ordering = ["-leading_until", "-created_at"]
+    ordering = [F("leading_until").desc(nulls_last=True), "-created_at"]
 
     queryset = Listing.objects.select_related(
         "seller",
@@ -745,23 +745,16 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                     image_object.is_primary = True
                 else:
                     if image_object.is_primary:
-                        other_primary_exists = (
-                            ListingImage.objects
-                            .filter(listing=listing, is_primary=True)
-                            .exclude(pk=image_object.pk)
-                            .exists()
+                        # Cannot unset the ONLY primary image — promote
+                        # another image first.
+                        return Response(
+                            {"detail": (
+                                "Tangazo lazima liwe na angalau picha "
+                                "moja kuu. Weka picha nyingine kuwa kuu "
+                                "kwanza."
+                            )},
+                            status=status.HTTP_400_BAD_REQUEST,
                         )
-                        if not other_primary_exists:
-                            return Response(
-                                {
-                                    "detail": (
-                                        "Tangazo lazima liwe na "
-                                        "angalau picha moja kuu."
-                                    )
-                                },
-                                status=status.HTTP_400_BAD_REQUEST,
-                            )
-                        image_object.is_primary = False
 
             if ordering is not None:
                 image_object.ordering = ordering
@@ -907,7 +900,14 @@ class ListingFeePaymentView(APIView):
         serializer = ListingFeePaymentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        create_listing_fee(listing)
+        try:
+            create_listing_fee(listing)
+        except DjangoValidationError as exc:
+            msgs = getattr(exc, "messages", None) or [str(exc)]
+            return Response(
+                {"detail": msgs},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             listing_fee = mark_listing_fee_as_paid(

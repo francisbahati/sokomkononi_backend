@@ -24,13 +24,6 @@ from .serializers import (
 
 
 class RoleViewSet(viewsets.GenericViewSet):
-    """
-        GET     /api/rbac/roles/
-        POST    /api/rbac/roles/
-        PATCH   /api/rbac/roles/{id}/
-        DELETE  /api/rbac/roles/{id}/     (non-system only)
-    """
-
     serializer_class = RoleSerializer
     permission_classes = [IsAdminUser]
 
@@ -49,8 +42,6 @@ class RoleViewSet(viewsets.GenericViewSet):
         serializer = RoleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         d = serializer.validated_data
-        label = d.get("label") or {}
-        description = d.get("description") or {}
 
         key = d["key"]
         if Role.objects.filter(key=key).exists():
@@ -61,10 +52,10 @@ class RoleViewSet(viewsets.GenericViewSet):
 
         obj = Role.objects.create(
             key=key,
-            label_sw=label.get("sw", ""),
-            label_en=label.get("en", ""),
-            description_sw=description.get("sw", ""),
-            description_en=description.get("en", ""),
+            label_sw=d.get("label_sw") or "",
+            label_en=d.get("label_en") or "",
+            description_sw=d.get("description_sw") or "",
+            description_en=d.get("description_en") or "",
             permissions=d.get("permissions", []),
             is_system=False,
         )
@@ -78,14 +69,14 @@ class RoleViewSet(viewsets.GenericViewSet):
         serializer = RoleSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         d = serializer.validated_data
-        if "label" in d:
-            label = d["label"] or {}
-            obj.label_sw = label.get("sw", "")
-            obj.label_en = label.get("en", "")
-        if "description" in d:
-            description = d["description"] or {}
-            obj.description_sw = description.get("sw", "")
-            obj.description_en = description.get("en", "")
+        if "label_sw" in d:
+            obj.label_sw = d["label_sw"] or ""
+        if "label_en" in d:
+            obj.label_en = d["label_en"] or ""
+        if "description_sw" in d:
+            obj.description_sw = d["description_sw"] or ""
+        if "description_en" in d:
+            obj.description_en = d["description_en"] or ""
         if "permissions" in d:
             obj.permissions = d["permissions"]
         obj.save()
@@ -103,13 +94,6 @@ class RoleViewSet(viewsets.GenericViewSet):
 
 
 class StaffViewSet(viewsets.GenericViewSet):
-    """
-        GET     /api/rbac/staff/
-        POST    /api/rbac/staff/
-        PATCH   /api/rbac/staff/{id}/
-        DELETE  /api/rbac/staff/{id}/
-    """
-
     serializer_class = StaffAssignmentSerializer
     permission_classes = [IsAdminUser]
 
@@ -132,6 +116,10 @@ class StaffViewSet(viewsets.GenericViewSet):
             user=user,
             defaults={"role": role, "active": d.get("active", True)},
         )
+        # Grant admin access on assignment.
+        if not user.is_staff:
+            user.is_staff = True
+            user.save(update_fields=["is_staff", "updated_at"])
         return Response(
             StaffAssignmentSerializer(obj).data,
             status=status.HTTP_201_CREATED,
@@ -141,16 +129,19 @@ class StaffViewSet(viewsets.GenericViewSet):
         obj = get_object_or_404(StaffAssignment, pk=pk)
         data = request.data or {}
         if "role_key" in data:
-            obj.role = get_object_or_404(Role, key=data["role_key"])
+            role = Role.objects.filter(key=data["role_key"]).first()
+            if not role:
+                return Response(
+                    {"detail": "Role haipatikani."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            obj.role = role
         if "active" in data:
             obj.active = bool(data["active"])
         obj.save()
         return Response(StaffAssignmentSerializer(obj).data)
 
     def destroy(self, request, pk=None):
-        # Removes the RBAC assignment ONLY. is_staff is intentionally
-        # preserved — a user may still be a superuser or admin via
-        # another path. Revoke is_staff explicitly if you need to.
         obj = get_object_or_404(StaffAssignment, pk=pk)
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

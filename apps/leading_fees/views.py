@@ -1,17 +1,21 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import LeadingFeeConfig
-from .serializers import LeadingFeeConfigSerializer
+from apps.listings.models import Listing
+
+from .models import LeadingFeeConfig, ListingLeading
+from .serializers import (
+    LeadingApplySerializer,
+    LeadingFeeConfigSerializer,
+    LeadingPaymentSerializer,
+    ListingLeadingSerializer,
+)
+from .services.leading import create_leading, mark_leading_paid
 
 
 class LeadingFeeConfigViewSet(viewsets.GenericViewSet):
-    """
-        GET     /api/leading-fees/       public read
-        POST    /api/leading-fees/       admin upsert
-        PATCH   /api/leading-fees/       admin partial
-    """
-
     serializer_class = LeadingFeeConfigSerializer
 
     def get_permissions(self):
@@ -36,3 +40,57 @@ class LeadingFeeConfigViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class ListingLeadingViewSet(viewsets.GenericViewSet):
+    """
+        POST /api/leading-fees/apply/        create PENDING leading
+        POST /api/leading-fees/{id}/pay/     mark paid + activate
+        GET  /api/leading-fees/mine/         my purchases
+        GET  /api/leading-fees/listing/{id}/ public current leading
+    """
+    serializer_class = ListingLeadingSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return ListingLeading.objects.select_related("listing", "seller")
+
+    @action(detail=False, methods=["post"], url_path="apply")
+    def apply(self, request):
+        s = LeadingApplySerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        leading = create_leading(
+            listing_id=s.validated_data["listing"],
+            user=request.user,
+            payment_reference=s.validated_data.get("payment_reference", ""),
+        )
+        return Response(
+            ListingLeadingSerializer(leading).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="pay")
+    def pay(self, request, pk=None):
+        leading = get_object_or_404(self.get_queryset(), pk=pk)
+        if leading.seller_id != request.user.id and not request.user.is_staff:
+            return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
+        s = LeadingPaymentSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        leading = mark_leading_paid(
+            leading=leading,
+            payment_reference=s.validated_data["payment_reference"],
+        )
+        return Response(ListingLeadingSerializer(leading).data)
+
+    @action(detail=False, methods=["get"], url_path="mine")
+    def mine(self, request):
+        qs = self.get_queryset().filter(seller=request.user)
+        return Response(ListingLeadingSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=["get"], url_path=r"listing/(?P<listing_id>\d+)")
+    def listing_leading(self, request, listing_id=None):
+        listing = get_object_or_404(Listing, pk=listing_id)
+        return Response({
+            "listing_id": listing.id,
+            "leading_until": listing.leading_until,
+        })

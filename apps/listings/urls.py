@@ -124,8 +124,4 @@ urlpatterns = [
     path("<int:listing_id>/reject/", admin_reject_listing,
          name="admin-reject-listing"),
 ]
-from .views_leading import ApplyLeadingView
-urlpatterns += [
-    path("<int:listing_id>/leading/", ApplyLeadingView.as_view(),
-         name="listing-leading"),
-]
+# Leading now handled by /api/leading-fees/purchases/

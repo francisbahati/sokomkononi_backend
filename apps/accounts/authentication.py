@@ -1,13 +1,9 @@
 """
 Flexible JWT authentication.
-
-Reads the access token from any of:
+Reads the access token from:
   1. Authorization: Bearer <token>
   2. Cookie:         access_token=<token>
   3. Header:         X-Access-Token: <token>
-
-NOTE: The ?token= query-string source was removed for security — it
-leaks into server logs, browser history, and Referer headers.
 """
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
@@ -31,8 +27,8 @@ class FlexibleJWTAuthentication(JWTAuthentication):
         except (InvalidToken, TokenError):
             return None
 
-        # Reject any token whose type is not "access" (e.g. password reset).
-        if validated.get("token_type") not in (None, "access"):
+        # Strictly access tokens only — no password-reset, no missing type.
+        if validated.get("token_type") != "access":
             return None
         if validated.get("purpose"):
             return None

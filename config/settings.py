@@ -1,8 +1,6 @@
 # ============================================================
-# config/settings.py
-# SokoMkononi — Django settings
+# config/settings.py — SokoMkononi (production-ready)
 # ============================================================
-
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -11,115 +9,61 @@ from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
-# ------------------------------------------------------------
-# ENV
-# ------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 load_dotenv(BASE_DIR / ".env")
 
 
 def env_bool(key, default=False):
-    value = os.environ.get(key)
-    if value is None:
+    v = os.environ.get(key)
+    if v is None:
         return default
-    return value.strip().lower() in ("1", "true", "yes", "on")
+    return v.strip().lower() in ("1", "true", "yes", "on")
 
 
 def env_list(key, default=""):
     raw = os.environ.get(key, default) or ""
-    return [item.strip() for item in raw.split(",") if item.strip()]
+    return [i.strip() for i in raw.split(",") if i.strip()]
 
 
 def env_int(key, default=0):
-    value = os.environ.get(key)
-    if value is None or value == "":
+    v = os.environ.get(key)
+    if v is None or v == "":
         return default
     try:
-        return int(value)
+        return int(v)
     except (TypeError, ValueError):
         return default
 
 
-# ------------------------------------------------------------
-# CORE
-# ------------------------------------------------------------
+# ---------------- CORE ----------------
 SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key-change-me")
-
 DEBUG = env_bool("DEBUG", False)
 
 if not DEBUG:
     if SECRET_KEY == "insecure-dev-key-change-me":
-        raise ImproperlyConfigured(
-            "SECRET_KEY must be set to a secure value when DEBUG=False."
-        )
+        raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG=False.")
     if len(SECRET_KEY) < 50:
-        raise ImproperlyConfigured(
-            "SECRET_KEY must be at least 50 characters in production. "
-            "Generate one with: python -c "
-            "'from django.core.management.utils import get_random_secret_key as g; print(g())'"
-        )
+        raise ImproperlyConfigured("SECRET_KEY must be at least 50 chars in production.")
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
     "127.0.0.1,localhost,sokomkononi.co.tz,www.sokomkononi.co.tz,api.sokomkononi.co.tz",
 )
 
-# ------------------------------------------------------------
-# APPS
-# ------------------------------------------------------------
 INSTALLED_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
-    "django.contrib.staticfiles",
-
-    # Third-party
-    "rest_framework",
-    "rest_framework_simplejwt",
-    "rest_framework_simplejwt.token_blacklist",
-    "corsheaders",
-    "django_filters",
-    "drf_spectacular",
-    "storages",
-    "csp",
-
-    # Local apps
-    "apps.core",
-    "apps.contact",
-    "apps.accounts",
-    "apps.categories",
-    "apps.listings",
-    "apps.boosting",
-    "apps.deals",
-    "apps.transactions",
-    "apps.finance",
-    "apps.notifications",
-    "apps.waiting_list",
-    "apps.saved",
-    "apps.searches",
-    "apps.leads",
-    "apps.messaging",
-    "apps.verifications",
-    "apps.tickets",
-    "apps.audit",
-    "apps.announcements",
-    "apps.content",
-    "apps.rbac",
-    "apps.system_settings",
-    "apps.bundles",
-    "apps.credits",
-    "apps.banners",
-    "apps.leading_fees",
-    "apps.advertisement_fees",
-    "apps.reservation_rates",
+    "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
+    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
+    "rest_framework", "rest_framework_simplejwt", "rest_framework_simplejwt.token_blacklist",
+    "corsheaders", "django_filters", "drf_spectacular", "storages", "csp",
+    "apps.core", "apps.contact", "apps.accounts", "apps.categories", "apps.listings",
+    "apps.boosting", "apps.deals", "apps.transactions", "apps.finance",
+    "apps.notifications", "apps.waiting_list", "apps.saved", "apps.searches",
+    "apps.leads", "apps.messaging", "apps.verifications", "apps.tickets",
+    "apps.audit", "apps.announcements", "apps.content", "apps.rbac",
+    "apps.system_settings", "apps.bundles", "apps.credits", "apps.banners",
+    "apps.leading_fees", "apps.advertisement_fees", "apps.reservation_rates",
 ]
 
-# ------------------------------------------------------------
-# MIDDLEWARE  (CorsMiddleware MUST be before CommonMiddleware)
-# ------------------------------------------------------------
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -134,46 +78,32 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "config.urls"
-
-TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.debug",
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-        },
-    },
-]
+TEMPLATES = [{
+    "BACKEND": "django.template.backends.django.DjangoTemplates",
+    "DIRS": [BASE_DIR / "templates"],
+    "APP_DIRS": True,
+    "OPTIONS": {"context_processors": [
+        "django.template.context_processors.debug",
+        "django.template.context_processors.request",
+        "django.contrib.auth.context_processors.auth",
+        "django.contrib.messages.context_processors.messages",
+    ]},
+}]
 
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-# ------------------------------------------------------------
-# DATABASE
-# ------------------------------------------------------------
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "sokomkononi"),
-        "USER": os.environ.get("DB_USER", "postgres"),
-        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
-        "HOST": os.environ.get("DB_HOST", "localhost"),
-        "PORT": os.environ.get("DB_PORT", "5432"),
-        "CONN_MAX_AGE": 60,
-    }
-}
+DATABASES = {"default": {
+    "ENGINE": "django.db.backends.postgresql",
+    "NAME": os.environ.get("DB_NAME", "sokomkononi"),
+    "USER": os.environ.get("DB_USER", "postgres"),
+    "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+    "HOST": os.environ.get("DB_HOST", "localhost"),
+    "PORT": os.environ.get("DB_PORT", "5432"),
+    "CONN_MAX_AGE": 60,
+}}
 
-# ------------------------------------------------------------
-# AUTH
-# ------------------------------------------------------------
 AUTH_USER_MODEL = "accounts.User"
-
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -181,35 +111,22 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# ------------------------------------------------------------
-# I18N / TZ
-# ------------------------------------------------------------
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Africa/Dar_es_Salaam"
 USE_I18N = True
 USE_TZ = True
 
-# ------------------------------------------------------------
-# STATIC / MEDIA
-# ------------------------------------------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
-
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
 
-# ------------------------------------------------------------
-# R2 (S3-compatible) STORAGE
-# ------------------------------------------------------------
-# NOTE: R2_CUSTOM_DOMAIN must be a BARE domain (no https://).
-# django-storages prepends the scheme itself. We also tolerate
-# and fix typos like "https//" (missing colon).
+# ---------------- R2 STORAGE ----------------
 R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "")
 R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
@@ -217,37 +134,25 @@ R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 R2_MEDIA_LOCATION = os.environ.get("R2_MEDIA_LOCATION", "media")
 
 _raw_domain = (os.environ.get("R2_CUSTOM_DOMAIN", "") or "").strip().rstrip("/")
-# Fix common typos before stripping the scheme
 _raw_domain = _raw_domain.replace("https//", "https://").replace("http//", "http://")
-for _prefix in ("https://", "http://"):
-    if _raw_domain.startswith(_prefix):
-        _raw_domain = _raw_domain[len(_prefix):]
+for _p in ("https://", "http://"):
+    if _raw_domain.startswith(_p):
+        _raw_domain = _raw_domain[len(_p):]
 R2_CUSTOM_DOMAIN = _raw_domain or None
 
-R2_ENABLED = bool(
-    R2_BUCKET_NAME
-    and R2_ENDPOINT_URL
-    and R2_ACCESS_KEY_ID
-    and R2_SECRET_ACCESS_KEY
+R2_ENABLED = bool(R2_BUCKET_NAME and R2_ENDPOINT_URL and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY)
+
+_default_storage = (
+    "config.storages.CloudflareR2MediaStorage" if R2_ENABLED
+    else "django.core.files.storage.FileSystemStorage"
 )
 
-if R2_ENABLED:
-    _default_storage = "config.storages.CloudflareR2MediaStorage"
-else:
-    _default_storage = "django.core.files.storage.FileSystemStorage"
-
 STORAGES = {
-    "default": {
-        "BACKEND": _default_storage,
-    },
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
+    "default": {"BACKEND": _default_storage},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
-# ------------------------------------------------------------
-# CONTENT SECURITY POLICY
-# ------------------------------------------------------------
+# ---------------- CSP ----------------
 R2_PUBLIC_ORIGIN = f"https://{R2_CUSTOM_DOMAIN}" if R2_CUSTOM_DOMAIN else None
 
 _CSP_IMG_SRC = ["'self'", "data:", "blob:"]
@@ -256,74 +161,64 @@ if R2_PUBLIC_ORIGIN:
     _CSP_IMG_SRC.append(R2_PUBLIC_ORIGIN)
     _CSP_MEDIA_SRC.append(R2_PUBLIC_ORIGIN)
 
-CONTENT_SECURITY_POLICY = {
-    "DIRECTIVES": {
-        "default-src": ["'self'"],
-        "img-src": _CSP_IMG_SRC,
-        "media-src": _CSP_MEDIA_SRC,
-        "script-src": ["'self'"],
-        "style-src": ["'self'", "'unsafe-inline'"],
-        "font-src": ["'self'", "data:"],
-        "connect-src": ["'self'"] + [
-            o for o in ["https://api.sokomkononi.co.tz", R2_PUBLIC_ORIGIN] if o
-        ],
-        "frame-ancestors": ["'none'"],
-        "base-uri": ["'self'"],
-        "form-action": ["'self'"],
-    },
-    "REPORT_ONLY": os.environ.get("CSP_REPORT_ONLY", "true").lower() in ("1", "true", "yes", "on"),
+_connect_src = ["'self'"] + [
+    o for o in ["https://api.sokomkononi.co.tz", R2_PUBLIC_ORIGIN] if o
+]
+
+_CSP_DIRECTIVES = {
+    "default-src": ["'self'"],
+    "img-src": _CSP_IMG_SRC,
+    "media-src": _CSP_MEDIA_SRC,
+    "script-src": ["'self'", "'unsafe-inline'"],
+    "style-src": ["'self'", "'unsafe-inline'"],
+    "font-src": ["'self'", "data:"],
+    "connect-src": _connect_src,
+    "frame-ancestors": ["'none'"],
+    "base-uri": ["'self'"],
+    "form-action": ["'self'"],
 }
 
-# ------------------------------------------------------------
-# CORS
-# ------------------------------------------------------------
+_EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin")
+
+if env_bool("CSP_REPORT_ONLY", False):
+    # django-csp 4.0 native report-only mode.
+    CONTENT_SECURITY_POLICY_REPORT_ONLY = {
+        "DIRECTIVES": _CSP_DIRECTIVES,
+        "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
+    }
+    CONTENT_SECURITY_POLICY = {"DIRECTIVES": {}}
+else:
+    CONTENT_SECURITY_POLICY = {
+        "DIRECTIVES": _CSP_DIRECTIVES,
+        "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
+    }
+
+# ---------------- CORS ----------------
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:3000,http://localhost:5173,https://sokomkononi.co.tz,https://www.sokomkononi.co.tz",
 )
-
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", False)
 CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
-
 CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-    "x-access-token",
+    "accept", "accept-encoding", "authorization", "content-type", "dnt",
+    "origin", "user-agent", "x-csrftoken", "x-requested-with", "x-access-token",
 ]
-
-CORS_ALLOW_METHODS = [
-    "DELETE",
-    "GET",
-    "OPTIONS",
-    "PATCH",
-    "POST",
-    "PUT",
-]
+CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
 
 CSRF_TRUSTED_ORIGINS = env_list(
     "CSRF_TRUSTED_ORIGINS",
     "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz,https://api.sokomkononi.co.tz",
 )
 
-# ------------------------------------------------------------
-# DRF
-# ------------------------------------------------------------
+# ---------------- DRF ----------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.accounts.authentication.FlexibleJWTAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_FILTER_BACKENDS": (
@@ -332,10 +227,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-
-    "DEFAULT_THROTTLE_CLASSES": (
-        "rest_framework.throttling.ScopedRateThrottle",
-    ),
+    "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.ScopedRateThrottle",),
     "DEFAULT_THROTTLE_RATES": {
         "register": "10/hour",
         "login": "20/min",
@@ -362,79 +254,53 @@ SIMPLE_JWT = {
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
 }
 
-# ------------------------------------------------------------
-# SPECTACULAR (Swagger / OpenAPI)
-# ------------------------------------------------------------
+# ---------------- SPECTACULAR (SWAGGER) — FIXED ----------------
 SPECTACULAR_SETTINGS = {
     "TITLE": "SokoMkononi API",
     "DESCRIPTION": "SokoMkononi marketplace API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # Serve Swagger UI / Redoc assets from our own origin (sidecar)
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "REDOC_DIST": "SIDECAR",
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SORT_OPERATIONS": False,
 }
 
-if not DEBUG and env_bool("RESTRICT_DOCS", True):
+# Docs are PUBLIC by default. Flip RESTRICT_DOCS=True in .env to lock down.
+if not DEBUG and env_bool("RESTRICT_DOCS", False):
     SPECTACULAR_SETTINGS["SERVE_PERMISSIONS"] = [
         "rest_framework.permissions.IsAdminUser",
     ]
 
-# ------------------------------------------------------------
-# EMAIL
-# ------------------------------------------------------------
-EMAIL_BACKEND = os.environ.get(
-    "EMAIL_BACKEND",
-    "django.core.mail.backends.console.EmailBackend",
-)
-
+# ---------------- EMAIL ----------------
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = env_int("EMAIL_PORT", 587)
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-
-DEFAULT_FROM_EMAIL = os.environ.get(
-    "DEFAULT_FROM_EMAIL",
-    "SokoMkononi <info@sokomkononi.co.tz>",
-)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "SokoMkononi <info@sokomkononi.co.tz>")
 
 if not DEBUG and not EMAIL_HOST:
-    raise ImproperlyConfigured(
-        "EMAIL_HOST must be set when DEBUG=False."
-    )
+    raise ImproperlyConfigured("EMAIL_HOST must be set when DEBUG=False.")
 
-ADMINS = [
-    ("SokoMkononi Admin", os.environ.get("ADMIN_EMAIL", DEFAULT_FROM_EMAIL)),
-]
+ADMINS = [("SokoMkononi Admin", os.environ.get("ADMIN_EMAIL", DEFAULT_FROM_EMAIL))]
 MANAGERS = ADMINS
 
-# ------------------------------------------------------------
-# SOCIAL LOGIN
-# ------------------------------------------------------------
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 APPLE_CLIENT_ID = os.environ.get("APPLE_CLIENT_ID", "")
-
-# ------------------------------------------------------------
-# SMS (NextSMS)
-# ------------------------------------------------------------
 PYNEXTSMS_TOKEN = os.environ.get("PYNEXTSMS_TOKEN", "")
 PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
 
-# ------------------------------------------------------------
-# CELERY
-# ------------------------------------------------------------
-CELERY_BROKER_URL = os.environ.get(
-    "CELERY_BROKER_URL",
-    "redis://localhost:6379/0",
-)
-CELERY_RESULT_BACKEND = os.environ.get(
-    "CELERY_RESULT_BACKEND",
-    "redis://localhost:6379/0",
-)
-
+# ---------------- CELERY ----------------
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
-
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 10 * 60
 CELERY_TASK_SOFT_TIME_LIMIT = 8 * 60
@@ -444,114 +310,43 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
 CELERY_BEAT_SCHEDULE = {
-    "purge-soft-deleted": {
-        "task": "core.purge_soft_deleted",
-        "schedule": crontab(hour=3, minute=0),
-    },
-    "expire-stale-reservations": {
-        "task": "transactions.expire_stale_reservations",
-        "schedule": crontab(minute="*/15"),
-    },
-    "expire-unpaid-reservations": {
-        "task": "transactions.expire_unpaid_reservations",
-        "schedule": crontab(minute="*/10"),
-    },
-    "expire-stale-inspections": {
-        "task": "transactions.expire_stale_inspections",
-        "schedule": crontab(minute="*/15"),
-    },
-    "warn-expiring-reservations": {
-        "task": "transactions.warn_expiring_reservations",
-        "schedule": crontab(minute=0),
-    },
-    "expire-stale-boosts": {
-        "task": "boosting.expire_stale_boosts",
-        "schedule": crontab(minute="*/15"),
-    },
-    "expire-stale-banners": {
-        "task": "banners.expire_stale_banners",
-        "schedule": crontab(minute="*/15"),
-    },
-    "expire-stale-credits": {
-        "task": "credits.expire_stale_credits",
-        "schedule": crontab(hour=2, minute=30),
-    },
-    "cleanup-stale-services": {
-        "task": "credits.cleanup_stale_services",
-        "schedule": crontab(hour=2, minute=45),
-    },
+    "purge-soft-deleted": {"task": "core.purge_soft_deleted", "schedule": crontab(hour=3, minute=0)},
+    "expire-stale-reservations": {"task": "transactions.expire_stale_reservations", "schedule": crontab(minute="*/15")},
+    "expire-unpaid-reservations": {"task": "transactions.expire_unpaid_reservations", "schedule": crontab(minute="*/10")},
+    "expire-stale-inspections": {"task": "transactions.expire_stale_inspections", "schedule": crontab(minute="*/15")},
+    "warn-expiring-reservations": {"task": "transactions.warn_expiring_reservations", "schedule": crontab(minute=0)},
+    "expire-stale-boosts": {"task": "boosting.expire_stale_boosts", "schedule": crontab(minute="*/15")},
+    "expire-stale-banners": {"task": "banners.expire_stale_banners", "schedule": crontab(minute="*/15")},
+    "expire-stale-credits": {"task": "credits.expire_stale_credits", "schedule": crontab(hour=2, minute=30)},
+    "cleanup-stale-services": {"task": "credits.cleanup_stale_services", "schedule": crontab(hour=2, minute=45)},
+    "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
 }
 
-# ------------------------------------------------------------
-# SECURITY (production)
-# ------------------------------------------------------------
+# ---------------- SECURITY (prod) ----------------
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     USE_X_FORWARDED_HOST = True
-
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-
     SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
-
     SECURE_REFERRER_POLICY = "same-origin"
 
-# ------------------------------------------------------------
-# LOGGING
-# ------------------------------------------------------------
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {
-        "verbose": {
-            "format": (
-                "[{levelname}] {asctime} "
-                "{name}:{lineno} — {message}"
-            ),
-            "style": "{",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "verbose",
-        },
-    },
-    "root": {
-        "handlers": ["console"],
-        "level": "INFO",
-    },
+    "formatters": {"verbose": {"format": "[{levelname}] {asctime} {name}:{lineno} — {message}", "style": "{"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "verbose"}},
+    "root": {"handlers": ["console"], "level": "INFO"},
     "loggers": {
-        "django.request": {
-            "handlers": ["console"],
-            "level": "ERROR",
-            "propagate": False,
-        },
-        "django.security": {
-            "handlers": ["console"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "csp": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "celery": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
-        "apps": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
-        },
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        "django.security": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "csp": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "celery": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "apps": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }

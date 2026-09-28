@@ -60,8 +60,7 @@ class ConversationViewSet(viewsets.GenericViewSet):
     def retrieve(self, request, pk=None):
         conv = get_object_or_404(
             Conversation.objects
-            .select_related("listing", "buyer", "seller")
-            .prefetch_related("messages__sender"),
+            .select_related("listing", "buyer", "seller"),
             pk=pk,
         )
         if (request.user.id not in (conv.buyer_id, conv.seller_id)

@@ -1,3 +1,4 @@
+from rest_framework.exceptions import PermissionDenied
 from django.utils import timezone
 
 from ..models import Notification
@@ -33,7 +34,7 @@ def create_notification(
 
 def mark_notification_as_read(*, notification, user):
     if notification.recipient_id != user.id and not user.is_staff:
-        raise PermissionError(
+        raise PermissionDenied(
             "Huruhusiwi kubadilisha arifa ya mtumiaji mwingine."
         )
 

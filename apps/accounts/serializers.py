@@ -66,6 +66,13 @@ class RegisterSerializer(serializers.Serializer):
 
         return attrs
 
+    def validate_password(self, value):
+        try:
+            validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
+        return value
+
 
 # ============================================================
 # VERIFY OTP (registration)

@@ -3,11 +3,6 @@ from django.urls import path
 from .views_admin import AdminContentViewSet
 
 
-def _dispatch(request, kind, pk=None):
-    view = AdminContentViewSet.as_view({"get": "list_content", "post": "create_content"})
-    return view(request, kind=kind)
-
-
 urlpatterns = [
     # Banners
     path(

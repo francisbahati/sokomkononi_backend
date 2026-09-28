@@ -141,6 +141,14 @@ class BundlePurchase(models.Model):
         verbose_name = "Ununuzi wa kifurushi"
         verbose_name_plural = "Manunuzi ya vifurushi"
 
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "bundle"],
+                condition=models.Q(status="PENDING"),
+                name="uniq_pending_purchase_per_user_bundle",
+            ),
+        ]
+
         indexes = [
             models.Index(
                 fields=["user", "status"],

@@ -14,8 +14,8 @@ from .services.notification import (
 logger = logging.getLogger(__name__)
 
 
-@shared_task(name="notifications.create")
-def create_notification_task(
+@shared_task(name="notifications.create", bind=True, max_retries=3)
+def create_notification_task(self, 
     recipient_id,
     notification_type,
     title,

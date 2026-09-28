@@ -1,7 +1,6 @@
 """
-Banner ad creation. Reads the current Advertisement Fee config.
+Banner ad creation + activation. Reads the current Advertisement Fee config.
 """
-
 from datetime import timedelta
 
 from django.db import transaction
@@ -23,12 +22,11 @@ def _get_ad_fee_config():
 def create_banner_ad(*, listing_id, seller, payment_reference=""):
     config = _get_ad_fee_config()
 
-    # Lock the listing row — serializes concurrent banner creation for
-    # the same listing (prevents the "one active banner" race).
     try:
         listing = Listing.objects.select_for_update().get(pk=listing_id)
     except Listing.DoesNotExist:
         raise ValidationError({"listing": "Tangazo halipatikani."})
+
     if listing.seller_id != seller.id:
         raise ValidationError({"listing": "Huruhusiwi kutangaza tangazo ambalo si lako."})
     if listing.status != Listing.Status.AVAILABLE:
@@ -57,4 +55,39 @@ def create_banner_ad(*, listing_id, seller, payment_reference=""):
         payment_status="PENDING",
         expires_at=now + timedelta(days=config.days),
     )
+    return banner
+
+
+@transaction.atomic
+def mark_banner_paid_and_activate(*, banner, payment_reference):
+    """Mark a PENDING banner as PAID and flip it active."""
+    if not payment_reference:
+        raise ValidationError("Payment reference inahitajika.")
+    ref = payment_reference.strip()
+    if not ref:
+        raise ValidationError("Payment reference haiwezi kuwa tupu.")
+
+    banner = (
+        BannerAd.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "seller")
+        .get(pk=banner.pk)
+    )
+
+    if banner.payment_status == "PAID":
+        if banner.payment_reference == ref:
+            return banner
+        raise ValidationError("Banner hii tayari imelipiwa.")
+
+    if BannerAd.objects.filter(payment_reference=ref).exclude(pk=banner.pk).exists():
+        raise ValidationError("Payment reference hii tayari imetumika.")
+
+    now = timezone.now()
+    banner.payment_status = "PAID"
+    banner.payment_reference = ref
+    banner.paid_at = now
+    banner.active = True
+    banner.save(update_fields=[
+        "payment_status", "payment_reference", "paid_at", "active",
+    ])
     return banner

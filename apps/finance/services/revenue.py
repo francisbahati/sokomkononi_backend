@@ -66,14 +66,6 @@ def get_period_range(period):
     return start, end
 
 
-def _apply_date_filter(queryset, start, end, field="created_at"):
-    if start is None or end is None:
-        return queryset
-    return queryset.filter(**{
-        f"{field}__gte": start, f"{field}__lt": end,
-    })
-
-
 # ============================================================
 # DASHBOARD
 # ============================================================
@@ -119,7 +111,7 @@ def calculate_financial_dashboard(period="all"):
     paid_boosts = boosts.count()
 
     # ---------------- Advertisement (banners) ----------------
-    banners = BannerAd.objects.all()
+    banners = BannerAd.objects.filter(payment_status="PAID")
     if start and end:
         banners = banners.filter(
             created_at__gte=start, created_at__lt=end,
@@ -301,7 +293,7 @@ def get_revenue_records(period="all", source="all"):
 
     # ---------------- Advertisements ----------------
     if source in {"all", "advertisement"}:
-        qs = BannerAd.objects.all().select_related("seller", "listing")
+        qs = BannerAd.objects.filter(payment_status="PAID").select_related("seller", "listing")
         if start and end:
             qs = qs.filter(
                 created_at__gte=start, created_at__lt=end,
@@ -312,9 +304,9 @@ def get_revenue_records(period="all", source="all"):
                 "source": "advertisement",
                 "source_label": "Advertisement Fee",
                 "amount": item.amount or ZERO,
-                "payment_status": "PAID",
+                "payment_status": item.payment_status,
                 "payment_reference": item.payment_reference or "",
-                "paid_at": item.created_at,
+                "paid_at": item.paid_at or item.created_at,
                 "refunded_at": None,
                 "seller_id": item.seller_id,
                 "seller_name": getattr(item.seller, "name", ""),

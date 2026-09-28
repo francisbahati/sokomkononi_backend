@@ -84,7 +84,7 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "storages",
-    "csp",                            # django-csp for Content Security Policy
+    "csp",
 
     # Local apps
     "apps.core",
@@ -130,7 +130,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "csp.middleware.CSPMiddleware",   # Must be near the end
+    "csp.middleware.CSPMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -200,23 +200,25 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024       # 10 MB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024       # 10 MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
 
 # ------------------------------------------------------------
 # R2 (S3-compatible) STORAGE
 # ------------------------------------------------------------
 # NOTE: R2_CUSTOM_DOMAIN must be a BARE domain (no https://).
-# django-storages prepends the scheme itself.
+# django-storages prepends the scheme itself. We also tolerate
+# and fix typos like "https//" (missing colon).
 R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "")
 R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 R2_MEDIA_LOCATION = os.environ.get("R2_MEDIA_LOCATION", "media")
 
-# Normalize: strip scheme and trailing slash if present.
 _raw_domain = (os.environ.get("R2_CUSTOM_DOMAIN", "") or "").strip().rstrip("/")
+# Fix common typos before stripping the scheme
+_raw_domain = _raw_domain.replace("https//", "https://").replace("http//", "http://")
 for _prefix in ("https://", "http://"):
     if _raw_domain.startswith(_prefix):
         _raw_domain = _raw_domain[len(_prefix):]
@@ -241,6 +243,35 @@ STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
+}
+
+# ------------------------------------------------------------
+# CONTENT SECURITY POLICY
+# ------------------------------------------------------------
+R2_PUBLIC_ORIGIN = f"https://{R2_CUSTOM_DOMAIN}" if R2_CUSTOM_DOMAIN else None
+
+_CSP_IMG_SRC = ["'self'", "data:", "blob:"]
+_CSP_MEDIA_SRC = ["'self'"]
+if R2_PUBLIC_ORIGIN:
+    _CSP_IMG_SRC.append(R2_PUBLIC_ORIGIN)
+    _CSP_MEDIA_SRC.append(R2_PUBLIC_ORIGIN)
+
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "img-src": _CSP_IMG_SRC,
+        "media-src": _CSP_MEDIA_SRC,
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "font-src": ["'self'", "data:"],
+        "connect-src": ["'self'"] + [
+            o for o in ["https://api.sokomkononi.co.tz", R2_PUBLIC_ORIGIN] if o
+        ],
+        "frame-ancestors": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+    },
+    "REPORT_ONLY": os.environ.get("CSP_REPORT_ONLY", "true").lower() in ("1", "true", "yes", "on"),
 }
 
 # ------------------------------------------------------------
@@ -280,44 +311,6 @@ CSRF_TRUSTED_ORIGINS = env_list(
     "CSRF_TRUSTED_ORIGINS",
     "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz,https://api.sokomkononi.co.tz",
 )
-
-# ------------------------------------------------------------
-# CONTENT SECURITY POLICY (django-csp)
-# ------------------------------------------------------------
-# The public R2 domain MUST be in img-src and media-src, otherwise the
-# browser refuses to load images even if the URL is technically correct.
-R2_PUBLIC_ORIGIN = (
-    f"https://{R2_CUSTOM_DOMAIN}" if R2_CUSTOM_DOMAIN else None
-)
-
-_CSP_IMG_SRC = ["'self'", "data:", "blob:"]
-_CSP_MEDIA_SRC = ["'self'"]
-if R2_PUBLIC_ORIGIN:
-    _CSP_IMG_SRC.append(R2_PUBLIC_ORIGIN)
-    _CSP_MEDIA_SRC.append(R2_PUBLIC_ORIGIN)
-
-CONTENT_SECURITY_POLICY = {
-    "DIRECTIVES": {
-        "default-src": ["'self'"],
-        "img-src": _CSP_IMG_SRC,
-        "media-src": _CSP_MEDIA_SRC,
-        "script-src": ["'self'"],
-        "style-src": ["'self'", "'unsafe-inline'"],
-        "font-src": ["'self'", "data:"],
-        "connect-src": ["'self'"] + [
-            o for o in [
-                "https://api.sokomkononi.co.tz",
-                R2_PUBLIC_ORIGIN,
-            ] if o
-        ],
-        "frame-ancestors": ["'none'"],
-        "base-uri": ["'self'"],
-        "form-action": ["'self'"],
-    },
-    # Start in report-only mode: violations are logged but NOT blocked.
-    # Once you confirm the console is clean, set this to False to enforce.
-    "REPORT_ONLY": env_bool("CSP_REPORT_ONLY", True),
-}
 
 # ------------------------------------------------------------
 # DRF

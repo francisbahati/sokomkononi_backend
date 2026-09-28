@@ -45,10 +45,15 @@ if not DEBUG:
     if len(SECRET_KEY) < 50:
         raise ImproperlyConfigured("SECRET_KEY must be at least 50 chars in production.")
 
-ALLOWED_HOSTS = env_list(
-    "ALLOWED_HOSTS",
-    "127.0.0.1,localhost,sokomkononi.co.tz,www.sokomkononi.co.tz,api.sokomkononi.co.tz",
-)
+ALLOWED_HOSTS = list(dict.fromkeys(
+    env_list("ALLOWED_HOSTS", "127.0.0.1,localhost") + [
+        "sokomkononi.co.tz",
+        "www.sokomkononi.co.tz",
+        "api.sokomkononi.co.tz",
+        "127.0.0.1",
+        "localhost",
+    ]
+))
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
@@ -208,10 +213,13 @@ CORS_ALLOW_HEADERS = [
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
 
-CSRF_TRUSTED_ORIGINS = env_list(
-    "CSRF_TRUSTED_ORIGINS",
-    "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz,https://api.sokomkononi.co.tz",
-)
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(
+    env_list("CSRF_TRUSTED_ORIGINS", "") + [
+        "https://sokomkononi.co.tz",
+        "https://www.sokomkononi.co.tz",
+        "https://api.sokomkononi.co.tz",
+    ]
+))
 
 # ---------------- DRF ----------------
 REST_FRAMEWORK = {

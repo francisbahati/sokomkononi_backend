@@ -35,17 +35,17 @@ def _post(path, payload):
         )
     except requests.RequestException as exc:
         logger.exception("FimiPay request failed: %s", url)
-        raise ValidationError({"detail": "Imeshindwa kuwasiliana na FimiPay."}) from exc
+        raise ValidationError("Imeshindwa kuwasiliana na FimiPay.") from exc
 
     try:
         data = response.json()
     except ValueError:
-        raise ValidationError({"detail": "Jibu la FimiPay si sahihi (si JSON)."})
+        raise ValidationError("Jibu la FimiPay si sahihi (si JSON).")
 
     if not response.ok:
         message = data.get("message") or data.get("error") or f"FimiPay error ({response.status_code})"
         logger.warning("FimiPay error %s: %s", response.status_code, message)
-        raise ValidationError({"detail": message})
+        raise ValidationError(message)
     return data
 
 
@@ -55,15 +55,15 @@ def _get(path):
         response = requests.get(url, headers=_headers(), timeout=REQUEST_TIMEOUT)
     except requests.RequestException as exc:
         logger.exception("FimiPay GET failed: %s", url)
-        raise ValidationError({"detail": "Imeshindwa kuwasiliana na FimiPay."}) from exc
+        raise ValidationError("Imeshindwa kuwasiliana na FimiPay.") from exc
 
     try:
         data = response.json()
     except ValueError:
-        raise ValidationError({"detail": "Jibu la FimiPay si sahihi."})
+        raise ValidationError("Jibu la FimiPay si sahihi.")
 
     if not response.ok:
-        raise ValidationError({"detail": data.get("message") or "FimiPay error."})
+        raise ValidationError(data.get("message") or "FimiPay error.")
     return data
 
 
@@ -91,7 +91,7 @@ def create_order(*, order_id, amount, buyer_phone, buyer_email="", buyer_name=""
     response = _post("/payment/create_order", payload)
     data = response.get("data") or {}
     if not data.get("order_id"):
-        raise ValidationError({"detail": "FimiPay hakurudisha order_id."})
+        raise ValidationError("FimiPay hakurudisha order_id.")
     return data
 
 

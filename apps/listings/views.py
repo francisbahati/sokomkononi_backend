@@ -896,7 +896,7 @@ class ListingFeePaymentView(APIView):
             data = initiate_listing_fee_payment(listing=listing, user=request.user)
         except ValidationError as exc:
             return Response(
-                {"detail": getattr(exc, "detail", str(exc))},
+                exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

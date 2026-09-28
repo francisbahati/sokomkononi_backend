@@ -12,7 +12,7 @@ from .serializers import (
     LeadingPaymentSerializer,
     ListingLeadingSerializer,
 )
-from .services.leading import create_leading, mark_leading_paid
+from .services.leading import create_leading, initiate_leading_payment
 
 
 class LeadingFeeConfigViewSet(viewsets.GenericViewSet):
@@ -74,6 +74,8 @@ class ListingLeadingViewSet(viewsets.GenericViewSet):
         leading = get_object_or_404(self.get_queryset(), pk=pk)
         if leading.seller_id != request.user.id and not request.user.is_staff:
             return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
+        data = initiate_leading_payment(leading=leading, user=request.user)
+        return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
         s = LeadingPaymentSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         leading = mark_leading_paid(

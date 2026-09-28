@@ -8,7 +8,7 @@ from .serializers import (
     BundlePurchaseSerializer,
     BundleSerializer,
 )
-from .services import create_purchase, mark_purchase_paid
+from .services import create_purchase, initiate_purchase_payment
 
 
 class IsAdminOrReadOnly(permissions.BasePermission):
@@ -92,12 +92,6 @@ class BundlePurchaseViewSet(viewsets.GenericViewSet):
     def pay(self, request, pk=None):
         purchase = self.get_object()
         if purchase.user_id != request.user.id and not request.user.is_staff:
-            return Response(
-                {"detail": "Huna ruhusa."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        purchase = mark_purchase_paid(
-            purchase=purchase,
-            payment_reference=request.data.get("payment_reference", ""),
-        )
-        return Response(BundlePurchaseSerializer(purchase).data)
+            return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
+        data = initiate_purchase_payment(purchase=purchase, user=request.user)
+        return Response({"fimipay": data}, status=status.HTTP_201_CREATED)

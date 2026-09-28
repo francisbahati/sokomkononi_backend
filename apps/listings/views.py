@@ -64,9 +64,7 @@ from .services.listing_moderation import (
     reject_listing,
 )
 
-from .services.listing_payment import mark_listing_fee_as_paid
 from .views_helpers import require_int_listing_id
-
 
 # ============================================================================
 # CATEGORY SLUGS
@@ -79,7 +77,6 @@ CATEGORY_SLUGS = {
     "business": "biashara-zinazouzwa",
     "equipment": "mashine-heavy-equipment",
 }
-
 
 # ============================================================================
 # LISTING VIEWSET
@@ -271,7 +268,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-
 # ============================================================================
 # REUSABLE CATEGORY DETAILS VIEWSET
 # ============================================================================
@@ -454,7 +450,6 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-
 # ============================================================================
 # PROPERTY
 # ============================================================================
@@ -469,7 +464,6 @@ class PropertyDetailsViewSet(CategoryDetailsViewSet):
         "Maelezo ya nyumba/jengo tayari yameongezwa kwenye tangazo hili."
     )
     deleted_message = "Maelezo ya nyumba/jengo yamefutwa."
-
 
 # ============================================================================
 # LAND
@@ -486,7 +480,6 @@ class LandDetailsViewSet(CategoryDetailsViewSet):
     )
     deleted_message = "Maelezo ya ardhi yamefutwa."
 
-
 # ============================================================================
 # VEHICLE
 # ============================================================================
@@ -501,7 +494,6 @@ class VehicleDetailsViewSet(CategoryDetailsViewSet):
         "Maelezo ya gari tayari yameongezwa kwenye tangazo hili."
     )
     deleted_message = "Maelezo ya gari yamefutwa."
-
 
 # ============================================================================
 # BUSINESS
@@ -518,7 +510,6 @@ class BusinessDetailsViewSet(CategoryDetailsViewSet):
     )
     deleted_message = "Maelezo ya biashara yamefutwa."
 
-
 # ============================================================================
 # EQUIPMENT
 # ============================================================================
@@ -533,7 +524,6 @@ class EquipmentDetailsViewSet(CategoryDetailsViewSet):
         "Maelezo ya mashine tayari yameongezwa kwenye tangazo hili."
     )
     deleted_message = "Maelezo ya mashine yamefutwa."
-
 
 # ============================================================================
 # LISTING IMAGE VIEWSET
@@ -807,7 +797,6 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-
 # ============================================================================
 # LISTING FEE API
 # ============================================================================
@@ -859,7 +848,6 @@ class ListingFeeView(APIView):
             status=status.HTTP_200_OK,
         )
 
-
 # ============================================================================
 # LISTING FEE PAYMENT API
 # ============================================================================
@@ -880,6 +868,7 @@ class ListingFeeView(APIView):
     },
 )
 class ListingFeePaymentView(APIView):
+    """Initiate a FimiPay collection for a listing fee."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, listing_id):
@@ -888,72 +877,36 @@ class ListingFeePaymentView(APIView):
             return err
         listing = get_object_or_404(Listing, id=listing_id)
 
-        if (
-            not request.user.is_staff
-            and listing.seller_id != request.user.id
-        ):
+        if not request.user.is_staff and listing.seller_id != request.user.id:
             return Response(
                 {"detail": "Huna ruhusa ya kulipia ada ya tangazo hili."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        serializer = ListingFeePaymentSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
         try:
             create_listing_fee(listing)
         except DjangoValidationError as exc:
-            msgs = getattr(exc, "messages", None) or [str(exc)]
             return Response(
-                {"detail": msgs},
+                {"detail": getattr(exc, "messages", [str(exc)])},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        from .services.listing_payment import initiate_listing_fee_payment
         try:
-            listing_fee = mark_listing_fee_as_paid(
-                listing,
-                serializer.validated_data["payment_reference"],
-            )
-        except ListingFee.DoesNotExist:
-            return Response(
-                {"detail": "Ada ya tangazo haijapatikana."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            data = initiate_listing_fee_payment(listing=listing, user=request.user)
         except ValidationError as exc:
-            detail = getattr(exc, "detail", str(exc))
             return Response(
-                {"detail": detail},
+                {"detail": getattr(exc, "detail", str(exc))},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         return Response(
-            ListingFeeSerializer(
-                listing_fee, context={"request": request},
-            ).data,
-            status=status.HTTP_200_OK,
+            {
+                "message": "Malipo yameanzishwa. Angalia simu yako kuidhinisha.",
+                "fimipay": data,
+            },
+            status=status.HTTP_201_CREATED,
         )
-
-
-# ============================================================================
-# ADMIN LISTING MODERATION
-# ============================================================================
-
-@extend_schema(
-    summary="Orodha ya matangazo yanayosubiri idhini",
-    description=(
-        "Huonyesha matangazo yote yenye hali ya "
-        "PENDING_APPROVAL kwa wasimamizi wa mfumo pekee."
-    ),
-    responses={
-        200: AdminPendingListingSerializer(many=True),
-        403: OpenApiResponse(
-            description=(
-                "Ni wasimamizi wa mfumo pekee wanaoweza "
-                "kuona matangazo yanayosubiri idhini."
-            )
-        ),
-    },
-)
 
 class AdminPendingListingsView(GenericAPIView):
     permission_classes = [permissions.IsAdminUser]
@@ -980,7 +933,6 @@ class AdminPendingListingsView(GenericAPIView):
             {"count": listings.count(), "results": serializer.data},
             status=status.HTTP_200_OK,
         )
-
 
 # ============================================================================
 # ADMIN APPROVE LISTING
@@ -1032,7 +984,6 @@ class AdminApproveListingView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
 
 # ============================================================================
 # ADMIN REJECT LISTING

@@ -21,6 +21,7 @@ from .services.boost import (
     cancel_boost,
     create_boost,
     mark_boost_as_paid,
+    initiate_boost_payment,
 )
 
 
@@ -125,26 +126,12 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(qs, many=True).data)
 
-    @extend_schema(
-        request=BoostPaymentSerializer,
-        responses={200: ListingBoostSerializer},
-    )
+    @extend_schema(request=None, responses={201: ListingBoostSerializer})
     @action(detail=True, methods=["post"], url_path="pay")
     def pay(self, request, pk=None):
         boost = get_object_or_404(self.get_queryset(), pk=pk)
-
-        serializer = BoostPaymentSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        boost = mark_boost_as_paid(
-            boost=boost,
-            payment_reference=serializer.validated_data["payment_reference"],
-        )
-
-        return Response(
-            self.get_serializer(boost).data,
-            status=status.HTTP_200_OK,
-        )
+        data = initiate_boost_payment(boost=boost, user=request.user)
+        return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         request=None,

@@ -91,3 +91,42 @@ def mark_banner_paid_and_activate(*, banner, payment_reference):
         "payment_status", "payment_reference", "paid_at", "active",
     ])
     return banner
+
+
+# ============================================================================
+# FIMIPAY INTEGRATION
+# ============================================================================
+from apps.payments.fimipay import create_order as _fp_create_order
+
+
+@transaction.atomic
+def initiate_banner_payment(*, banner, user):
+    if banner.seller_id != user.id:
+        raise ValidationError("Huruhusiwi kulipia banner hii.")
+    order_id = f"ADV-{banner.pk}"
+    data = _fp_create_order(
+        order_id=order_id,
+        amount=banner.amount,
+        buyer_phone=user.phone or "",
+        buyer_email=user.email or "",
+        buyer_name=user.name or "",
+        payment_method="mobile",
+    )
+    banner.payment_reference = data.get("order_id") or order_id
+    banner.save(update_fields=["payment_reference"])
+    return data
+
+
+@transaction.atomic
+def mark_banner_paid_from_webhook(*, ref_id, payment_reference):
+    banner = BannerAd.objects.select_for_update().get(pk=ref_id)
+    if banner.payment_status == "PAID":
+        return banner
+    banner.payment_status = "PAID"
+    banner.payment_reference = payment_reference
+    banner.paid_at = timezone.now()
+    banner.active = True
+    banner.save(update_fields=[
+        "payment_status", "payment_reference", "paid_at", "active",
+    ])
+    return banner

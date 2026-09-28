@@ -304,6 +304,18 @@ APPLE_CLIENT_ID = os.environ.get("APPLE_CLIENT_ID", "")
 PYNEXTSMS_TOKEN = os.environ.get("PYNEXTSMS_TOKEN", "")
 PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
 
+# ---------------- FIMIPAY PAYMENTS ----------------
+FIMIPAY_SECRET_KEY = os.environ.get("FIMIPAY_SECRET_KEY", "")
+FIMIPAY_WEBHOOK_SECRET = os.environ.get("FIMIPAY_WEBHOOK_SECRET", "")
+FIMIPAY_BASE_URL = os.environ.get("FIMIPAY_BASE_URL", "https://fimipay.com/api/v1")
+FIMIPAY_CURRENCY = os.environ.get("FIMIPAY_CURRENCY", "TZS")
+
+if not DEBUG and not FIMIPAY_SECRET_KEY:
+    raise ImproperlyConfigured("FIMIPAY_SECRET_KEY must be set when DEBUG=False.")
+if not DEBUG and not FIMIPAY_WEBHOOK_SECRET:
+    raise ImproperlyConfigured("FIMIPAY_WEBHOOK_SECRET must be set when DEBUG=False.")
+
+
 # ---------------- CELERY ----------------
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")

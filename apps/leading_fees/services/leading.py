@@ -141,3 +141,54 @@ def expire_stale_leading():
                 leading_until=None,
             )
     return count
+
+
+# ============================================================================
+# FIMIPAY INTEGRATION
+# ============================================================================
+from apps.payments.fimipay import create_order as _fp_create_order
+
+
+@transaction.atomic
+def initiate_leading_payment(*, leading, user):
+    leading = (
+        ListingLeading.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "seller")
+        .get(pk=leading.pk)
+    )
+    if leading.seller_id != user.id:
+        raise ValidationError("Huruhusiwi kulipia leading hii.")
+
+    order_id = f"LDS-{leading.pk}"
+    data = _fp_create_order(
+        order_id=order_id,
+        amount=leading.price,
+        buyer_phone=user.phone or "",
+        buyer_email=user.email or "",
+        buyer_name=user.name or "",
+        payment_method="mobile",
+    )
+    leading.payment_reference = data.get("order_id") or order_id
+    leading.save(update_fields=["payment_reference", "updated_at"])
+    return data
+
+
+@transaction.atomic
+def mark_leading_paid_from_webhook(*, ref_id, payment_reference):
+    leading = (
+        ListingLeading.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "seller")
+        .get(pk=ref_id)
+    )
+    if leading.payment_status == ListingLeading.PaymentStatus.PAID:
+        return leading
+
+    leading.payment_status = ListingLeading.PaymentStatus.PAID
+    leading.payment_reference = payment_reference
+    leading.paid_at = timezone.now()
+    leading.save(update_fields=[
+        "payment_status", "payment_reference", "paid_at", "updated_at",
+    ])
+    return _activate(leading)

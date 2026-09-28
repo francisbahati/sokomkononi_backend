@@ -2,55 +2,70 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from apps.payments.fimipay import create_order
+
 from ..models import Listing, ListingFee
 
 
 @transaction.atomic
-def mark_listing_fee_as_paid(listing, payment_reference):
-    if not payment_reference:
-        raise ValidationError("Payment reference inahitajika.")
-
-    payment_reference = payment_reference.strip()
-    if not payment_reference:
-        raise ValidationError("Payment reference haiwezi kuwa tupu.")
-
+def initiate_listing_fee_payment(*, listing, user):
     listing = (
         Listing.objects
         .select_for_update(of=("self",))
         .select_related("seller", "category")
         .get(pk=listing.pk)
     )
+    if listing.seller_id != user.id:
+        raise ValidationError("Huruhusiwi kulipia ada ya tangazo hili.")
+    if listing.status != Listing.Status.DRAFT:
+        raise ValidationError("Ada inaweza kulipwa tu kwa tangazo lenye hali ya DRAFT.")
 
     try:
-        listing_fee = (
-            ListingFee.objects
-            .select_for_update()
-            .get(listing=listing)
-        )
+        listing_fee = ListingFee.objects.select_for_update().get(listing=listing)
     except ListingFee.DoesNotExist:
         raise ValidationError("Ada ya tangazo haijatengenezwa bado.")
-
-    if listing.status != Listing.Status.DRAFT:
-        raise ValidationError(
-            "Ada inaweza kulipwa tu kwa tangazo lenye hali ya DRAFT."
-        )
 
     if listing_fee.payment_status == ListingFee.PaymentStatus.PAID:
         raise ValidationError("Ada ya tangazo hili tayari imelipwa.")
 
-    if ListingFee.objects.filter(
-        payment_reference=payment_reference
-    ).exclude(pk=listing_fee.pk).exists():
-        raise ValidationError("Payment reference hii tayari imetumika.")
+    order_id = f"LSF-{listing.id}"
+    data = create_order(
+        order_id=order_id,
+        amount=listing_fee.amount,
+        buyer_phone=user.phone or "",
+        buyer_email=user.email or "",
+        buyer_name=user.name or "",
+        payment_method="mobile",
+    )
+
+    listing_fee.payment_reference = data.get("order_id") or order_id
+    listing_fee.save(update_fields=["payment_reference", "updated_at"])
+    return data
+
+
+@transaction.atomic
+def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
+    try:
+        listing_fee = (
+            ListingFee.objects
+            .select_for_update()
+            .select_related("listing")
+            .get(listing_id=ref_id)
+        )
+    except ListingFee.DoesNotExist:
+        return None
+
+    if listing_fee.payment_status == ListingFee.PaymentStatus.PAID:
+        return listing_fee
 
     listing_fee.payment_status = ListingFee.PaymentStatus.PAID
-    listing_fee.payment_reference = payment_reference
+    listing_fee.payment_reference = payment_reference or listing_fee.payment_reference
     listing_fee.paid_at = timezone.now()
     listing_fee.save(update_fields=[
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
-
-    listing.status = Listing.Status.PENDING_APPROVAL
-    listing.save(update_fields=["status", "updated_at"])
-
+    Listing.objects.filter(pk=ref_id).update(
+        status=Listing.Status.PENDING_APPROVAL,
+        updated_at=timezone.now(),
+    )
     return listing_fee

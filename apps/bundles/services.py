@@ -94,3 +94,59 @@ def mark_purchase_paid(*, purchase, payment_reference=""):
     )
 
     return purchase
+
+
+# ============================================================================
+# FIMIPAY INTEGRATION
+# ============================================================================
+from apps.payments.fimipay import create_order as _fp_create_order
+
+
+@transaction.atomic
+def initiate_purchase_payment(*, purchase, user):
+    if purchase.user_id != user.id:
+        raise ValidationError("Huruhusiwi kulipia ununuzi huu.")
+    order_id = f"BND-{purchase.pk}"
+    data = _fp_create_order(
+        order_id=order_id,
+        amount=purchase.amount,
+        buyer_phone=user.phone or "",
+        buyer_email=user.email or "",
+        buyer_name=user.name or "",
+        payment_method="mobile",
+    )
+    purchase.payment_reference = data.get("order_id") or order_id
+    purchase.save(update_fields=["payment_reference"])
+    return data
+
+
+@transaction.atomic
+def mark_purchase_paid_from_webhook(*, ref_id, payment_reference):
+    purchase = (
+        BundlePurchase.objects
+        .select_for_update()
+        .select_related("bundle")
+        .get(pk=ref_id)
+    )
+    if purchase.status == BundlePurchase.Status.PAID:
+        return purchase
+
+    now = timezone.now()
+    expires_at = now + timedelta(days=purchase.bundle.validity_days)
+    purchase.status = BundlePurchase.Status.PAID
+    purchase.payment_reference = payment_reference
+    purchase.paid_at = now
+    purchase.expires_at = expires_at
+    purchase.save(update_fields=[
+        "status", "payment_reference", "paid_at", "expires_at",
+    ])
+    from apps.credits.services import grant_bundle_credits
+    grant_bundle_credits(
+        user=purchase.user,
+        credits=purchase.credits_snapshot or {},
+        services=purchase.services_snapshot or [],
+        expires_at=expires_at,
+        bundle_code=purchase.bundle.code,
+        bundle_name=purchase.bundle.name_sw,
+    )
+    return purchase

@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 from .models import BannerAd
 from .serializers import BannerAdCreateSerializer, BannerAdSerializer
-from .services import create_banner_ad, mark_banner_paid_and_activate
+from .services import create_banner_ad, initiate_banner_payment
 
 
 class BannerAdViewSet(viewsets.GenericViewSet):
@@ -67,20 +67,11 @@ class BannerAdViewSet(viewsets.GenericViewSet):
     def pay(self, request, pk=None):
         banner = BannerAd.objects.filter(pk=pk).first()
         if not banner:
-            return Response(
-                {"detail": "Haipatikani."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"detail": "Haipatikani."}, status=status.HTTP_404_NOT_FOUND)
         if banner.seller_id != request.user.id and not request.user.is_staff:
-            return Response(
-                {"detail": "Huna ruhusa."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        ref = (request.data.get("payment_reference") or "").strip()
-        banner = mark_banner_paid_and_activate(
-            banner=banner, payment_reference=ref,
-        )
-        return Response(BannerAdSerializer(banner).data)
+            return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
+        data = initiate_banner_payment(banner=banner, user=request.user)
+        return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
 
     def destroy(self, request, pk=None):
         banner = BannerAd.objects.filter(pk=pk).first()

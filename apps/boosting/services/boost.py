@@ -340,3 +340,55 @@ def pay_boost_with_credits(*, boost, user):
     ])
 
     return boost
+
+
+# ============================================================================
+# FIMIPAY INTEGRATION
+# ============================================================================
+from apps.payments.fimipay import create_order as _fp_create_order
+
+
+@db_transaction.atomic
+def initiate_boost_payment(*, boost, user):
+    boost = (
+        ListingBoost.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "seller", "package")
+        .get(pk=boost.pk)
+    )
+    if boost.seller_id != user.id:
+        raise ValidationError("Huruhusiwi kulipia boost hii.")
+    if boost.payment_status == ListingBoost.PaymentStatus.PAID:
+        raise ValidationError("Boost hii tayari imelipiwa.")
+
+    order_id = f"BST-{boost.pk}"
+    data = _fp_create_order(
+        order_id=order_id,
+        amount=boost.amount,
+        buyer_phone=user.phone or "",
+        buyer_email=user.email or "",
+        buyer_name=user.name or "",
+        payment_method="mobile",
+    )
+    boost.payment_reference = data.get("order_id") or order_id
+    boost.save(update_fields=["payment_reference", "updated_at"])
+    return data
+
+
+@db_transaction.atomic
+def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
+    boost = (
+        ListingBoost.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "seller", "package")
+        .get(pk=ref_id)
+    )
+    if boost.payment_status == ListingBoost.PaymentStatus.PAID:
+        return boost
+    boost.payment_status = ListingBoost.PaymentStatus.PAID
+    boost.payment_reference = payment_reference
+    boost.paid_at = timezone.now()
+    boost.save(update_fields=[
+        "payment_status", "payment_reference", "paid_at", "updated_at",
+    ])
+    return boost

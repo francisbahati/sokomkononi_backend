@@ -70,7 +70,11 @@ class BannerAdViewSet(viewsets.GenericViewSet):
             return Response({"detail": "Haipatikani."}, status=status.HTTP_404_NOT_FOUND)
         if banner.seller_id != request.user.id and not request.user.is_staff:
             return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
-        data = initiate_banner_payment(banner=banner, user=request.user)
+        data = initiate_banner_payment(
+            banner=banner, user=request.user,
+            payment_method=request.data.get("payment_method", "mobile"),
+            phone=request.data.get("phone", ""),
+        )
         return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
 
     def destroy(self, request, pk=None):

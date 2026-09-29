@@ -96,11 +96,14 @@ def mark_banner_paid_and_activate(*, banner, payment_reference):
 # ============================================================================
 # FIMIPAY INTEGRATION
 # ============================================================================
-from apps.payments.fimipay import create_order as _fp_create_order
+from apps.payments.fimipay import (
+    create_order as _fp_create_order,
+    normalize_payment_method as _fp_normalize_method,
+)
 
 
 @transaction.atomic
-def initiate_banner_payment(*, banner, user):
+def initiate_banner_payment(*, banner, user, payment_method='mobile', phone=''):
     if banner.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia banner hii.")
     from apps.payments.fimipay import get_order_status as _fp_get_status
@@ -118,10 +121,10 @@ def initiate_banner_payment(*, banner, user):
     data = _fp_create_order(
         order_id=order_id,
         amount=banner.amount,
-        buyer_phone=user.phone or "",
+        buyer_phone=phone or user.phone or "",
         buyer_email=user.email or "",
         buyer_name=user.name or "",
-        payment_method="mobile",
+        payment_method=_fp_normalize_method(payment_method),
     )
     banner.payment_reference = data.get("order_id") or order_id
     banner.save(update_fields=["payment_reference"])

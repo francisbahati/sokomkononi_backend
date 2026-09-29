@@ -130,7 +130,11 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="pay")
     def pay(self, request, pk=None):
         boost = get_object_or_404(self.get_queryset(), pk=pk)
-        data = initiate_boost_payment(boost=boost, user=request.user)
+        data = initiate_boost_payment(
+            boost=boost, user=request.user,
+            payment_method=request.data.get("payment_method", "mobile"),
+            phone=request.data.get("phone", ""),
+        )
         return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
 
     @extend_schema(

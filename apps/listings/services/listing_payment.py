@@ -2,13 +2,16 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from apps.payments.fimipay import create_order
+from apps.payments.fimipay import (
+    create_order,
+    normalize_payment_method as _fp_normalize_method,
+)
 
 from ..models import Listing, ListingFee
 
 
 @transaction.atomic
-def initiate_listing_fee_payment(*, listing, user):
+def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phone=''):
     listing = (
         Listing.objects
         .select_for_update(of=("self",))
@@ -51,10 +54,10 @@ def initiate_listing_fee_payment(*, listing, user):
     data = create_order(
         order_id=order_id,
         amount=listing_fee.amount,
-        buyer_phone=user.phone or "",
+        buyer_phone=phone or user.phone or "",
         buyer_email=user.email or "",
         buyer_name=user.name or "",
-        payment_method="mobile",
+        payment_method=_fp_normalize_method(payment_method),
     )
 
     listing_fee.payment_reference = data.get("order_id") or order_id

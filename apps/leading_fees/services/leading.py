@@ -146,11 +146,14 @@ def expire_stale_leading():
 # ============================================================================
 # FIMIPAY INTEGRATION
 # ============================================================================
-from apps.payments.fimipay import create_order as _fp_create_order
+from apps.payments.fimipay import (
+    create_order as _fp_create_order,
+    normalize_payment_method as _fp_normalize_method,
+)
 
 
 @transaction.atomic
-def initiate_leading_payment(*, leading, user):
+def initiate_leading_payment(*, leading, user, payment_method='mobile', phone=''):
     leading = (
         ListingLeading.objects
         .select_for_update(of=("self",))
@@ -175,10 +178,10 @@ def initiate_leading_payment(*, leading, user):
     data = _fp_create_order(
         order_id=order_id,
         amount=leading.price,
-        buyer_phone=user.phone or "",
+        buyer_phone=phone or user.phone or "",
         buyer_email=user.email or "",
         buyer_name=user.name or "",
-        payment_method="mobile",
+        payment_method=_fp_normalize_method(payment_method),
     )
     leading.payment_reference = data.get("order_id") or order_id
     leading.save(update_fields=["payment_reference", "updated_at"])

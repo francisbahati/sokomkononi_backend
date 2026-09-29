@@ -893,7 +893,11 @@ class ListingFeePaymentView(APIView):
 
         from .services.listing_payment import initiate_listing_fee_payment
         try:
-            data = initiate_listing_fee_payment(listing=listing, user=request.user)
+            data = initiate_listing_fee_payment(
+            listing=listing, user=request.user,
+            payment_method=request.data.get("payment_method", "mobile"),
+            phone=request.data.get("phone", ""),
+        )
         except ValidationError as exc:
             return Response(
                 exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail},

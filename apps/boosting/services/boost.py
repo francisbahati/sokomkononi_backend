@@ -345,11 +345,14 @@ def pay_boost_with_credits(*, boost, user):
 # ============================================================================
 # FIMIPAY INTEGRATION
 # ============================================================================
-from apps.payments.fimipay import create_order as _fp_create_order
+from apps.payments.fimipay import (
+    create_order as _fp_create_order,
+    normalize_payment_method as _fp_normalize_method,
+)
 
 
 @db_transaction.atomic
-def initiate_boost_payment(*, boost, user):
+def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
     boost = (
         ListingBoost.objects
         .select_for_update(of=("self",))
@@ -376,10 +379,10 @@ def initiate_boost_payment(*, boost, user):
     data = _fp_create_order(
         order_id=order_id,
         amount=boost.amount,
-        buyer_phone=user.phone or "",
+        buyer_phone=phone or user.phone or "",
         buyer_email=user.email or "",
         buyer_name=user.name or "",
-        payment_method="mobile",
+        payment_method=_fp_normalize_method(payment_method),
     )
     boost.payment_reference = data.get("order_id") or order_id
     boost.save(update_fields=["payment_reference", "updated_at"])

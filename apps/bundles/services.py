@@ -99,11 +99,14 @@ def mark_purchase_paid(*, purchase, payment_reference=""):
 # ============================================================================
 # FIMIPAY INTEGRATION
 # ============================================================================
-from apps.payments.fimipay import create_order as _fp_create_order
+from apps.payments.fimipay import (
+    create_order as _fp_create_order,
+    normalize_payment_method as _fp_normalize_method,
+)
 
 
 @transaction.atomic
-def initiate_purchase_payment(*, purchase, user):
+def initiate_purchase_payment(*, purchase, user, payment_method='mobile', phone=''):
     if purchase.user_id != user.id:
         raise ValidationError("Huruhusiwi kulipia ununuzi huu.")
     from apps.payments.fimipay import get_order_status as _fp_get_status
@@ -121,10 +124,10 @@ def initiate_purchase_payment(*, purchase, user):
     data = _fp_create_order(
         order_id=order_id,
         amount=purchase.amount,
-        buyer_phone=user.phone or "",
+        buyer_phone=phone or user.phone or "",
         buyer_email=user.email or "",
         buyer_name=user.name or "",
-        payment_method="mobile",
+        payment_method=_fp_normalize_method(payment_method),
     )
     purchase.payment_reference = data.get("order_id") or order_id
     purchase.save(update_fields=["payment_reference"])

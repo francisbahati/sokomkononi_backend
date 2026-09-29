@@ -93,5 +93,9 @@ class BundlePurchaseViewSet(viewsets.GenericViewSet):
         purchase = self.get_object()
         if purchase.user_id != request.user.id and not request.user.is_staff:
             return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
-        data = initiate_purchase_payment(purchase=purchase, user=request.user)
+        data = initiate_purchase_payment(
+            purchase=purchase, user=request.user,
+            payment_method=request.data.get("payment_method", "mobile"),
+            phone=request.data.get("phone", ""),
+        )
         return Response({"fimipay": data}, status=status.HTTP_201_CREATED)

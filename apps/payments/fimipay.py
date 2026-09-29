@@ -77,6 +77,23 @@ def _get(path):
     return data
 
 
+def normalize_payment_method(raw):
+    """
+    Map frontend keys (mpesa, airtel, mixx, halopesa, mtn, orange,
+    tigo, etc.) to FimiPay's accepted payment_method values.
+
+    FimiPay only accepts: "mobile" | "card" | "bank".
+    The specific mobile-money provider is auto-detected by FimiPay
+    from the phone number's network.
+    """
+    if not raw:
+        return "mobile"
+    raw = str(raw).strip().lower()
+    if raw in ("card", "bank"):
+        return raw
+    return "mobile"
+
+
 def create_order(*, order_id, amount, buyer_phone, buyer_email="", buyer_name="",
                  currency=None, payment_method="mobile", redirect_url="", test_outcome=None):
     if not order_id:

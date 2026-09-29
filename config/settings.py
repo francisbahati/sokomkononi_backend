@@ -61,7 +61,8 @@ INSTALLED_APPS = [
     "rest_framework", "rest_framework_simplejwt", "rest_framework_simplejwt.token_blacklist",
     "corsheaders", "django_filters", "drf_spectacular",
     "drf_spectacular_sidecar", "storages", "csp",
-    "apps.core", "apps.contact", "apps.accounts", "apps.categories", "apps.listings",
+    "apps.core",
+    "apps.payments", "apps.contact", "apps.accounts", "apps.categories", "apps.listings",
     "apps.boosting", "apps.deals", "apps.transactions", "apps.finance",
     "apps.notifications", "apps.waiting_list", "apps.saved", "apps.searches",
     "apps.leads", "apps.messaging", "apps.verifications", "apps.tickets",
@@ -341,6 +342,10 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-banners": {"task": "banners.expire_stale_banners", "schedule": crontab(minute="*/15")},
     "expire-stale-credits": {"task": "credits.expire_stale_credits", "schedule": crontab(hour=2, minute=30)},
     "cleanup-stale-services": {"task": "credits.cleanup_stale_services", "schedule": crontab(hour=2, minute=45)},
+    "refresh-pending-payouts": {
+        "task": "payments.refresh_pending_payouts",
+        "schedule": crontab(minute="*/10"),
+    },
     "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
 }
 

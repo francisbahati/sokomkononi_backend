@@ -16,6 +16,7 @@ class Bundle(models.Model):
         LEADING = "LEADING", "Leading"
         BOOST = "BOOST", "Boost"
         RESERVATION = "RESERVATION", "Reservation"
+        SUCCESS = "SUCCESS", "Success"
         ADS = "ADS", "Ads"
         PREMIUM = "PREMIUM", "Premium"
         PACKAGE = "PACKAGE", "Package"

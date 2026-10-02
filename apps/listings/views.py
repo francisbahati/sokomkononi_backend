@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q, F
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -24,6 +25,7 @@ from rest_framework.views import APIView
 from rest_framework.generics import GenericAPIView
 
 from apps.core.mixins import SoftDeleteViewSetMixin
+from apps.credits.services import consume_credit
 
 from .models import (
     BusinessDetails,
@@ -856,8 +858,7 @@ class ListingFeeView(APIView):
     summary="Lipa ada ya tangazo",
     description=(
         "Huthibitisha malipo ya ada ya tangazo. "
-        "Kwa sasa endpoint hii ni simulation ya payment service. "
-        "Baadaye itaunganishwa na payment gateway/webhook."
+        "Inaunga mkono FimiPay au credits za bundle."
     ),
     request=ListingFeePaymentSerializer,
     responses={
@@ -883,6 +884,29 @@ class ListingFeePaymentView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # ── Credits path ────────────────────────────────────────
+        payment_reference = (request.data.get("payment_reference") or "").strip()
+        if payment_reference == "credits":
+            if not consume_credit(request.user, "listing"):
+                return Response(
+                    {"detail": "Hakuna listing credits za kutosha."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            listing.status = Listing.Status.PENDING_APPROVAL
+            if hasattr(listing, "paid_at"):
+                listing.paid_at = timezone.now()
+            listing.save()
+            return Response(
+                {
+                    "payment_status": "SUCCESS",
+                    "via": "credits",
+                    "listing_id": listing.id,
+                    "status": listing.status,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # ── Default: FimiPay ────────────────────────────────────
         try:
             create_listing_fee(listing)
         except DjangoValidationError as exc:
@@ -894,10 +918,10 @@ class ListingFeePaymentView(APIView):
         from .services.listing_payment import initiate_listing_fee_payment
         try:
             data = initiate_listing_fee_payment(
-            listing=listing, user=request.user,
-            payment_method=request.data.get("payment_method", "mobile"),
-            phone=request.data.get("phone", ""),
-        )
+                listing=listing, user=request.user,
+                payment_method=request.data.get("payment_method", "mobile"),
+                phone=request.data.get("phone", ""),
+            )
         except ValidationError as exc:
             return Response(
                 exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail},

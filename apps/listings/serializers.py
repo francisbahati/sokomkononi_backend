@@ -97,6 +97,7 @@ class ListingListSerializer(serializers.ModelSerializer):
             "title",
             "price",
             "location",
+            "attributes",   # ⬅️ MPYA
             "status",
             "is_featured",
             "is_boosted",
@@ -327,6 +328,7 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "description",
             "price",
             "location",
+            "attributes",   # ⬅️ MPYA
             "status",
             "is_featured",
             "is_boosted",
@@ -397,6 +399,7 @@ class ListingWriteSerializer(serializers.ModelSerializer):
             "description",
             "price",
             "location",
+            "attributes",   # ⬅️ MPYA
         ]
 
     def validate_title(self, value):
@@ -435,6 +438,15 @@ class ListingWriteSerializer(serializers.ModelSerializer):
                 "Tafadhali weka eneo sahihi."
             )
 
+        return value
+
+    def validate_attributes(self, value):
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(
+                "Attributes lazima iwe JSON object."
+            )
         return value
 
 
@@ -580,6 +592,7 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
             "description",
             "price",
             "location",
+            "attributes",   # ⬅️ MPYA
             "status",
             "seller",
             "seller_name",

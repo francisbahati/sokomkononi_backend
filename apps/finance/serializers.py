@@ -73,7 +73,9 @@ class MyTransactionSerializer(serializers.Serializer):
 
     listing_id = serializers.IntegerField(allow_null=True)
     listing_title = serializers.CharField(allow_null=True, allow_blank=True)
-
+    bundle_id = serializers.IntegerField(allow_null=True, required=False)
+    bundle_name = serializers.CharField(allow_null=True, required=False)
+    credits = serializers.JSONField(required=False)
     amount = serializers.DecimalField(max_digits=20, decimal_places=2)
 
     status = serializers.CharField()
@@ -83,3 +85,50 @@ class MyTransactionSerializer(serializers.Serializer):
 
     paid_at = serializers.DateTimeField(allow_null=True)
     created_at = serializers.DateTimeField()
+
+
+
+# ============================================================
+# REVENUE — SUCCESS FEE CONFIG (Singleton)
+# ============================================================
+
+from .models import SuccessFeeConfig, SystemFeatureToggle
+
+
+class SuccessFeeConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SuccessFeeConfig
+        fields = [
+            "id",
+            "key",
+            "label_sw",
+            "label_en",
+            "desc_sw",
+            "desc_en",
+            "percentage",
+            "min_fee",
+            "max_fee",
+            "is_enabled",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "key", "updated_at"]
+
+
+# ============================================================
+# REVENUE — SYSTEM FEATURE TOGGLE
+# ============================================================
+
+class SystemFeatureToggleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemFeatureToggle
+        fields = [
+            "id",
+            "key",
+            "label_sw",
+            "label_en",
+            "desc_sw",
+            "desc_en",
+            "is_enabled",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "key", "updated_at"]

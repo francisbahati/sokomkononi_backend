@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 from apps.core.mixins import SoftDeleteViewSetMixin
+from apps.credits.services import consume_credit
 from apps.listings.models import Listing
 
 from .models import BoostPackage, ListingBoost
@@ -130,6 +131,29 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="pay")
     def pay(self, request, pk=None):
         boost = get_object_or_404(self.get_queryset(), pk=pk)
+
+        # ── Credits path ────────────────────────────────────────
+        payment_reference = (request.data.get("payment_reference") or "").strip()
+        if payment_reference == "credits":
+            if not consume_credit(request.user, "boost"):
+                return Response(
+                    {"detail": "Hakuna boost credits za kutosha."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            boost = mark_boost_as_paid(boost=boost)
+            boost = activate_boost(boost=boost)
+            return Response(
+                {
+                    "payment_status": "SUCCESS",
+                    "via": "credits",
+                    "boost": ListingBoostSerializer(
+                        boost, context={"request": request}
+                    ).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # ── Default: FimiPay ────────────────────────────────────
         data = initiate_boost_payment(
             boost=boost, user=request.user,
             payment_method=request.data.get("payment_method", "mobile"),

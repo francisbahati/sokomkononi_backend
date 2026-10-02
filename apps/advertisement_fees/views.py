@@ -1,4 +1,6 @@
+# apps/advertisement_fees/views.py
 from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import AdvertisementFeeConfig
@@ -30,3 +32,18 @@ class AdvertisementFeeConfigViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+    # ═══════════════════════════════════════════════════════════
+    # TOGGLE — POST /api/advertisement-fees/toggle/
+    # ═══════════════════════════════════════════════════════════
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="toggle",
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def toggle(self, request):
+        obj, _ = AdvertisementFeeConfig.objects.get_or_create(pk=1)
+        obj.is_enabled = not obj.is_enabled
+        obj.save(update_fields=["is_enabled", "updated_at"])
+        return Response({"is_enabled": obj.is_enabled})

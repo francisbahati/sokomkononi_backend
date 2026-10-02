@@ -1,5 +1,8 @@
-from rest_framework import permissions, status, viewsets
+# apps/reservation_rates/views.py
+from rest_framework import viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.permissions import IsAdminUser, AllowAny
 
 from .models import ReservationRate
 from .serializers import ReservationRateSerializer
@@ -7,41 +10,45 @@ from .serializers import ReservationRateSerializer
 
 class ReservationRateViewSet(viewsets.GenericViewSet):
     """
-        GET     /api/reservation-rates/            public read
-        PATCH   /api/reservation-rates/{tier}/     admin update
+    Singleton viewset — kuna ReservationRate moja pekee (pk=1).
     """
-
     serializer_class = ReservationRateSerializer
+    queryset = ReservationRate.objects.all()
 
     def get_permissions(self):
-        if self.action == "list":
-            return [permissions.AllowAny()]
-        return [permissions.IsAdminUser()]
+        if self.action in ("list", "retrieve"):
+            return [AllowAny()]
+        return [IsAdminUser()]
+
+    def get_object(self):
+        obj, _ = ReservationRate.objects.get_or_create(
+            pk=1,
+            defaults={
+                "flat_fee": 50000,
+                "days": 3,
+                "is_enabled": True,
+            },
+        )
+        return obj
 
     def list(self, request):
-        qs = ReservationRate.objects.all()
-        return Response(ReservationRateSerializer(qs, many=True).data)
+        return Response(ReservationRateSerializer(self.get_object()).data)
+
+    def retrieve(self, request, pk=None):
+        return Response(ReservationRateSerializer(self.get_object()).data)
 
     def partial_update(self, request, pk=None):
-        obj = ReservationRate.objects.filter(tier=pk).first()
-        if not obj and str(pk).isdigit():
-            obj = ReservationRate.objects.filter(pk=int(pk)).first()
-        if not obj:
-            return Response(
-                {"detail": "Haipatikani."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        obj = self.get_object()
+        serializer = ReservationRateSerializer(
+            obj, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
-        data = request.data or {}
-        allowed = {
-            "fee", "hours", "label_sw", "label_en",
-            "sub_sw", "sub_en", "ordering",
-        }
-        updates = []
-        for field in allowed:
-            if field in data:
-                setattr(obj, field, data[field])
-                updates.append(field)
-        if updates:
-            obj.save(update_fields=updates)
-        return Response(ReservationRateSerializer(obj).data)
+    @action(detail=False, methods=["post"], url_path="toggle")
+    def toggle(self, request):
+        obj = self.get_object()
+        obj.is_enabled = not obj.is_enabled
+        obj.save(update_fields=["is_enabled", "updated_at"])
+        return Response({"is_enabled": obj.is_enabled})

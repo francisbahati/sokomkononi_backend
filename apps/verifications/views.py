@@ -1,3 +1,5 @@
+import logging
+
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -14,6 +16,8 @@ from .serializers import (
     VerificationRejectSerializer,
     VerificationRequestSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class IsAdminUser(permissions.BasePermission):
@@ -36,6 +40,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
         POST    /api/verifications/                    create (any authenticated)
         POST    /api/verifications/{id}/approve/       admin only
         POST    /api/verifications/{id}/reject/        admin only
+        POST    /api/verifications/{id}/request-documents/  admin only
         POST    /api/verifications/{id}/documents/     multipart upload
         DELETE  /api/verifications/{id}/               owner or admin
     """
@@ -107,6 +112,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    # ══════════════════════════════════════════════════════════
+    # APPROVE — idhinisha ombi + update user.is_verified
+    # ══════════════════════════════════════════════════════════
     @action(detail=True, methods=["post"], url_path="approve",
             permission_classes=[IsAdminUser])
     def approve(self, request, pk=None):
@@ -116,12 +124,35 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 {"detail": "Ombi hili halipo kwenye hali ya PENDING."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
         obj.status = VerificationRequest.Status.APPROVED
         obj.reviewed_by = request.user
         obj.reviewed_at = timezone.now()
         obj.save(update_fields=[
             "status", "reviewed_by", "reviewed_at", "updated_at",
         ])
+
+        # ⬇️ MPYA — Badilisha user.is_verified kulingana na aina ya ombi
+        try:
+            target_user = obj.user
+            if obj.type in (
+                VerificationRequest.Type.SELLER,
+                VerificationRequest.Type.BUYER,
+            ):
+                target_user.is_verified = True
+                target_user.save(update_fields=["is_verified", "updated_at"])
+                logger.info(
+                    "[verifications] user %s marked as verified (type=%s)",
+                    target_user.id, obj.type,
+                )
+            # PROPERTY, VEHICLE, BUSINESS — zinaathiri listing moja kwa moja,
+            # sio user. Tunaweza kuongeza logic baadaye.
+        except Exception as exc:
+            logger.warning(
+                "[verifications] failed to update user.is_verified for "
+                "request %s: %s", obj.id, exc,
+            )
+
         return Response(
             VerificationRequestSerializer(
                 obj, context={"request": request},
@@ -150,6 +181,54 @@ class VerificationViewSet(viewsets.GenericViewSet):
         obj.save(update_fields=[
             "status", "rejection_reason", "reviewed_by",
             "reviewed_at", "updated_at",
+        ])
+        return Response(
+            VerificationRequestSerializer(
+                obj, context={"request": request},
+            ).data,
+        )
+
+    # ══════════════════════════════════════════════════════════
+    # MPYA: Admin anaomba mtumiaji apakie documents zaidi
+    # ══════════════════════════════════════════════════════════
+    @extend_schema(
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {"message": {"type": "string"}},
+                "required": ["message"],
+            }
+        },
+        responses={200: VerificationRequestSerializer},
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="request-documents",
+        permission_classes=[IsAdminUser],
+    )
+    def request_documents(self, request, pk=None):
+        """Admin anaomba mtumiaji apakie documents zaidi."""
+        obj = get_object_or_404(VerificationRequest, pk=pk)
+        if obj.status != VerificationRequest.Status.PENDING:
+            return Response(
+                {"detail": "Ombi hili halipo kwenye hali ya PENDING."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        message = (request.data.get("message") or "").strip()
+        if not message:
+            return Response(
+                {"detail": "Ujumbe unahitajika."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        obj.documents_requested_at = timezone.now()
+        obj.documents_request_message = message
+        obj.save(update_fields=[
+            "documents_requested_at",
+            "documents_request_message",
+            "updated_at",
         ])
         return Response(
             VerificationRequestSerializer(

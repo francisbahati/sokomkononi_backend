@@ -94,8 +94,16 @@ class TestimonialSerializer(serializers.ModelSerializer):
     class Meta:
         model = Testimonial
         fields = [
-            "id", "name", "quote", "avatar_url", "rating",
-            "active", "created_at", "quote_sw", "quote_en",
+            "id",
+            "name",
+            "location",      # ⬅️ MPYA
+            "quote",
+            "avatar_url",
+            "rating",
+            "active",
+            "created_at",
+            "quote_sw",
+            "quote_en",
         ]
         read_only_fields = ["id", "created_at"]
 

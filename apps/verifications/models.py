@@ -64,6 +64,18 @@ class VerificationRequest(SoftDeleteModel):
         verbose_name="Maelezo",
     )
 
+    # ⬇️ MPYA — Admin anaomba documents zaidi
+    documents_requested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Documents requested at",
+    )
+    documents_request_message = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Message from admin",
+    )
+
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

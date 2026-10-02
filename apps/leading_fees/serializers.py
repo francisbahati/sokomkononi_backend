@@ -1,3 +1,4 @@
+# apps/leading_fees/serializers.py
 from rest_framework import serializers
 
 from .models import LeadingFeeConfig, ListingLeading
@@ -9,7 +10,15 @@ class LeadingFeeConfigSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = LeadingFeeConfig
-        fields = ["id", "price", "days", "label", "desc", "updated_at"]
+        fields = [
+            "id",
+            "price",
+            "days",
+            "is_enabled",   # ⬅️ MPYA
+            "label",
+            "desc",
+            "updated_at",
+        ]
         read_only_fields = ["id", "updated_at"]
 
     def get_label(self, obj):
@@ -25,6 +34,8 @@ class LeadingFeeConfigSerializer(serializers.ModelSerializer):
             out["price"] = data["price"]
         if "days" in data:
             out["days"] = data["days"]
+        if "is_enabled" in data:                    # ⬅️ MPYA
+            out["is_enabled"] = data["is_enabled"]  # ⬅️ MPYA
         label = data.get("label") or {}
         if isinstance(label, dict):
             if "sw" in label:

@@ -58,6 +58,19 @@ class Listing(SoftDeleteModel):
         verbose_name="Mahali",
     )
 
+    # ⬇️ MPYA — Category-specific attributes (JSONField)
+    # Inahifadhi data kama: bedrooms, bathrooms, make, model, mileage,
+    # mode, region, district, area, n.k. kulingana na category.
+    attributes = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Sifa za ziada",
+        help_text=(
+            "Data ya category-specific: bedrooms, bathrooms, make, model, "
+            "mileage, mode, region, district, area, n.k."
+        ),
+    )
+
     status = models.CharField(
         max_length=30,
         choices=Status.choices,
@@ -849,8 +862,28 @@ class ListingFeeRule(SoftDeleteModel):
     percentage = models.DecimalField(
         max_digits=5,
         decimal_places=2,
+        default=0,
         verbose_name="Asilimia ya ada",
-        help_text="Mfano: 2.50 kwa 2.5%",
+        help_text="Mfano: 2.50 kwa 2.5%. Tumia 0 kama fee_mode = FLAT.",
+    )
+
+    fee_mode = models.CharField(
+        max_length=10,
+        choices=[
+            ("PERCENTAGE", "Asilimia ya Bei"),
+            ("FLAT", "Flat Fee (TZS)"),
+        ],
+        default="PERCENTAGE",
+        verbose_name="Aina ya Ada",
+        help_text="Chagua jinsi ada inavyokokotolewa.",
+    )
+
+    flat_fee = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=5000,
+        verbose_name="Flat Fee (TZS)",
+        help_text="Kama fee_mode = FLAT, ada hii inatumika.",
     )
 
     is_active = models.BooleanField(
@@ -892,5 +925,8 @@ class ListingFeeRule(SoftDeleteModel):
             price_range = f"TSh {self.min_price}+"
         else:
             price_range = f"TSh {self.min_price} - {self.max_price}"
+
+        if self.fee_mode == "FLAT":
+            return f"{self.name} ({price_range}) - TSh {self.flat_fee}"
 
         return f"{self.name} ({price_range}) - {self.percentage}%"

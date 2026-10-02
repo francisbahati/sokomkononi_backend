@@ -57,6 +57,15 @@ class Banner(models.Model):
 
 class Testimonial(models.Model):
     name = models.CharField(max_length=150)
+
+    # ⬇️ MPYA — Mahali pa mtoa ushuhuda
+    location = models.CharField(
+        max_length=150,
+        blank=True,
+        verbose_name="Mahali",
+        help_text="Mfano: Dar es Salaam, Mwanza, n.k.",
+    )
+
     quote_sw = models.TextField(blank=True)
     quote_en = models.TextField(blank=True)
     avatar_url = models.URLField(blank=True)

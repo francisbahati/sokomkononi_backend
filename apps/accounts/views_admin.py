@@ -26,6 +26,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         POST    /api/admin/users/{id}/suspend/
         POST    /api/admin/users/{id}/activate/
         POST    /api/admin/users/{id}/verify/
+        DELETE  /api/admin/users/{id}/permanent/  hard delete (HAIRUDISHWI)
     """
 
     serializer_class = ProfileSerializer
@@ -98,6 +99,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         return Response(ProfileSerializer(user).data)
 
     def destroy(self, request, pk=None):
+        """Soft delete — inaweka kwenye kikapu (is_deleted=True)."""
         user = self._get_user(pk)
         if not user:
             return Response(
@@ -150,3 +152,70 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user.is_verified = True
         user.save(update_fields=["is_verified", "updated_at"])
         return Response({"detail": "Mtumiaji amethibitishwa."})
+
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path="permanent",
+        url_name="permanent-delete",
+    )
+    def permanent_delete(self, request, pk=None):
+        """
+        Hard delete user — HAIRUDISHWI.
+
+        - Admin pekee
+        - Hauwezi kumfuta admin / superuser mwingine
+        - Hauwezi kujifuta mwenyewe
+
+        Endpoint: DELETE /api/admin/users/{id}/permanent/
+        """
+        user = self._get_user(pk)
+        if not user:
+            return Response(
+                {"detail": "Haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Zuia kumfuta admin
+        if user.is_staff or user.is_superuser:
+            return Response(
+                {
+                    "detail": (
+                        "Hauwezi kumfuta admin. "
+                        "Wasiliana na Super Admin."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Zuia kujifuta mwenyewe
+        if user.id == request.user.id:
+            return Response(
+                {"detail": "Hauwezi kujifuta mwenyewe."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        user_id = user.id
+        user_email = user.email
+        user_name = user.name
+
+        # Hard delete — inaondoa user na data yake yote
+        try:
+            user.hard_delete()
+        except AttributeError:
+            # Fallback kama hard_delete haipo kwenye model
+            user.delete(
+                by=request.user,
+                reason="Admin permanent delete (fallback)",
+            )
+
+        return Response(
+            {
+                "detail": (
+                    f"Mtumiaji {user_name} ({user_email}) "
+                    f"amefutwa kabisa."
+                ),
+                "deleted_id": user_id,
+            },
+            status=status.HTTP_200_OK,
+        )

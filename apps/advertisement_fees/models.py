@@ -1,13 +1,10 @@
+# apps/advertisement_fees/models.py
 from decimal import Decimal
-
 from django.db import models
 
 
 class AdvertisementFeeConfig(models.Model):
-    """
-    Singleton (always pk=1). Editable by admins.
-    """
-
+    """Singleton (always pk=1). Editable by admins."""
     price = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal("25000"),
     )
@@ -20,6 +17,13 @@ class AdvertisementFeeConfig(models.Model):
     desc_en = models.TextField(
         default="Rotating banner on the Dashboard (5s rotation) for 7 days",
     )
+    
+    # ⬇️ MPYA
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text="Kama False, matangazo hayatozwi.",
+    )
+    
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

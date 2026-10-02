@@ -109,3 +109,49 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             {"image_url": url, "url": url},
             status=status.HTTP_201_CREATED,
         )
+
+    # ══════════════════════════════════════════════════════════
+    # REORDER — admin anaweza kupanga categories
+    # ══════════════════════════════════════════════════════════
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="reorder",
+        url_name="reorder",
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def reorder(self, request):
+        """
+        Reorder categories.
+        Body: { "order": ["key_1", "key_2", ...] }
+        au:   { "order": [id_1, id_2, ...] }
+        """
+        order = request.data.get("order") or []
+        if not isinstance(order, list) or not order:
+            return Response(
+                {"detail": "order lazima iwe list isiyo tupu."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated = 0
+        for idx, item in enumerate(order):
+            cat = None
+            # Jaribu id
+            if isinstance(item, int) or (isinstance(item, str) and item.isdigit()):
+                cat = Category.objects.filter(id=item).first()
+            # Jaribu slug
+            if not cat:
+                cat = Category.objects.filter(slug=item).first()
+            # Jaribu name
+            if not cat:
+                cat = Category.objects.filter(name=item).first()
+
+            if cat:
+                cat.ordering = idx
+                cat.save(update_fields=["ordering"])
+                updated += 1
+
+        return Response({
+            "detail": f"Categories {updated} zimepangwa upya.",
+            "updated": updated,
+        })

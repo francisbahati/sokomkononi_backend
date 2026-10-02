@@ -35,6 +35,9 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
             "subject_id",
             "notes",
             "documents",
+            # ⬇️ MPYA — Admin request documents
+            "documents_requested_at",
+            "documents_request_message",
             "reviewed_by",
             "reviewed_at",
             "rejection_reason",
@@ -48,6 +51,9 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
             "user_name",
             "user_email",
             "documents",
+            # ⬇️ MPYA
+            "documents_requested_at",
+            "documents_request_message",
             "reviewed_by",
             "reviewed_at",
             "rejection_reason",

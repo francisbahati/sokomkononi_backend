@@ -1,3 +1,4 @@
+# apps/leading_fees/models.py
 from decimal import Decimal
 
 from django.conf import settings
@@ -7,12 +8,25 @@ from django.db import models
 class LeadingFeeConfig(models.Model):
     """Singleton (pk=1). Admin editable."""
 
-    price = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal("10000"))
+    price = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("10000"),
+    )
     days = models.PositiveIntegerField(default=7)
     label_sw = models.CharField(max_length=100, default="Ada ya Kipaumbele")
     label_en = models.CharField(max_length=100, default="Leading Fee")
-    desc_sw = models.TextField(default="Bidhaa yako inapanda juu ya matokeo ya utafutaji kwa siku 7")
-    desc_en = models.TextField(default="Your listing appears at the top of search results for 7 days")
+    desc_sw = models.TextField(
+        default="Bidhaa yako inapanda juu ya matokeo ya utafutaji kwa siku 7",
+    )
+    desc_en = models.TextField(
+        default="Your listing appears at the top of search results for 7 days",
+    )
+
+    # ⬇️ MPYA
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text="Kama False, leading haitozwi.",
+    )
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -40,25 +54,33 @@ class ListingLeading(models.Model):
         CANCELLED = "CANCELLED", "Cancelled"
 
     listing = models.ForeignKey(
-        "listings.Listing", on_delete=models.PROTECT,
+        "listings.Listing",
+        on_delete=models.PROTECT,
         related_name="leading_purchases",
     )
     seller = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
         related_name="leading_purchases",
     )
     days = models.PositiveIntegerField(default=7)
     price = models.DecimalField(max_digits=15, decimal_places=2)
     payment_status = models.CharField(
-        max_length=20, choices=PaymentStatus.choices,
+        max_length=20,
+        choices=PaymentStatus.choices,
         default=PaymentStatus.PENDING,
     )
     payment_reference = models.CharField(
-        max_length=255, blank=True, null=True, unique=True,
+        max_length=255,
+        blank=True,
+        null=True,
+        unique=True,
     )
     paid_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.PENDING,
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
     )
     starts_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
@@ -69,9 +91,18 @@ class ListingLeading(models.Model):
         db_table = "listing_leadings"
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["listing", "status"], name="leading_listing_status_idx"),
-            models.Index(fields=["status", "expires_at"], name="leading_status_exp_idx"),
-            models.Index(fields=["seller", "status"], name="leading_seller_status_idx"),
+            models.Index(
+                fields=["listing", "status"],
+                name="leading_listing_status_idx",
+            ),
+            models.Index(
+                fields=["status", "expires_at"],
+                name="leading_status_exp_idx",
+            ),
+            models.Index(
+                fields=["seller", "status"],
+                name="leading_seller_status_idx",
+            ),
         ]
 
     def __str__(self):

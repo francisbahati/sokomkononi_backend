@@ -6,3 +6,6 @@ class ListingsConfig(AppConfig):
     name = "apps.listings"
     label = "listings"
     verbose_name = "Matangazo"
+
+    def ready(self):
+        import apps.listings.signals

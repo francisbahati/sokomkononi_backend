@@ -114,8 +114,9 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             pk=serializer.validated_data["listing"],
         )
 
+        # SASISHO: `create_leading()` service inatarajia `listing_id`, sio `listing`.
         leading = create_leading(
-            listing=listing,
+            listing_id=listing.id,
             user=request.user,
         )
 
@@ -135,7 +136,7 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # ── Credits path ────────────────────────────────────────
+        # ── Credits path ──────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
             if not consume_credit(request.user, "leading"):
@@ -165,7 +166,7 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        # ── Default: FimiPay ────────────────────────────────────
+        # ── Default: FimiPay ──────────────────────────────────────
         data = initiate_leading_payment(
             leading=leading,
             user=request.user,

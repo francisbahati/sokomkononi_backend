@@ -49,9 +49,12 @@ class BannerAdViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         from .services import create_banner_ad
+
+        # SASISHO: `create_banner_ad()` service inatarajia `listing_id` + `seller`,
+        # sio `listing` + `user`.
         banner = create_banner_ad(
-            listing=serializer.validated_data["listing"],
-            user=request.user,
+            listing_id=serializer.validated_data["listing"],
+            seller=request.user,
         )
 
         return Response(
@@ -73,7 +76,7 @@ class BannerAdViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # ── Credits path ────────────────────────────────────────
+        # ── Credits path ──────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
             if not consume_credit(request.user, "ads"):
@@ -99,7 +102,7 @@ class BannerAdViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        # ── Default: FimiPay ────────────────────────────────────
+        # ── Default: FimiPay ──────────────────────────────────────
         from .services import initiate_banner_payment
         data = initiate_banner_payment(
             banner=banner, user=request.user,

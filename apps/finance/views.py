@@ -1,5 +1,6 @@
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import permissions
+from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -8,10 +9,13 @@ from apps.boosting.models import ListingBoost
 from apps.listings.models import ListingFee
 from apps.transactions.models import Reservation
 
+from .models import SuccessFeeConfig, SystemFeatureToggle
 from .serializers import (
     FinancialDashboardSerializer,
     MyTransactionSerializer,
     RevenueRecordSerializer,
+    SuccessFeeConfigSerializer,
+    SystemFeatureToggleSerializer,
 )
 from .services.revenue import (
     calculate_financial_dashboard,
@@ -273,25 +277,21 @@ class MyTransactionsView(APIView):
 # REVENUE — SUCCESS FEE CONFIG VIEW (Singleton)
 # ============================================================
 
-from rest_framework import status, viewsets
-from rest_framework.decorators import action
-
-from .models import SuccessFeeConfig, SystemFeatureToggle
-from .serializers import (
-    SuccessFeeConfigSerializer,
-    SystemFeatureToggleSerializer,
-)
-
-
 class SuccessFeeConfigView(APIView):
     """
     Singleton viewset — SuccessFeeConfig moja (pk=1).
 
-    GET   /api/finance/success-fee-config/
-    PATCH /api/finance/success-fee-config/
-    POST  /api/finance/success-fee-config/toggle/
+    GET   /api/finance/success-fee-config/         (any logged-in user)
+    PATCH /api/finance/success-fee-config/         (admin only)
+    POST  /api/finance/success-fee-config/toggle/  (admin only)
     """
-    permission_classes = [IsAdminUser]
+
+    # FIX: reading is allowed for any authenticated user (was admin-only → 403).
+    # Writing (PATCH / toggle) stays admin-only.
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [permissions.IsAuthenticated()]
+        return [IsAdminUser()]
 
     def get_object(self):
         obj, _ = SuccessFeeConfig.objects.get_or_create(

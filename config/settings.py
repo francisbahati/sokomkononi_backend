@@ -178,8 +178,8 @@ _CSP_DIRECTIVES = {
     "media-src": _CSP_MEDIA_SRC,
     "script-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
     "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+    # FIX: duplicate "font-src" key removed; the Google Fonts version is kept.
     "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
-    "font-src": ["'self'", "data:"],
     "connect-src": _connect_src,
     "frame-ancestors": ["'none'"],
     "base-uri": ["'self'"],
@@ -224,6 +224,8 @@ CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(
 
 # ---------------- DRF ----------------
 REST_FRAMEWORK = {
+    # FIX: stop DRF from hijacking ?format=pdf|csv|doc (it returned 404).
+    "URL_FORMAT_OVERRIDE": None,
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.accounts.authentication.FlexibleJWTAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",

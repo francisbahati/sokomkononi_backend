@@ -55,6 +55,11 @@ def _map_status(payment_status):
     return mapping.get(payment_status, "Pending")
 
 
+def _is_sw():
+    """Check kama request ni Kiswahili (kutoka header au default sw)."""
+    return True  # Kwa sasa default Kiswahili; tunaweza kutumia header baadaye
+
+
 def _get_user_transactions(user):
     """
     Chukua miamala yote ya user:
@@ -111,11 +116,6 @@ def _get_user_transactions(user):
 
     records.sort(key=lambda r: r["date"], reverse=True)
     return records
-
-
-def _is_sw():
-    """Check kama request ni Kiswahili (kutoka header au default sw)."""
-    return True  # Kwa sasa default Kiswahili; tunaweza kutumia header baadaye
 
 
 # ============================================================
@@ -179,8 +179,10 @@ class SuccessFeeDownloadView(APIView):
     - Kama true → 402 Payment Required (frontend inaomba malipo kwanza)
 
     Baada ya malipo (kupitia POST /api/finance/success-fee/), user anaweza
-    kupakua kwa kuita endpoint hii tena — tunaweza ku-check payment_reference
-    kwenye query param.
+    kupakua kwa kuita endpoint hii tena na `payment_reference`.
+
+    NOTE: requires REST_FRAMEWORK["URL_FORMAT_OVERRIDE"] = None in settings,
+    otherwise DRF intercepts ?format= and returns 404.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -196,11 +198,11 @@ class SuccessFeeDownloadView(APIView):
 
         # ── Check payment ──
         if config.is_enabled:
-            # Kama success fee imewashwa, angalia kama user ameshalipa
-            # kwa `payment_reference`. Kwa sasa, tunaruhusu download kama
-            # payment_reference imetumwa (tunaweza ku-validate baadaye).
             payment_ref = (request.query_params.get("payment_reference") or "").strip()
-            if not payment_ref:
+            # FIX: reference must belong to this user (format SF-<user_id>-...).
+            # TODO: verify against a stored PAID order (FimiPay webhook) for
+            # real protection; this only blocks made-up / other users' refs.
+            if not payment_ref or not payment_ref.startswith(f"SF-{request.user.id}-"):
                 return Response(
                     {
                         "requires_payment": True,
@@ -213,20 +215,17 @@ class SuccessFeeDownloadView(APIView):
         # ── Chukua miamala ──
         records = _get_user_transactions(request.user)
         if not records:
-            return Response(
-                {"detail": "Hakuna miamala ya kupakua."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            # FIX: empty history is not an error (was 404).
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
         # ── Generate file ──
         timestamp = timezone.now().strftime("%Y%m%d")
 
         if fmt == "csv":
             return self._generate_csv(records, timestamp)
-        elif fmt == "pdf":
+        if fmt == "pdf":
             return self._generate_pdf(records, timestamp)
-        elif fmt == "doc":
-            return self._generate_doc(records, timestamp)
+        return self._generate_doc(records, timestamp)
 
     # ── CSV ──
     def _generate_csv(self, records, timestamp):
@@ -344,12 +343,13 @@ class SuccessFeeDownloadView(APIView):
         )
         return response
 
-    # ── DOC ──
+    # ── DOC (real .docx so Word opens it without a warning) ──
     def _generate_doc(self, records, timestamp):
         try:
             from docx import Document
-            from docx.shared import Pt, Cm, RGBColor
             from docx.enum.table import WD_TABLE_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.shared import Pt
         except ImportError:
             return Response(
                 {"detail": "python-docx haipo. Wasiliana na admin."},
@@ -360,11 +360,11 @@ class SuccessFeeDownloadView(APIView):
 
         # Title
         heading = doc.add_heading("SokoMkononi — Miamala Yangu", 0)
-        heading.alignment = WD_TABLE_ALIGNMENT.CENTER
+        heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         # Subtitle
         subtitle = doc.add_paragraph(f"Ripoti ya miamala · {len(records)} rekodi")
-        subtitle.alignment = WD_TABLE_ALIGNMENT.CENTER
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         doc.add_paragraph()
 
@@ -401,9 +401,12 @@ class SuccessFeeDownloadView(APIView):
 
         response = HttpResponse(
             buffer.read(),
-            content_type="application/msword",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
         )
         response["Content-Disposition"] = (
-            f'attachment; filename="miamala_{timestamp}.doc"'
+            f'attachment; filename="miamala_{timestamp}.docx"'
         )
         return response

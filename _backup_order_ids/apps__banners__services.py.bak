@@ -96,7 +96,6 @@ def mark_banner_paid_and_activate(*, banner, payment_reference):
 # ============================================================================
 # FIMIPAY INTEGRATION
 # ============================================================================
-from apps.payments.order_ids import make_order_id
 from apps.payments.fimipay import (
     create_order as _fp_create_order,
     normalize_payment_method as _fp_normalize_method,
@@ -118,7 +117,7 @@ def initiate_banner_payment(*, banner, user, payment_method='mobile', phone=''):
         except Exception:
             pass
 
-    order_id = make_order_id("ADV", banner.pk)
+    order_id = f"ADV-{banner.pk}"
     data = _fp_create_order(
         order_id=order_id,
         amount=banner.amount,

@@ -12,7 +12,6 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from .fimipay import verify_webhook_signature
-from .order_ids import parse_order_id
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +29,8 @@ def _route_success(order_id, event):
     from apps.leading_fees.services.leading import mark_leading_paid_from_webhook
     from apps.banners.services import mark_banner_paid_from_webhook
 
-    # Accepts both "BND-5" (old) and "BND-5-a1b2c3d4" (unique per attempt).
-    prefix, ref_id_int = parse_order_id(order_id)
+    prefix, _, ref_id = order_id.partition("-")
+    ref_id_int = int(ref_id) if ref_id.isdigit() else None
     if ref_id_int is None:
         logger.warning("Webhook order_id has bad ref: %s", order_id)
         return False

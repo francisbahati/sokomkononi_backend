@@ -146,7 +146,6 @@ def expire_stale_leading():
 # ============================================================================
 # FIMIPAY INTEGRATION
 # ============================================================================
-from apps.payments.order_ids import make_order_id
 from apps.payments.fimipay import (
     create_order as _fp_create_order,
     normalize_payment_method as _fp_normalize_method,
@@ -175,7 +174,7 @@ def initiate_leading_payment(*, leading, user, payment_method='mobile', phone=''
         except Exception:
             pass
 
-    order_id = make_order_id("LDS", leading.pk)
+    order_id = f"LDS-{leading.pk}"
     data = _fp_create_order(
         order_id=order_id,
         amount=leading.price,

@@ -103,7 +103,6 @@ from apps.payments.fimipay import (
     create_order as _fp_create_order,
     normalize_payment_method as _fp_normalize_method,
 )
-from apps.payments.order_ids import make_order_id
 
 
 @transaction.atomic
@@ -121,9 +120,7 @@ def initiate_purchase_payment(*, purchase, user, payment_method='mobile', phone=
         except Exception:
             pass
 
-    # FIX: FimiPay rejects an order_id it has seen before, so every new
-    # attempt gets a unique id (BND-<pk>-<random>). The webhook parses the pk.
-    order_id = make_order_id("BND", purchase.pk)
+    order_id = f"BND-{purchase.pk}"
     data = _fp_create_order(
         order_id=order_id,
         amount=purchase.amount,

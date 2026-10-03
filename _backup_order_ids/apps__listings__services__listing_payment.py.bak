@@ -2,7 +2,6 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from apps.payments.order_ids import make_order_id
 from apps.payments.fimipay import (
     create_order,
     normalize_payment_method as _fp_normalize_method,
@@ -51,7 +50,7 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
             # If we can't fetch the old order, fall through and create a new one.
             pass
 
-    order_id = make_order_id("LSF", listing.id)
+    order_id = f"LSF-{listing.id}"
     data = create_order(
         order_id=order_id,
         amount=listing_fee.amount,

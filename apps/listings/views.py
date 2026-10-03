@@ -292,36 +292,39 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 # ── 1. ListingFee (PROTECT) ────────────────────
                 ListingFee.objects.filter(listing=listing).delete()
 
-                # ── 2. Leads (PROTECT) — HARD DELETE ───────────
-# Lead ina Model.delete() override inayofanya soft delete.
-# Hata queryset.delete() inaheshimu override hiyo. Kwa hivyo
-# LAZIMA tutumie hard_delete() kwa kila lead mmoja mmoja.
-try:
-    from apps.leads.models import Lead
+                # 2. Leads (PROTECT) -- HARD DELETE
+                # Lead ina Model.delete() override inayofanya
+                # soft delete. Hata queryset.delete() inaheshimu
+                # override hiyo. Kwa hivyo LAZIMA tutumie
+                # hard_delete() kwa kila lead mmoja mmoja.
+                try:
+                    from apps.leads.models import Lead
 
-    lead_ids = list(
-        Lead._base_manager
-        .filter(listing=listing)
-        .values_list("pk", flat=True)
-    )
+                    lead_ids = list(
+                        Lead._base_manager
+                        .filter(listing=listing)
+                        .values_list("pk", flat=True)
+                    )
 
-    for lead_id in lead_ids:
-        lead = Lead._base_manager.get(pk=lead_id)
-        if hasattr(lead, "hard_delete"):
-            lead.hard_delete()
-        else:
-            # Fallback mbaya — lakini kama hard_delete haipo,
-            # hatuna namna nyingine ya kufuta DB row.
-            # Tunaweza ku-force kwa raw SQL kama inahitajika.
-            Lead._base_manager.filter(pk=lead_id).delete()
+                    for lead_id in lead_ids:
+                        lead = Lead._base_manager.get(pk=lead_id)
+                        if hasattr(lead, "hard_delete"):
+                            lead.hard_delete()
+                        else:
+                            Lead._base_manager.filter(pk=lead_id).delete()
 
-    remaining = Lead._base_manager.filter(listing=listing).count()
-    if remaining:
-        raise RuntimeError(
-            f"Leads {remaining} zinarejelea tangazo hili bado."
-        )
-except ImportError:
-    logger.warning("[listings] leads app not available, skipping")
+                    remaining = Lead._base_manager.filter(
+                        listing=listing
+                    ).count()
+                    if remaining:
+                        raise RuntimeError(
+                            f"Leads {remaining} zinarejelea tangazo "
+                            f"hili bado."
+                        )
+                except ImportError:
+                    logger.warning(
+                        "[listings] leads app not available, skipping"
+                    )
 
                 # ── 3. Transaction chain ───────────────────────
                 # Mpangilio: InspectionPeriod → Reservation →

@@ -10,7 +10,11 @@ from .serializers import ReservationRateSerializer
 
 class ReservationRateViewSet(viewsets.GenericViewSet):
     """
-    Singleton viewset — kuna ReservationRate moja pekee (pk=1).
+    Singleton viewset — ReservationRate moja (pk=1).
+
+    GET     /api/reservation-rates/          → rate (object)
+    PATCH   /api/reservation-rates/          → update rate
+    POST    /api/reservation-rates/toggle/   → toggle is_enabled
     """
     serializer_class = ReservationRateSerializer
     queryset = ReservationRate.objects.all()

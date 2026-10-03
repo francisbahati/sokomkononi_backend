@@ -19,9 +19,67 @@ from .services import create_leading, initiate_leading_payment
 
 
 class LeadingFeeConfigViewSet(viewsets.ModelViewSet):
+    """
+    Singleton viewset — LeadingFeeConfig moja (pk=1).
+
+    GET     /api/leading-fees/             → config (object, si list)
+    PATCH   /api/leading-fees/             → update config
+    POST    /api/leading-fees/toggle/      → toggle is_enabled
+    """
     queryset = LeadingFeeConfig.objects.all()
     serializer_class = LeadingFeeConfigSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_object(self):
+        obj, _ = LeadingFeeConfig.objects.get_or_create(
+            pk=1,
+            defaults={
+                "price": 10000,
+                "days": 7,
+                "is_enabled": True,
+                "label_sw": "Ada ya Kipaumbele",
+                "label_en": "Leading Fee",
+                "desc_sw": "",
+                "desc_en": "",
+            },
+        )
+        return obj
+
+    def list(self, request):
+        # Rudisha OBJECT moja, sio list — kwa sababu ni singleton
+        obj = self.get_object()
+        return Response(
+            LeadingFeeConfigSerializer(obj).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def create(self, request):
+        obj = self.get_object()
+        serializer = LeadingFeeConfigSerializer(
+            obj, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def partial_update(self, request, pk=None):
+        obj = self.get_object()
+        serializer = LeadingFeeConfigSerializer(
+            obj, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="toggle")
+    def toggle(self, request):
+        obj = self.get_object()
+        obj.is_enabled = not obj.is_enabled
+        obj.save(update_fields=["is_enabled", "updated_at"])
+        return Response(
+            {"is_enabled": obj.is_enabled},
+            status=status.HTTP_200_OK,
+        )
 
 
 class ListingLeadingViewSet(viewsets.ModelViewSet):

@@ -2,6 +2,8 @@
 # apps/listings/views.py
 # ============================================================
 
+import logging
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q, F
@@ -68,6 +70,8 @@ from .services.listing_moderation import (
 
 from .views_helpers import require_int_listing_id
 
+logger = logging.getLogger(__name__)
+
 # ============================================================================
 # CATEGORY SLUGS
 # ============================================================================
@@ -122,7 +126,8 @@ CATEGORY_SLUGS = {
         summary="Futa/hifadhi tangazo",
         description=(
             "Tangazo huwekwa kwenye kikapu kwa siku 90. "
-            "Muuzaji anaweza kulirejesha kabla ya muda kuisha."
+            "Muuzaji anaweza kulirejesha kabla ya muda kuisha. "
+            "Admin anaweza kufuta kabisa kwa `?hard=true`."
         ),
     ),
 )
@@ -241,18 +246,95 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             status=instance.status,
         )
 
+    # ═══════════════════════════════════════════════════════════
+    # DESTROY — soft delete (default) au hard delete (admin)
+    # Defensive: inafuta related models zote kwa try/except
+    # ═══════════════════════════════════════════════════════════
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
 
-        if request.user.is_staff and request.query_params.get(
+        is_hard = request.query_params.get(
             "hard", "false"
-        ).lower() in ("true", "1", "yes"):
-            listing.hard_delete()
+        ).lower() in ("true", "1", "yes")
+
+        if request.user.is_staff and is_hard:
+            # ══════════════════════════════════════════════════
+            # HARD DELETE — futa related models zote kwa try/except
+            # ══════════════════════════════════════════════════
+
+            # 1. Futa ListingFee (PROTECT) kwanza
+            try:
+                ListingFee.objects.filter(listing=listing).delete()
+            except Exception as exc:
+                logger.warning(
+                    "[listings] delete ListingFee for %s failed: %s",
+                    listing.id, exc,
+                )
+
+            # 2. Futa related models zote kwa try/except
+            related_fields = [
+                "images",
+                "boosts",
+                "deal_rooms",
+                "transactions",
+                "waiting_list_entries",
+                "saved_by",
+                "search_matches",
+                "leads",
+                "conversations",
+                "banner_ads",
+                "leading_purchases",
+            ]
+
+            for field_name in related_fields:
+                try:
+                    manager = getattr(listing, field_name, None)
+                    if manager is not None:
+                        manager.all().delete()
+                except Exception as exc:
+                    logger.warning(
+                        "[listings] delete %s for listing %s failed: %s",
+                        field_name, listing.id, exc,
+                    )
+
+            # 3. Futa details (Property/Land/Vehicle/Business/Equipment)
+            detail_fields = [
+                "property_details",
+                "land_details",
+                "vehicle_details",
+                "business_details",
+                "equipment_details",
+            ]
+            for field_name in detail_fields:
+                try:
+                    obj = getattr(listing, field_name, None)
+                    if obj is not None:
+                        obj.delete()
+                except Exception as exc:
+                    logger.warning(
+                        "[listings] delete %s for listing %s failed: %s",
+                        field_name, listing.id, exc,
+                    )
+
+            # 4. Sasa hard delete
+            try:
+                listing.hard_delete()
+            except Exception as exc:
+                logger.error(
+                    "[listings] hard_delete failed for %s: %s",
+                    listing.id, exc,
+                )
+                return Response(
+                    {"detail": f"Imeshindwa kufuta: {exc}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
             return Response(
                 {"detail": "Tangazo limefutwa kabisa."},
                 status=status.HTTP_204_NO_CONTENT,
             )
 
+        # ── Soft delete (default) ─────────────────────────────
         listing.delete(
             by=request.user,
             reason=request.data.get("reason", "") if isinstance(

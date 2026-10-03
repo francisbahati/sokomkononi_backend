@@ -6,7 +6,7 @@ import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q, F
+from django.db.models import ProtectedError, Q, F
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -248,17 +248,16 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
     # ═══════════════════════════════════════════════════════════
     # DESTROY — soft delete (default) au hard delete (admin)
-    # Defensive: inafuta related models zote kwa try/except.
     #
-    # SASISHO: Mpangilio sahihi ili kuepuka ProtectedError:
-    #   1. ListingFee (PROTECT)
-    #   2. Lead (PROTECT — LAZIMA hard_delete kwa sababu Lead ni SoftDeleteModel)
-    #   3. Reservation + InspectionPeriod (PROTECT kwa Transaction)
-    #   4. Transaction (PROTECT kwa Listing)
-    #   5. DealRoom (PROTECT kwa Listing; NegotiationOffer CASCADE)
-    #   6. Related models zingine (CASCADE au soft, inatumia hard_delete)
-    #   7. Details (Property/Land/Vehicle/Business/Equipment)
-    #   8. listing.hard_delete()
+    # SASISHO:
+    #   - Tumia `_base_manager` ili kuona rows zote (hata zilizo
+    #     soft-deleted) kwa sababu PROTECT inaangalia DB rows, si
+    #     manager view.
+    #   - Usimeze exceptions. Kama kitu kimeshindikana, rudisha
+    #     400 na uache operesheni isimame — usiendelee hadi
+    #     listing.hard_delete() ambayo itatupa 500.
+    #   - Catch ProtectedError mwisho kama safety net, na
+    #     tumia transaction.atomic() kuzuia partial deletes.
     # ═══════════════════════════════════════════════════════════
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
@@ -267,197 +266,194 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             "hard", "false"
         ).lower() in ("true", "1", "yes")
 
-        if request.user.is_staff and is_hard:
-            # ══════════════════════════════════════════════════
-            # HARD DELETE
-            # ══════════════════════════════════════════════════
+        # ── Soft delete (default) ─────────────────────────────
+        if not (request.user.is_staff and is_hard):
+            listing.delete(
+                by=request.user,
+                reason=request.data.get("reason", "") if isinstance(
+                    request.data, dict
+                ) else "",
+            )
+            return Response(
+                {
+                    "detail": (
+                        "Tangazo limewekwa kwenye kikapu. "
+                        "Litaondolewa kabisa baada ya siku 90."
+                    )
+                },
+                status=status.HTTP_200_OK,
+            )
 
-            # 1. Futa ListingFee (PROTECT)
-            try:
+        # ══════════════════════════════════════════════════════
+        # HARD DELETE
+        # ══════════════════════════════════════════════════════
+        try:
+            with transaction.atomic():
+                # ── 1. ListingFee (PROTECT) ────────────────────
                 ListingFee.objects.filter(listing=listing).delete()
-            except Exception as exc:
-                logger.warning(
-                    "[listings] delete ListingFee for %s failed: %s",
-                    listing.id, exc,
-                )
 
-            # 2. Futa Leads (PROTECT kwa Listing) — HARD DELETE
-            #    Lead ni SoftDeleteModel. `manager.all().delete()` inaita
-            #    soft delete (haifuti kabisa). Tunahitaji `hard_delete()`
-            #    ili `Lead.listing` FK isiondoke na kuzuia listing delete.
-            try:
-                from apps.leads.models import Lead
-                leads_qs = Lead.objects.filter(listing=listing)
-                for lead in leads_qs:
-                    if hasattr(lead, "hard_delete"):
-                        lead.hard_delete()
-                    else:
-                        lead.delete()
-            except ImportError as exc:
-                logger.warning(
-                    "[listings] leads app not available: %s", exc,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "[listings] delete Lead for %s failed: %s",
-                    listing.id, exc,
-                )
+                # ── 2. Leads (PROTECT) — HARD DELETE ───────────
+# Lead ina Model.delete() override inayofanya soft delete.
+# Hata queryset.delete() inaheshimu override hiyo. Kwa hivyo
+# LAZIMA tutumie hard_delete() kwa kila lead mmoja mmoja.
+try:
+    from apps.leads.models import Lead
 
-            # 3. Futa Transaction chain: InspectionPeriod + Reservation + Transaction
-            #    (PROTECT: Reservation.transaction, InspectionPeriod.transaction,
-            #     Transaction.listing — zote zinahitaji kufutwa kwa mpangilio)
-            try:
-                from apps.transactions.models import (
-                    Transaction,
-                    Reservation,
-                    InspectionPeriod,
-                )
+    lead_ids = list(
+        Lead._base_manager
+        .filter(listing=listing)
+        .values_list("pk", flat=True)
+    )
 
-                tx_ids = list(
-                    Transaction.objects
-                    .filter(listing=listing)
-                    .values_list("id", flat=True)
-                )
+    for lead_id in lead_ids:
+        lead = Lead._base_manager.get(pk=lead_id)
+        if hasattr(lead, "hard_delete"):
+            lead.hard_delete()
+        else:
+            # Fallback mbaya — lakini kama hard_delete haipo,
+            # hatuna namna nyingine ya kufuta DB row.
+            # Tunaweza ku-force kwa raw SQL kama inahitajika.
+            Lead._base_manager.filter(pk=lead_id).delete()
 
-                if tx_ids:
-                    # 3a. InspectionPeriod kwanza (PROTECT kwa Transaction)
-                    try:
-                        InspectionPeriod.objects.filter(
+    remaining = Lead._base_manager.filter(listing=listing).count()
+    if remaining:
+        raise RuntimeError(
+            f"Leads {remaining} zinarejelea tangazo hili bado."
+        )
+except ImportError:
+    logger.warning("[listings] leads app not available, skipping")
+
+                # ── 3. Transaction chain ───────────────────────
+                # Mpangilio: InspectionPeriod → Reservation →
+                # Transaction (kila moja ina PROTECT kwa iliyo juu).
+                try:
+                    from apps.transactions.models import (
+                        Transaction,
+                        Reservation,
+                        InspectionPeriod,
+                    )
+
+                    tx_ids = list(
+                        Transaction._base_manager
+                        .filter(listing=listing)
+                        .values_list("id", flat=True)
+                    )
+
+                    if tx_ids:
+                        InspectionPeriod._base_manager.filter(
                             transaction_id__in=tx_ids,
                         ).delete()
-                    except Exception as exc:
-                        logger.warning(
-                            "[listings] delete InspectionPeriod for %s failed: %s",
-                            listing.id, exc,
-                        )
 
-                    # 3b. Reservation (PROTECT kwa Transaction)
-                    try:
-                        Reservation.objects.filter(
+                        Reservation._base_manager.filter(
                             transaction_id__in=tx_ids,
                         ).delete()
-                    except Exception as exc:
-                        logger.warning(
-                            "[listings] delete Reservation for %s failed: %s",
-                            listing.id, exc,
-                        )
 
-                    # 3c. Transaction (PROTECT kwa Listing)
-                    try:
-                        Transaction.objects.filter(
+                        Transaction._base_manager.filter(
                             listing=listing,
                         ).delete()
-                    except Exception as exc:
-                        logger.warning(
-                            "[listings] delete Transaction for %s failed: %s",
-                            listing.id, exc,
-                        )
-            except ImportError as exc:
-                logger.warning(
-                    "[listings] transactions app not available: %s", exc,
-                )
+                except ImportError:
+                    logger.warning(
+                        "[listings] transactions app not available, "
+                        "skipping"
+                    )
 
-            # 4. Futa DealRoom (PROTECT kwa Listing; NegotiationOffer CASCADE)
-            try:
-                from apps.deals.models import DealRoom
-
-                DealRoom.objects.filter(listing=listing).delete()
-            except ImportError as exc:
-                logger.warning(
-                    "[listings] deals app not available: %s", exc,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "[listings] delete DealRoom for %s failed: %s",
-                    listing.id, exc,
-                )
-
-            # 5. Futa related models zingine (CASCADE au soft)
-            #    NOTE: `transactions`, `deal_rooms`, na `leads` zimeondolewa
-            #    kwa sababu tumezishughulikia juu kwa mpangilio maalum.
-            related_fields = [
-                "images",
-                "boosts",
-                "waiting_list_entries",
-                "saved_by",
-                "search_matches",
-                # "leads",              # ⬅️ IMEONDOLEWA — tumefuta juu
-                "conversations",
-                "banner_ads",
-                "leading_purchases",
-            ]
-
-            for field_name in related_fields:
+                # ── 4. DealRoom (PROTECT) ──────────────────────
                 try:
+                    from apps.deals.models import DealRoom
+
+                    DealRoom._base_manager.filter(
+                        listing=listing,
+                    ).delete()
+                except ImportError:
+                    logger.warning(
+                        "[listings] deals app not available, skipping"
+                    )
+
+                # ── 5. Related models zingine ──────────────────
+                # NOTE: `leads`, `transactions`, `deal_rooms`
+                # zimeondolewa — tumeshughulikia juu.
+                related_fields = [
+                    "images",
+                    "boosts",
+                    "waiting_list_entries",
+                    "saved_by",
+                    "search_matches",
+                    "conversations",
+                    "banner_ads",
+                    "leading_purchases",
+                ]
+
+                for field_name in related_fields:
                     manager = getattr(listing, field_name, None)
                     if manager is None:
                         continue
-                    # Hard delete kila object (kwa SoftDeleteModel)
-                    for obj in manager.all():
-                        if hasattr(obj, "hard_delete"):
-                            obj.hard_delete()
-                        else:
-                            obj.delete()
-                except Exception as exc:
-                    logger.warning(
-                        "[listings] delete %s for listing %s failed: %s",
-                        field_name, listing.id, exc,
-                    )
+                    try:
+                        for obj in manager.all():
+                            if hasattr(obj, "hard_delete"):
+                                obj.hard_delete()
+                            else:
+                                obj.delete()
+                    except Exception as exc:
+                        logger.warning(
+                            "[listings] delete %s for listing %s "
+                            "failed: %s",
+                            field_name, listing.id, exc,
+                        )
+                        raise
 
-            # 6. Futa details (Property/Land/Vehicle/Business/Equipment)
-            detail_fields = [
-                "property_details",
-                "land_details",
-                "vehicle_details",
-                "business_details",
-                "equipment_details",
-            ]
-            for field_name in detail_fields:
-                try:
-                    obj = getattr(listing, field_name, None)
+                # ── 6. Details (one-to-one) ────────────────────
+                detail_fields = [
+                    "property_details",
+                    "land_details",
+                    "vehicle_details",
+                    "business_details",
+                    "equipment_details",
+                ]
+                for field_name in detail_fields:
+                    try:
+                        obj = getattr(listing, field_name, None)
+                    except Exception:
+                        obj = None
                     if obj is not None:
                         obj.delete()
-                except Exception as exc:
-                    logger.warning(
-                        "[listings] delete %s for listing %s failed: %s",
-                        field_name, listing.id, exc,
-                    )
 
-            # 7. Sasa hard delete
-            try:
+                # ── 7. Hatimaye: hard delete listing ───────────
                 listing.hard_delete()
-            except Exception as exc:
-                logger.error(
-                    "[listings] hard_delete failed for %s: %s",
-                    listing.id, exc,
-                )
-                return Response(
-                    {"detail": f"Imeshindwa kufuta: {exc}"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
 
+        except ProtectedError as exc:
+            protected = list(getattr(exc, "protected_objects", []))
+            logger.error(
+                "[listings] ProtectedError on hard_delete for %s: %s",
+                listing.id, protected,
+            )
             return Response(
-                {"detail": "Tangazo limefutwa kabisa."},
-                status=status.HTTP_204_NO_CONTENT,
+                {
+                    "detail": (
+                        "Imeshindwa kufuta: kuna rekodi "
+                        f"{len(protected)} zinazorejelea tangazo "
+                        "hili."
+                    ),
+                    "protected_objects": [
+                        str(o) for o in protected
+                    ],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            logger.exception(
+                "[listings] hard_delete failed for %s: %s",
+                listing.id, exc,
+            )
+            return Response(
+                {"detail": f"Imeshindwa kufuta: {exc}"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── Soft delete (default) ─────────────────────────────
-        listing.delete(
-            by=request.user,
-            reason=request.data.get("reason", "") if isinstance(
-                request.data, dict
-            ) else "",
+        return Response(
+            {"detail": "Tangazo limefutwa kabisa."},
+            status=status.HTTP_204_NO_CONTENT,
         )
 
-        return Response(
-            {
-                "detail": (
-                    "Tangazo limewekwa kwenye kikapu. "
-                    "Litaondolewa kabisa baada ya siku 90."
-                )
-            },
-            status=status.HTTP_200_OK,
-        )
 
 # ============================================================================
 # REUSABLE CATEGORY DETAILS VIEWSET

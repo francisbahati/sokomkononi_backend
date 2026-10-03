@@ -248,7 +248,20 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
     # ═══════════════════════════════════════════════════════════
     # DESTROY — soft delete (default) au hard delete (admin)
-    # Defensive: inafuta related models zote kwa try/except
+    # Defensive: inafuta related models zote kwa try/except.
+    #
+    # SASISHO: Tunafuta kwa mpangilio sahihi ili kuepuka
+    # ProtectedError kwa `Transaction.listing` na `DealRoom.listing`
+    # (zote zina `on_delete=PROTECT`).
+    #
+    # Mpangilio:
+    #   1. ListingFee (PROTECT)
+    #   2. Reservation + InspectionPeriod (PROTECT kwa Transaction)
+    #   3. Transaction (PROTECT kwa Listing)
+    #   4. DealRoom (PROTECT kwa Listing; NegotiationOffer CASCADE)
+    #   5. Related models zingine (CASCADE au soft)
+    #   6. Details (Property/Land/Vehicle/Business/Equipment)
+    #   7. listing.hard_delete()
     # ═══════════════════════════════════════════════════════════
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
@@ -259,10 +272,10 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         if request.user.is_staff and is_hard:
             # ══════════════════════════════════════════════════
-            # HARD DELETE — futa related models zote kwa try/except
+            # HARD DELETE
             # ══════════════════════════════════════════════════
 
-            # 1. Futa ListingFee (PROTECT) kwanza
+            # 1. Futa ListingFee (PROTECT)
             try:
                 ListingFee.objects.filter(listing=listing).delete()
             except Exception as exc:
@@ -271,12 +284,81 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     listing.id, exc,
                 )
 
-            # 2. Futa related models zote kwa try/except
+            # 2. Futa Transaction chain: InspectionPeriod + Reservation + Transaction
+            #    (PROTECT: Reservation.transaction, InspectionPeriod.transaction,
+            #     Transaction.listing — zote zinahitaji kufutwa kwa mpangilio)
+            try:
+                from apps.transactions.models import (
+                    Transaction,
+                    Reservation,
+                    InspectionPeriod,
+                )
+
+                tx_ids = list(
+                    Transaction.objects
+                    .filter(listing=listing)
+                    .values_list("id", flat=True)
+                )
+
+                if tx_ids:
+                    # 2a. InspectionPeriod kwanza (PROTECT kwa Transaction)
+                    try:
+                        InspectionPeriod.objects.filter(
+                            transaction_id__in=tx_ids,
+                        ).delete()
+                    except Exception as exc:
+                        logger.warning(
+                            "[listings] delete InspectionPeriod for %s failed: %s",
+                            listing.id, exc,
+                        )
+
+                    # 2b. Reservation (PROTECT kwa Transaction)
+                    try:
+                        Reservation.objects.filter(
+                            transaction_id__in=tx_ids,
+                        ).delete()
+                    except Exception as exc:
+                        logger.warning(
+                            "[listings] delete Reservation for %s failed: %s",
+                            listing.id, exc,
+                        )
+
+                    # 2c. Transaction (PROTECT kwa Listing)
+                    try:
+                        Transaction.objects.filter(
+                            listing=listing,
+                        ).delete()
+                    except Exception as exc:
+                        logger.warning(
+                            "[listings] delete Transaction for %s failed: %s",
+                            listing.id, exc,
+                        )
+            except ImportError as exc:
+                logger.warning(
+                    "[listings] transactions app not available: %s", exc,
+                )
+
+            # 3. Futa DealRoom (PROTECT kwa Listing; NegotiationOffer CASCADE)
+            try:
+                from apps.deals.models import DealRoom
+
+                DealRoom.objects.filter(listing=listing).delete()
+            except ImportError as exc:
+                logger.warning(
+                    "[listings] deals app not available: %s", exc,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[listings] delete DealRoom for %s failed: %s",
+                    listing.id, exc,
+                )
+
+            # 4. Futa related models zingine (CASCADE au soft)
+            #    NOTE: `transactions` na `deal_rooms` zimeondolewa kwa
+            #    sababu tumezishughulikia juu kwa mpangilio maalum.
             related_fields = [
                 "images",
                 "boosts",
-                "deal_rooms",
-                "transactions",
                 "waiting_list_entries",
                 "saved_by",
                 "search_matches",
@@ -289,15 +371,21 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             for field_name in related_fields:
                 try:
                     manager = getattr(listing, field_name, None)
-                    if manager is not None:
-                        manager.all().delete()
+                    if manager is None:
+                        continue
+                    # Hard delete kila object (kwa SoftDeleteModel)
+                    for obj in manager.all():
+                        if hasattr(obj, "hard_delete"):
+                            obj.hard_delete()
+                        else:
+                            obj.delete()
                 except Exception as exc:
                     logger.warning(
                         "[listings] delete %s for listing %s failed: %s",
                         field_name, listing.id, exc,
                     )
 
-            # 3. Futa details (Property/Land/Vehicle/Business/Equipment)
+            # 5. Futa details (Property/Land/Vehicle/Business/Equipment)
             detail_fields = [
                 "property_details",
                 "land_details",
@@ -316,7 +404,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         field_name, listing.id, exc,
                     )
 
-            # 4. Sasa hard delete
+            # 6. Sasa hard delete
             try:
                 listing.hard_delete()
             except Exception as exc:

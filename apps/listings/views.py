@@ -250,18 +250,15 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     # DESTROY — soft delete (default) au hard delete (admin)
     # Defensive: inafuta related models zote kwa try/except.
     #
-    # SASISHO: Tunafuta kwa mpangilio sahihi ili kuepuka
-    # ProtectedError kwa `Transaction.listing` na `DealRoom.listing`
-    # (zote zina `on_delete=PROTECT`).
-    #
-    # Mpangilio:
+    # SASISHO: Mpangilio sahihi ili kuepuka ProtectedError:
     #   1. ListingFee (PROTECT)
-    #   2. Reservation + InspectionPeriod (PROTECT kwa Transaction)
-    #   3. Transaction (PROTECT kwa Listing)
-    #   4. DealRoom (PROTECT kwa Listing; NegotiationOffer CASCADE)
-    #   5. Related models zingine (CASCADE au soft)
-    #   6. Details (Property/Land/Vehicle/Business/Equipment)
-    #   7. listing.hard_delete()
+    #   2. Lead (PROTECT — LAZIMA hard_delete kwa sababu Lead ni SoftDeleteModel)
+    #   3. Reservation + InspectionPeriod (PROTECT kwa Transaction)
+    #   4. Transaction (PROTECT kwa Listing)
+    #   5. DealRoom (PROTECT kwa Listing; NegotiationOffer CASCADE)
+    #   6. Related models zingine (CASCADE au soft, inatumia hard_delete)
+    #   7. Details (Property/Land/Vehicle/Business/Equipment)
+    #   8. listing.hard_delete()
     # ═══════════════════════════════════════════════════════════
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
@@ -284,7 +281,29 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     listing.id, exc,
                 )
 
-            # 2. Futa Transaction chain: InspectionPeriod + Reservation + Transaction
+            # 2. Futa Leads (PROTECT kwa Listing) — HARD DELETE
+            #    Lead ni SoftDeleteModel. `manager.all().delete()` inaita
+            #    soft delete (haifuti kabisa). Tunahitaji `hard_delete()`
+            #    ili `Lead.listing` FK isiondoke na kuzuia listing delete.
+            try:
+                from apps.leads.models import Lead
+                leads_qs = Lead.objects.filter(listing=listing)
+                for lead in leads_qs:
+                    if hasattr(lead, "hard_delete"):
+                        lead.hard_delete()
+                    else:
+                        lead.delete()
+            except ImportError as exc:
+                logger.warning(
+                    "[listings] leads app not available: %s", exc,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[listings] delete Lead for %s failed: %s",
+                    listing.id, exc,
+                )
+
+            # 3. Futa Transaction chain: InspectionPeriod + Reservation + Transaction
             #    (PROTECT: Reservation.transaction, InspectionPeriod.transaction,
             #     Transaction.listing — zote zinahitaji kufutwa kwa mpangilio)
             try:
@@ -301,7 +320,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 )
 
                 if tx_ids:
-                    # 2a. InspectionPeriod kwanza (PROTECT kwa Transaction)
+                    # 3a. InspectionPeriod kwanza (PROTECT kwa Transaction)
                     try:
                         InspectionPeriod.objects.filter(
                             transaction_id__in=tx_ids,
@@ -312,7 +331,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                             listing.id, exc,
                         )
 
-                    # 2b. Reservation (PROTECT kwa Transaction)
+                    # 3b. Reservation (PROTECT kwa Transaction)
                     try:
                         Reservation.objects.filter(
                             transaction_id__in=tx_ids,
@@ -323,7 +342,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                             listing.id, exc,
                         )
 
-                    # 2c. Transaction (PROTECT kwa Listing)
+                    # 3c. Transaction (PROTECT kwa Listing)
                     try:
                         Transaction.objects.filter(
                             listing=listing,
@@ -338,7 +357,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     "[listings] transactions app not available: %s", exc,
                 )
 
-            # 3. Futa DealRoom (PROTECT kwa Listing; NegotiationOffer CASCADE)
+            # 4. Futa DealRoom (PROTECT kwa Listing; NegotiationOffer CASCADE)
             try:
                 from apps.deals.models import DealRoom
 
@@ -353,16 +372,16 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     listing.id, exc,
                 )
 
-            # 4. Futa related models zingine (CASCADE au soft)
-            #    NOTE: `transactions` na `deal_rooms` zimeondolewa kwa
-            #    sababu tumezishughulikia juu kwa mpangilio maalum.
+            # 5. Futa related models zingine (CASCADE au soft)
+            #    NOTE: `transactions`, `deal_rooms`, na `leads` zimeondolewa
+            #    kwa sababu tumezishughulikia juu kwa mpangilio maalum.
             related_fields = [
                 "images",
                 "boosts",
                 "waiting_list_entries",
                 "saved_by",
                 "search_matches",
-                "leads",
+                # "leads",              # ⬅️ IMEONDOLEWA — tumefuta juu
                 "conversations",
                 "banner_ads",
                 "leading_purchases",
@@ -385,7 +404,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         field_name, listing.id, exc,
                     )
 
-            # 5. Futa details (Property/Land/Vehicle/Business/Equipment)
+            # 6. Futa details (Property/Land/Vehicle/Business/Equipment)
             detail_fields = [
                 "property_details",
                 "land_details",
@@ -404,7 +423,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         field_name, listing.id, exc,
                     )
 
-            # 6. Sasa hard delete
+            # 7. Sasa hard delete
             try:
                 listing.hard_delete()
             except Exception as exc:

@@ -1,4 +1,8 @@
 # apps/finance/models.py
+from decimal import Decimal
+
+from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 
 
@@ -119,3 +123,65 @@ class SystemFeatureToggle(models.Model):
     def __str__(self):
         status = "ON" if self.is_enabled else "OFF"
         return f"{self.key} — {status}"
+
+
+class SuccessFeePayment(models.Model):
+    """
+    One attempt to pay the success fee (transactions report download).
+
+    Created PENDING when the user starts a payment, and marked PAID only
+    by the FimiPay webhook (or by a server-side status check against
+    FimiPay). The download endpoint trusts this table, never the client.
+
+    Financial record - never deleted.
+    """
+
+    class PaymentStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        PAID = "PAID", "Paid"
+        FAILED = "FAILED", "Failed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="success_fee_payments",
+    )
+
+    purpose = models.CharField(max_length=50, default="download")
+
+    amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+
+    payment_status = models.CharField(
+        max_length=20,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.PENDING,
+    )
+
+    payment_reference = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        unique=True,
+    )
+
+    paid_at = models.DateTimeField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "success_fee_payments"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["user", "payment_status", "paid_at"],
+                name="sfp_user_status_paid_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"SuccessFeePayment #{self.pk} - {self.user_id} - {self.payment_status}"

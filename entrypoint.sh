@@ -65,6 +65,9 @@ fi
 echo "Applying database migrations..."
 python manage.py migrate --noinput
 
+echo "Seeding categories + fee rules..."
+python manage.py seed_all_fee_rules || echo "WARN: seed failed, continuing."
+
 # Only CREATE a superuser if one does not already exist.
 # We deliberately do NOT reset the password of an existing superuser.
 if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then

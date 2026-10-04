@@ -59,7 +59,17 @@ def get_listing_fee_rule(category_slug=None, price=None):
         if rule:
             return rule
 
-    # 3. Fallback: tafuta kwa bei (legacy)
+    # 3. Fallback: any active FLAT rule (system-wide default)
+    rule = (
+        ListingFeeRule.objects
+        .filter(is_active=True, is_deleted=False, fee_mode="FLAT")
+        .order_by("priority", "min_price")
+        .first()
+    )
+    if rule:
+        return rule
+
+    # 4. Fallback: tafuta kwa bei (legacy)
     if price is not None:
         price_dec = Decimal(price)
         rules = ListingFeeRule.objects.filter(
@@ -71,7 +81,20 @@ def get_listing_fee_rule(category_slug=None, price=None):
             if rule.max_price is None or price_dec <= rule.max_price:
                 return rule
 
-    return None
+    # 5. Last resort: auto-create a system default rule so listings
+    #    NEVER fail to get a fee. Admins can edit it later.
+    default_rule, _ = ListingFeeRule.objects.get_or_create(
+        category_slug="__default__",
+        defaults={
+            "name": "Default Listing Fee",
+            "fee_mode": "FLAT",
+            "flat_fee": 5000,
+            "percentage": 0,
+            "is_active": True,
+            "priority": 9999,
+        },
+    )
+    return default_rule
 
 
 def calculate_listing_fee(price, category_slug=None):

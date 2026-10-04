@@ -26,6 +26,23 @@ class BundleSerializer(serializers.ModelSerializer):
             data["credits"] = {}
         return data
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Canonical credits shape: {service_key: count}
+        credits = data.get("credits")
+        if isinstance(credits, list):
+            normalised = {}
+            for item in credits:
+                if isinstance(item, dict):
+                    key = item.get("service") or item.get("service_key") or item.get("key")
+                    count = item.get("count") or item.get("amount") or 1
+                    if key:
+                        normalised[str(key)] = int(count)
+            data["credits"] = normalised
+        elif not isinstance(credits, dict):
+            data["credits"] = {}
+        return data
+
     class Meta:
         model = Bundle
         fields = [

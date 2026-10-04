@@ -31,7 +31,6 @@ from .services import (
     create_pending_registration,
     delete_user_account,
     reset_user_password,
-    resolve_identifier,
     send_password_reset_otp,
     send_registration_otp,
     verify_password_reset_otp,
@@ -67,11 +66,10 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
 
         pending = create_pending_registration(serializer.validated_data)
-        verification_type = "EMAIL" if pending.email else "PHONE"
 
         otp_sent = True
         try:
-            send_registration_otp(pending, verification_type)
+            send_registration_otp(pending)
         except OTPThrottled as exc:
             return Response(
                 getattr(exc, "detail", {"detail": str(exc)}),
@@ -127,7 +125,6 @@ class VerifyOTPView(APIView):
         user = verify_registration_otp(
             identifier=serializer.validated_data["identifier"],
             otp_code=serializer.validated_data["otp_code"],
-            verification_type=serializer.validated_data["verification_type"],
         )
 
         refresh = RefreshToken.for_user(user)
@@ -355,30 +352,22 @@ class ForgotPasswordView(APIView):
         serializer = ForgotPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        identifier = serializer.validated_data["identifier"]
+        email = serializer.validated_data["identifier"]
 
         generic_response = {
             "message": (
                 "Kama akaunti ipo, OTP imetumwa. "
-                "Angalia barua pepe au ujumbe wa simu."
+                "Angalia barua pepe yako."
             ),
         }
 
-        try:
-            normalized, base_type = resolve_identifier(identifier)
-        except ValidationError:
-            return Response(generic_response, status=status.HTTP_200_OK)
-
-        if base_type == "EMAIL":
-            user = User.objects.filter(email__iexact=normalized).first()
-        else:
-            user = User.objects.filter(phone=normalized).first()
+        user = User.objects.filter(email__iexact=email).first()
 
         if not user:
             return Response(generic_response, status=status.HTTP_200_OK)
 
         try:
-            send_password_reset_otp(user, base_type)
+            send_password_reset_otp(user)
         except Exception:
             logger.exception(
                 "Failed to send password reset OTP for user %s", user.pk,
@@ -410,7 +399,6 @@ class VerifyPasswordResetOTPView(APIView):
         user = verify_password_reset_otp(
             identifier=serializer.validated_data["identifier"],
             otp_code=serializer.validated_data["otp_code"],
-            verification_type=serializer.validated_data["verification_type"],
         )
 
         reset_token = create_password_reset_token(user)
@@ -464,6 +452,7 @@ class PasswordResetView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
 
 # ============================================================
 # AVATAR UPLOAD / REMOVE

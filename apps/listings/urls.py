@@ -14,6 +14,8 @@ from .views import (
     ListingViewSet,
     PropertyDetailsViewSet,
     VehicleDetailsViewSet,
+    check_duplicate_listing,
+    publish_listing,
 )
 from .views_fee_rules import ListingFeeRuleViewSet
 
@@ -85,12 +87,13 @@ urlpatterns = [
     path("admin/pending/", admin_pending_listings, name="admin-pending-listings"),
 
     path("", listing_list, name="listing-list"),
-
-    # Similar listings — LAZIMA iwe kabla ya <int:pk>/ ili
-    # "similar" isichukuliwe kama pk (haitatokea kwa int, lakini ni
-    # best practice kuweka specific URLs kwanza).
+    path(
+        "check-duplicate/",
+        check_duplicate_listing,
+        name="listing-check-duplicate",
+    ),
     path("<int:pk>/similar/", listing_similar, name="listing-similar"),
-
+    path("<int:pk>/publish/", publish_listing, name="listing-publish"),
     path("<int:pk>/", listing_detail, name="listing-detail"),
 
     path("<int:listing_id>/property-details/", property_detail_list,

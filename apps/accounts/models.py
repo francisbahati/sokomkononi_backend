@@ -37,6 +37,8 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
         verbose_name="Barua pepe ya awali",
     )
 
+    # Contact info only. Unique among active users (see constraint
+    # below) but never used for OTP, verification or login.
     phone = models.CharField(
         max_length=20,
         null=True,
@@ -104,8 +106,6 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
         default_manager_name = "objects"
 
         constraints = [
-            # Email uniqueness is now enforced by the field itself
-            # (unique=True). The partial constraint is no longer needed.
             models.UniqueConstraint(
                 fields=["phone"],
                 condition=models.Q(
@@ -121,7 +121,6 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
             self.name
             or self.email
             or self.deleted_email
-            or self.phone
             or f"User {self.pk}"
         )
 
@@ -232,11 +231,10 @@ class PendingRegistration(models.Model):
 
     email = models.EmailField(
         unique=True,
-        null=True,
-        blank=True,
         verbose_name="Barua pepe",
     )
 
+    # Contact info only, carried over to User on verification.
     phone = models.CharField(
         max_length=20,
         unique=True,
@@ -274,32 +272,22 @@ class PendingRegistration(models.Model):
         verbose_name_plural = "Usajili unaosubiri"
 
     def __str__(self):
-        return (
-            self.email
-            or self.phone
-            or self.name
-            or f"Pending registration {self.pk}"
-        )
+        return self.email or self.name or f"Pending registration {self.pk}"
 
 
 class OTPVerification(models.Model):
 
     class VerificationType(models.TextChoices):
         EMAIL = "EMAIL", "Email"
-        PHONE = "PHONE", "Phone"
         PASSWORD_RESET_EMAIL = (
             "PASSWORD_RESET_EMAIL",
             "Password Reset (Email)",
-        )
-        PASSWORD_RESET_PHONE = (
-            "PASSWORD_RESET_PHONE",
-            "Password Reset (Phone)",
         )
 
     identifier = models.CharField(
         max_length=254,
         db_index=True,
-        verbose_name="Email au namba ya simu",
+        verbose_name="Barua pepe",
     )
 
     verification_type = models.CharField(

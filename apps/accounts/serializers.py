@@ -1,9 +1,24 @@
-from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .models import User
+from .services import normalize_tanzania_phone
+
+
+def _validate_otp_digits(value):
+    value = (value or "").strip()
+    if not value.isdigit() or len(value) != 6:
+        raise serializers.ValidationError("OTP lazima iwe namba sita.")
+    return value
+
+
+def _run_password_validators(value):
+    try:
+        validate_password(value)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError(list(exc.messages))
+    return value
 
 
 # ============================================================
@@ -11,14 +26,11 @@ from .models import User
 # ============================================================
 
 class RegisterSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=150, required=True)
+    name = serializers.CharField(max_length=150)
 
-    email = serializers.EmailField(
-        required=False,
-        allow_blank=True,
-        allow_null=True,
-    )
+    email = serializers.EmailField()
 
+    # Contact info only: optional and unique. Never used for OTP or login.
     phone = serializers.CharField(
         max_length=20,
         required=False,
@@ -37,41 +49,27 @@ class RegisterSerializer(serializers.Serializer):
         max_length=128,
     )
 
-    def validate(self, attrs):
-        email = attrs.get("email")
-        phone = attrs.get("phone")
-
-        if not email and not phone:
+    def validate_email(self, value):
+        value = value.strip().lower()
+        if User.all_objects.filter(email=value).exists():
             raise serializers.ValidationError(
-                "Barua pepe au namba ya simu inahitajika."
+                "Barua pepe hii tayari imesajiliwa."
             )
+        return value
 
-        if email:
-            email = email.strip().lower()
-            attrs["email"] = email
-
-            if User.all_objects.filter(email=email).exists():
-                raise serializers.ValidationError({
-                    "email": "Barua pepe hii tayari imesajiliwa."
-                })
-
-        if phone:
-            phone = phone.strip()
-            attrs["phone"] = phone
-
-            if User.objects.filter(phone=phone).exists():
-                raise serializers.ValidationError({
-                    "phone": "Namba hii ya simu tayari imesajiliwa."
-                })
-
-        return attrs
+    def validate_phone(self, value):
+        value = (value or "").strip()
+        if not value:
+            return None  # store NULL, never ""
+        value = normalize_tanzania_phone(value)
+        if User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError(
+                "Namba hii ya simu tayari imesajiliwa."
+            )
+        return value
 
     def validate_password(self, value):
-        try:
-            validate_password(value)
-        except DjangoValidationError as exc:
-            raise serializers.ValidationError(list(exc.messages))
-        return value
+        return _run_password_validators(value)
 
 
 # ============================================================
@@ -79,19 +77,14 @@ class RegisterSerializer(serializers.Serializer):
 # ============================================================
 
 class VerifyOTPSerializer(serializers.Serializer):
-    identifier = serializers.CharField(max_length=254)
-
+    identifier = serializers.EmailField()
     otp_code = serializers.CharField(min_length=6, max_length=6)
 
-    verification_type = serializers.ChoiceField(
-        choices=[("EMAIL", "Email"), ("PHONE", "Phone")]
-    )
+    def validate_identifier(self, value):
+        return value.strip().lower()
 
     def validate_otp_code(self, value):
-        value = (value or "").strip()
-        if not value.isdigit() or len(value) != 6:
-            raise serializers.ValidationError("OTP lazima iwe namba sita.")
-        return value
+        return _validate_otp_digits(value)
 
 
 # ============================================================
@@ -100,30 +93,17 @@ class VerifyOTPSerializer(serializers.Serializer):
 
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField(max_length=254)
-
     password = serializers.CharField(write_only=True, max_length=128)
 
     def validate(self, attrs):
-        identifier = attrs.get("identifier", "").strip()
+        identifier = attrs.get("identifier", "").strip().lower()
         password = attrs.get("password")
 
-        user = None
+        user = User.objects.filter(email=identifier).first()
 
-        # Email path uses Django's authenticate(); phone path
-        # checks the password directly because USERNAME_FIELD is email.
-        if "@" in identifier:
-            user = authenticate(
-                username=identifier.lower(),
-                password=password,
-            )
-        else:
-            user_obj = User.objects.filter(phone=identifier).first()
-            if user_obj and user_obj.check_password(password):
-                user = user_obj
-
-        if not user:
+        if not user or not user.check_password(password):
             raise serializers.ValidationError(
-                "Barua pepe/namba ya simu au nenosiri si sahihi."
+                "Barua pepe au nenosiri si sahihi."
             )
 
         if not user.is_active:
@@ -159,6 +139,20 @@ class ProfileSerializer(serializers.ModelSerializer):
             "avatar",
         ]
 
+    def validate_phone(self, value):
+        value = (value or "").strip()
+        if not value:
+            return None
+        value = normalize_tanzania_phone(value)
+        qs = User.objects.filter(phone=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                "Namba hii ya simu tayari imesajiliwa."
+            )
+        return value
+
     def get_seller_status(self, obj):
         return obj.can_sell
 
@@ -171,19 +165,12 @@ class ProfileSerializer(serializers.ModelSerializer):
 # ============================================================
 
 class ForgotPasswordSerializer(serializers.Serializer):
-    identifier = serializers.CharField(
-        max_length=254,
-        required=True,
-        help_text="Barua pepe au namba ya simu iliyosajiliwa.",
+    identifier = serializers.EmailField(
+        help_text="Barua pepe iliyosajiliwa.",
     )
 
     def validate_identifier(self, value):
-        value = (value or "").strip()
-        if not value:
-            raise serializers.ValidationError(
-                "Barua pepe au namba ya simu inahitajika."
-            )
-        return value
+        return value.strip().lower()
 
 
 # ============================================================
@@ -191,28 +178,14 @@ class ForgotPasswordSerializer(serializers.Serializer):
 # ============================================================
 
 class VerifyPasswordResetOTPSerializer(serializers.Serializer):
-    identifier = serializers.CharField(max_length=254, required=True)
-
-    otp_code = serializers.CharField(min_length=6, max_length=6, required=True)
-
-    verification_type = serializers.ChoiceField(
-        choices=[("EMAIL", "Email"), ("PHONE", "Phone")],
-        required=True,
-    )
+    identifier = serializers.EmailField()
+    otp_code = serializers.CharField(min_length=6, max_length=6)
 
     def validate_identifier(self, value):
-        value = (value or "").strip()
-        if not value:
-            raise serializers.ValidationError(
-                "Barua pepe au namba ya simu inahitajika."
-            )
-        return value
+        return value.strip().lower()
 
     def validate_otp_code(self, value):
-        value = (value or "").strip()
-        if not value.isdigit() or len(value) != 6:
-            raise serializers.ValidationError("OTP lazima iwe namba sita.")
-        return value
+        return _validate_otp_digits(value)
 
 
 # ============================================================
@@ -220,14 +193,14 @@ class VerifyPasswordResetOTPSerializer(serializers.Serializer):
 # ============================================================
 
 class PasswordResetSerializer(serializers.Serializer):
-    reset_token = serializers.CharField(required=True)
+    reset_token = serializers.CharField()
 
     new_password = serializers.CharField(
-        write_only=True, min_length=8, max_length=128, required=True,
+        write_only=True, min_length=8, max_length=128,
     )
 
     confirm_password = serializers.CharField(
-        write_only=True, min_length=8, max_length=128, required=True,
+        write_only=True, min_length=8, max_length=128,
     )
 
     def validate(self, attrs):
@@ -238,11 +211,7 @@ class PasswordResetSerializer(serializers.Serializer):
         return attrs
 
     def validate_new_password(self, value):
-        try:
-            validate_password(value)
-        except DjangoValidationError as exc:
-            raise serializers.ValidationError(list(exc.messages))
-        return value
+        return _run_password_validators(value)
 
 
 # ============================================================
@@ -251,15 +220,15 @@ class PasswordResetSerializer(serializers.Serializer):
 
 class ChangePasswordSerializer(serializers.Serializer):
     current_password = serializers.CharField(
-        write_only=True, required=True, max_length=128,
+        write_only=True, max_length=128,
     )
 
     new_password = serializers.CharField(
-        write_only=True, min_length=8, max_length=128, required=True,
+        write_only=True, min_length=8, max_length=128,
     )
 
     confirm_password = serializers.CharField(
-        write_only=True, min_length=8, max_length=128, required=True,
+        write_only=True, min_length=8, max_length=128,
     )
 
     def validate_current_password(self, value):
@@ -276,8 +245,4 @@ class ChangePasswordSerializer(serializers.Serializer):
         return attrs
 
     def validate_new_password(self, value):
-        try:
-            validate_password(value)
-        except DjangoValidationError as exc:
-            raise serializers.ValidationError(list(exc.messages))
-        return value
+        return _run_password_validators(value)

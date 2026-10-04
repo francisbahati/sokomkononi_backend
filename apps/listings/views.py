@@ -19,12 +19,13 @@ from drf_spectacular.utils import (
     extend_schema_view,
 )
 from rest_framework import filters, permissions, status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.generics import GenericAPIView
+from rest_framework.permissions import IsAuthenticated
 
 from apps.core.mixins import SoftDeleteViewSetMixin
 from apps.credits.services import consume_credit
@@ -1382,3 +1383,104 @@ class AdminRejectListingView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+    
+
+# ============================================================================
+# CHECK DUPLICATE LISTING
+# ============================================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def check_duplicate_listing(request):
+    """
+    Angalia kama mtumiaji ana listing inayofanana.
+    Inatumika kuzuia kuweka listing mara mbili.
+    """
+    user = request.user
+    title = (request.data.get("title") or "").strip()
+    price = request.data.get("price")
+    location = (request.data.get("location") or "").strip()
+
+    if not title:
+        return Response(
+            {"detail": "title inahitajika."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    qs = Listing.objects.filter(
+        seller=user,
+        title__iexact=title,
+    )
+
+    if price is not None:
+        try:
+            price_val = float(price)
+            if price_val > 0:
+                qs = qs.filter(price=price_val)
+        except (TypeError, ValueError):
+            pass
+
+    if location:
+        qs = qs.filter(location__icontains=location)
+
+    existing = qs.first()
+
+    return Response(
+        {
+            "is_duplicate": existing is not None,
+            "existing": (
+                {
+                    "id": existing.id,
+                    "title": existing.title,
+                    "price": str(existing.price),
+                    "location": existing.location,
+                    "status": existing.status,
+                }
+                if existing
+                else None
+            ),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+# ============================================================================
+# PUBLISH LISTING — wasilisha kwa admin approval
+# ============================================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def publish_listing(request, pk):
+    """
+    Submit listing kwa admin approval.
+    Kila listing (free au paid) inaenda PENDING_APPROVAL.
+    """
+    try:
+        listing = Listing.objects.get(pk=pk)
+    except Listing.DoesNotExist:
+        return Response(
+            {"detail": "Tangazo halijapatikana."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if not request.user.is_staff and listing.seller_id != request.user.id:
+        return Response(
+            {"detail": "Huna ruhusa ya kuchapisha tangazo hili."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    listing.status = Listing.Status.PENDING_APPROVAL
+    listing.save(update_fields=["status", "updated_at"])
+
+    return Response(
+        {
+            "detail": (
+                "Tangazo limewasilishwa kwa admin. "
+                "Litaonekana baada ya kuidhinishwa."
+            ),
+            "listing_id": listing.id,
+            "status": listing.status,
+        },
+        status=status.HTTP_200_OK,
+    )

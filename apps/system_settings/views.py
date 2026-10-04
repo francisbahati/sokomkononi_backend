@@ -53,8 +53,12 @@ class WebhookViewSet(viewsets.GenericViewSet):
 
 
 class AppStoreLinksView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
     serializer_class = AppStoreLinksSerializer
+
+    def get_permissions(self):
+        if self.action == "list":
+            return [permissions.AllowAny()]
+        return [IsAdminUser()]
 
     def list(self, request):
         obj, _ = AppStoreLinks.objects.get_or_create(pk=1)
@@ -71,8 +75,12 @@ class AppStoreLinksView(viewsets.ViewSet):
 
 
 class PlatformPolicyView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
     serializer_class = PlatformPolicySerializer
+
+    def get_permissions(self):
+        if self.action == "list":
+            return [permissions.AllowAny()]
+        return [IsAdminUser()]
 
     def list(self, request):
         obj, _ = PlatformPolicy.objects.get_or_create(pk=1)

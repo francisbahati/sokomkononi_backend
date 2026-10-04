@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db.models import Q
 from django.utils import timezone
 
@@ -87,7 +89,7 @@ class BannerAdViewSet(viewsets.ModelViewSet):
             banner.payment_status = "PAID"
             banner.paid_at = timezone.now()
             banner.active = True
-            banner.expires_at = timezone.now() + timezone.timedelta(days=7)
+            banner.expires_at = timezone.now() + timedelta(days=7)
             banner.save(update_fields=[
                 "payment_status", "paid_at", "active", "expires_at",
             ])
@@ -109,4 +111,8 @@ class BannerAdViewSet(viewsets.ModelViewSet):
             payment_method=request.data.get("payment_method", "mobile"),
             phone=request.data.get("phone", ""),
         )
-        return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
+        return Response({
+            "banner_id": banner.id,
+            "payment_status": (data.get("payment_status") or "PENDING"),
+            "fimipay": data,
+        }, status=status.HTTP_201_CREATED)

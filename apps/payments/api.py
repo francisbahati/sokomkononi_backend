@@ -11,8 +11,9 @@ Public DRF endpoints exposing FimiPay to SokoMkononi staff and users.
 """
 from django.shortcuts import get_object_or_404
 
-from rest_framework import permissions, status
+from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -98,18 +99,17 @@ def _apply_status(payout, data):
         payout.save()
 
 
-class PayoutListCreateView(APIView):
+class PayoutListCreateView(generics.ListAPIView):
     """
     GET  /api/payments/payouts/    list every payout (staff)
     POST /api/payments/payouts/create/  request a payout (staff)
     """
     permission_classes = [permissions.IsAdminUser]
+    serializer_class = PayoutSerializer
+    pagination_class = PageNumberPagination
 
-    def get(self, request):
-        qs = Payout.objects.select_related("created_by").all()
-        page = self.paginate_queryset(qs) if hasattr(self, "paginate_queryset") else None
-        serializer = PayoutSerializer(qs, many=True)
-        return Response(serializer.data)
+    def get_queryset(self):
+        return Payout.objects.select_related("created_by").order_by("-created_at")
 
 
 class PayoutCreateView(APIView):

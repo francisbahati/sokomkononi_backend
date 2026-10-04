@@ -156,7 +156,7 @@ _default_storage = (
 
 STORAGES = {
     "default": {"BACKEND": _default_storage},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
 }
 
 # ---------------- CSP ----------------
@@ -188,7 +188,7 @@ _CSP_DIRECTIVES = {
 
 _EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin")
 
-if env_bool("CSP_REPORT_ONLY", False):
+if env_bool("CSP_REPORT_ONLY", True):  # TEMP: unblock Swagger UI
     # django-csp 4.0 native report-only mode.
     CONTENT_SECURITY_POLICY_REPORT_ONLY = {
         "DIRECTIVES": _CSP_DIRECTIVES,
@@ -200,6 +200,8 @@ else:
         "DIRECTIVES": _CSP_DIRECTIVES,
         "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
     }
+
+
 
 # ---------------- CORS ----------------
 CORS_ALLOWED_ORIGINS = env_list(
@@ -276,9 +278,67 @@ SPECTACULAR_SETTINGS = {
     "SWAGGER_UI_DIST": "SIDECAR",
     "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
     "REDOC_DIST": "SIDECAR",
-    # Serve Swagger UI / Redoc assets from our own origin (sidecar)
     "COMPONENT_SPLIT_REQUEST": True,
     "SORT_OPERATIONS": False,
+    # Disambiguate enum names that would otherwise collide across
+    # multiple choice sets named "status", "type", "priority", etc.
+    "ENUM_NAME_OVERRIDES": {
+        # Transaction.status, Reservation.status, InspectionPeriod.status,
+        # BannerAd.payment_status, ListingFee.payment_status,
+        # BundlePurchase.status, ListingBoost.payment_status, etc.
+        "TransactionStatusEnum":
+            "apps.transactions.models.Transaction.Status.choices",
+        "ReservationStatusEnum":
+            "apps.transactions.models.Reservation.Status.choices",
+        "InspectionStatusEnum":
+            "apps.transactions.models.InspectionPeriod.Status.choices",
+        "ListingStatusEnum":
+            "apps.listings.models.Listing.Status.choices",
+        "ListingFeeStatusEnum":
+            "apps.listings.models.ListingFee.PaymentStatus.choices",
+        "BoostStatusEnum":
+            "apps.boosting.models.ListingBoost.BoostStatus.choices",
+        "BoostPaymentStatusEnum":
+            "apps.boosting.models.ListingBoost.PaymentStatus.choices",
+        "DealRoomStatusEnum":
+            "apps.deals.models.DealRoom.Status.choices",
+        "BundleStatusEnum":
+            "apps.bundles.models.BundlePurchase.Status.choices",
+        "BundleTypeEnum":
+            "apps.bundles.models.Bundle.Type.choices",
+        "BannerPaymentStatusEnum": [
+            ("PENDING", "Pending"),
+            ("PAID", "Paid"),
+            ("FAILED", "Failed"),
+            ("REFUNDED", "Refunded"),
+        ],
+        "NotificationTypeEnum":
+            "apps.notifications.models.Notification.NotificationType.choices",
+        "NotificationPriorityEnum":
+            "apps.notifications.models.Notification.Priority.choices",
+        "NotificationAudienceEnum":
+            "apps.notifications.models.Notification.Audience.choices",
+        "TicketStatusEnum":
+            "apps.tickets.models.Ticket.Status.choices",
+        "TicketPriorityEnum":
+            "apps.tickets.models.Ticket.Priority.choices",
+        "TicketCategoryEnum":
+            "apps.tickets.models.Ticket.Category.choices",
+        "VerificationStatusEnum":
+            "apps.verifications.models.VerificationRequest.Status.choices",
+        "VerificationTypeEnum":
+            "apps.verifications.models.VerificationRequest.Type.choices",
+        "LeadingStatusEnum":
+            "apps.leading_fees.models.ListingLeading.Status.choices",
+        "LeadingPaymentStatusEnum":
+            "apps.leading_fees.models.ListingLeading.PaymentStatus.choices",
+        "PayoutStatusEnum":
+            "apps.payments.models.Payout.Status.choices",
+        "WaitingListStatusEnum":
+            "apps.waiting_list.models.WaitingListEntry.Status.choices",
+        "UserAccountTypeEnum":
+            "apps.accounts.models.User.AccountType.choices",
+    },
 }
 
 # Docs are PUBLIC by default. Flip RESTRICT_DOCS=True in .env to lock down.

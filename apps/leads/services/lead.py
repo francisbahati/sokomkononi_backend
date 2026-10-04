@@ -32,7 +32,7 @@ def upsert_lead_from_deal_room(deal_room: DealRoom):
     if last_message:
         initial_message = last_message
 
-    lead, created = Lead.objects.get_or_create(
+    lead, created = Lead.all_objects.get_or_create(
         listing=listing,
         buyer=buyer,
         defaults={
@@ -45,6 +45,9 @@ def upsert_lead_from_deal_room(deal_room: DealRoom):
             "message_count": 1,
         },
     )
+
+    if not created and lead.is_deleted:
+        lead.restore()
 
     if not created:
         from django.utils import timezone

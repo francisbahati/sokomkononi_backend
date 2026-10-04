@@ -144,6 +144,17 @@ def confirm_reservation_payment(*, reservation, payment_reference):
     if not payment_reference:
         raise ValidationError("Payment reference inahitajika.")
 
+    # Credits path — consume a reservation credit instead of cash.
+    if payment_reference == "credits":
+        from apps.credits.services import consume_credit
+        if not consume_credit(transaction.buyer, "reservation"):
+            raise ValidationError(
+                "Hakuna reservation credits za kutosha."
+            )
+        payment_reference = (
+            f"credits-{transaction.buyer_id}-{timezone.now().timestamp()}"
+        )
+
     if Reservation.objects.filter(
         payment_reference=payment_reference,
     ).exclude(pk=reservation.pk).exists():

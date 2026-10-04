@@ -153,6 +153,18 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 "request %s: %s", obj.id, exc,
             )
 
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="verification.approved",
+                target="VerificationRequest",
+                target_id=obj.id,
+                details=f"Approved: type={obj.type}, subject={obj.subject}",
+            )
+        except Exception:
+            pass
+
         return Response(
             VerificationRequestSerializer(
                 obj, context={"request": request},
@@ -182,6 +194,19 @@ class VerificationViewSet(viewsets.GenericViewSet):
             "status", "rejection_reason", "reviewed_by",
             "reviewed_at", "updated_at",
         ])
+
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="verification.rejected",
+                target="VerificationRequest",
+                target_id=obj.id,
+                details=f"Rejected: {serializer.validated_data['rejection_reason'][:200]}",
+            )
+        except Exception:
+            pass
+
         return Response(
             VerificationRequestSerializer(
                 obj, context={"request": request},

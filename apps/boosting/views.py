@@ -138,9 +138,11 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             if not consume_credit(request.user, "boost"):
                 return Response(
                     {"detail": "Hakuna boost credits za kutosha."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    status=status.HTTP_402_PAYMENT_REQUIRED,
                 )
-            boost = mark_boost_as_paid(boost=boost)
+            boost = mark_boost_as_paid(
+                boost=boost, payment_reference="credits",
+            )
             boost = activate_boost(boost=boost)
             return Response(
                 {
@@ -159,7 +161,11 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             payment_method=request.data.get("payment_method", "mobile"),
             phone=request.data.get("phone", ""),
         )
-        return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
+        return Response({
+            "boost_id": boost.id,
+            "payment_status": (data.get("payment_status") or "PENDING"),
+            "fimipay": data,
+        }, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         request=None,

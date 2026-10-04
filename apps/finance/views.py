@@ -286,8 +286,8 @@ class SuccessFeeConfigView(APIView):
     POST  /api/finance/success-fee-config/toggle/  (admin only)
     """
 
-    # FIX: reading is allowed for any authenticated user (was admin-only → 403).
-    # Writing (PATCH / toggle) stays admin-only.
+    serializer_class = SuccessFeeConfigSerializer
+
     def get_permissions(self):
         if self.request.method == "GET":
             return [permissions.IsAuthenticated()]
@@ -343,8 +343,8 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
 
     GET    /api/finance/toggles/                      list
     GET    /api/finance/toggles/{key}/                retrieve
-    PATCH  /api/finance/toggles/{key}/                partial update
-    POST   /api/finance/toggles/{key}/toggle/         toggle
+    PATCH  /api/finance/toggles/{key}/                partial update (is_enabled)
+    POST   /api/finance/toggles/{key}/toggle/         toggle (or set)
     POST   /api/finance/toggles/bulk-toggle/          bulk toggle
     """
     queryset = SystemFeatureToggle.objects.all()
@@ -353,14 +353,32 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
     lookup_field = "key"
     http_method_names = ["get", "patch", "post"]
 
+    def partial_update(self, request, key=None):
+        toggle = self.get_object()
+        if "is_enabled" in request.data:
+            toggle.is_enabled = bool(request.data["is_enabled"])
+            toggle.save(update_fields=["is_enabled", "updated_at"])
+        return Response(SystemFeatureToggleSerializer(toggle).data)
+
     @action(detail=True, methods=["post"])
     def toggle(self, request, key=None):
         toggle = self.get_object()
-        toggle.is_enabled = not toggle.is_enabled
+        # Explicit value wins over flip.
+        if "is_enabled" in request.data:
+            toggle.is_enabled = bool(request.data["is_enabled"])
+        else:
+            toggle.is_enabled = not toggle.is_enabled
         toggle.save(update_fields=["is_enabled", "updated_at"])
+
+        # Return the full toggles payload so the frontend can replace its cache.
+        from .models import SystemFeatureToggle
+        from .serializers import SystemFeatureToggleSerializer
         return Response({
             "key": toggle.key,
             "is_enabled": toggle.is_enabled,
+            "toggles": SystemFeatureToggleSerializer(
+                SystemFeatureToggle.objects.all(), many=True,
+            ).data,
         })
 
     @action(detail=False, methods=["post"], url_path="bulk-toggle")

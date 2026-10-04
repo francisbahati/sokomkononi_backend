@@ -1,10 +1,29 @@
-venv/
-.env
-__pycache__/
-*.py[cod]
-*.sqlite3
-media/
-staticfiles/
-.DS_Store*.bak
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+ENV/
+
+# Django
+db.sqlite3
+staticfiles/
+media/
+celerybeat-schedule*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Backups
+*.bak
+*.bak_*

@@ -125,7 +125,8 @@ class Lead(SoftDeleteModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["listing", "buyer"],
-                name="unique_lead_listing_buyer",
+                condition=models.Q(is_deleted=False),
+                name="unique_active_lead_listing_buyer",
             ),
         ]
 

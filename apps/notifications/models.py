@@ -74,6 +74,10 @@ class Notification(SoftDeleteModel):
         HIGH = "HIGH", "High"
         URGENT = "URGENT", "Urgent"
 
+    class Audience(models.TextChoices):
+        USER = "user", "User"
+        ADMIN = "admin", "Admin"
+
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -102,6 +106,14 @@ class Notification(SoftDeleteModel):
         choices=Priority.choices,
         default=Priority.NORMAL,
         verbose_name="Kipaumbele",
+    )
+
+    audience = models.CharField(
+        max_length=10,
+        choices=Audience.choices,
+        default=Audience.USER,
+        db_index=True,
+        verbose_name="Watazamaji",
     )
 
     is_read = models.BooleanField(

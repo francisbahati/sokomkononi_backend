@@ -18,6 +18,7 @@ from .views import (
     publish_listing,
 )
 from .views_fee_rules import ListingFeeRuleViewSet
+from apps.listings.views_duplicate import check_duplicate_listing
 
 
 fee_rules_router = SimpleRouter()
@@ -80,6 +81,7 @@ admin_reject_listing = AdminRejectListingView.as_view()
 
 
 urlpatterns = [
+    path("check-duplicate/", check_duplicate_listing, name="listing-check-duplicate"),
     # Fee rules must come before <int:pk>/ catch-all
     path("fee-rules/", include(fee_rules_router.urls)),
 

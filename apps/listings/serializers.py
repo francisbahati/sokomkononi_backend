@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.categories.models import Category
+
 from .models import (
     BusinessDetails,
     EquipmentDetails,
@@ -154,7 +156,6 @@ class PropertyDetailsSerializer(serializers.ModelSerializer):
             "area_sqm",
             "furnished",
             "has_electricity",
-            "views_count",
             "has_water",
             "has_parking",
             "ownership_document",
@@ -381,46 +382,46 @@ class ListingDetailSerializer(serializers.ModelSerializer):
 # ============================================================================
 
 class ListingWriteSerializer(serializers.ModelSerializer):
-    category_id = serializers.PrimaryKeyRelatedField(
-        source="category",
-        queryset=__import__(
-            "apps.categories.models",
-            fromlist=["Category"],
-        ).Category.objects.filter(
-            is_active=True
-        ),
+    category = serializers.PrimaryKeyRelatedField(
+        queryset=Category.objects.filter(is_active=True),
+        required=True,
         write_only=True,
+    )
+    # Defensive alias — some clients still send `category_id`.
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=Category.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+        write_only=True,
+        source="category",
     )
 
     class Meta:
         model = Listing
         fields = [
+            "category",
             "category_id",
             "title",
             "description",
             "price",
             "location",
-            "attributes",   # ⬅️ MPYA
+            "attributes",
         ]
 
     def validate_title(self, value):
         value = value.strip()
-
         if len(value) < 5:
             raise serializers.ValidationError(
                 "Jina la tangazo lazima liwe na angalau herufi 5."
             )
-
         return value
 
     def validate_description(self, value):
         value = value.strip()
-
         if len(value) < 20:
             raise serializers.ValidationError(
                 "Maelezo ya tangazo lazima yawe na angalau herufi 20."
             )
-
         return value
 
     def validate_price(self, value):
@@ -428,17 +429,14 @@ class ListingWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Bei haiwezi kuwa chini ya sifuri."
             )
-
         return value
 
     def validate_location(self, value):
         value = value.strip()
-
         if len(value) < 2:
             raise serializers.ValidationError(
                 "Tafadhali weka eneo sahihi."
             )
-
         return value
 
     def validate_attributes(self, value):
@@ -450,10 +448,6 @@ class ListingWriteSerializer(serializers.ModelSerializer):
             )
         return value
 
-
-# ============================================================================
-# LISTING FEE SERIALIZER
-# ============================================================================
 
 class ListingFeeSerializer(serializers.ModelSerializer):
     listing_id = serializers.IntegerField(

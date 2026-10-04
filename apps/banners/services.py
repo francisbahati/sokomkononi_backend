@@ -137,8 +137,15 @@ def mark_banner_paid_from_webhook(*, ref_id, payment_reference):
     banner = BannerAd.objects.select_for_update().get(pk=ref_id)
     if banner.payment_status == "PAID":
         return banner
+
+    ref = (payment_reference or "").strip()
+    if not ref:
+        raise ValidationError("Payment reference inahitajika.")
+    if BannerAd.objects.filter(payment_reference=ref).exclude(pk=banner.pk).exists():
+        raise ValidationError("Payment reference hii tayari imetumika.")
+
     banner.payment_status = "PAID"
-    banner.payment_reference = payment_reference
+    banner.payment_reference = ref
     banner.paid_at = timezone.now()
     banner.active = True
     banner.save(update_fields=[

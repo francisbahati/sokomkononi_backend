@@ -1,7 +1,33 @@
 from django.contrib.auth.base_user import BaseUserManager
+from django.db import models
+from django.utils import timezone
 
 
-class UserManager(BaseUserManager):
+class UserQuerySet(models.QuerySet):
+    """
+    User queryset with bulk-delete override.
+
+    A bulk User.objects.filter(...).delete() must tombstone the
+    unique email so new accounts can register with it again.
+    """
+
+    def delete(self, *, by=None, reason="", **kwargs):
+        # Snapshot emails first — we need them for `deleted_email`.
+        rows = list(self.values_list("pk", "email"))
+        for pk, email in rows:
+            if email:
+                self.model.all_objects.filter(pk=pk).update(
+                    deleted_email=email, email=None,
+                )
+        return self.update(
+            is_deleted=True,
+            deleted_at=timezone.now(),
+            deleted_by=by,
+            deletion_reason=reason or "",
+        )
+
+
+class UserManager(BaseUserManager.from_queryset(UserQuerySet)):
     """
     Default manager for the custom User model.
 

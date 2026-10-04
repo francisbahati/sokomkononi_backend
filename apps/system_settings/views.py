@@ -15,9 +15,6 @@ class IsAdminUser(permissions.BasePermission):
 
 
 from apps.accounts.models import User
-from apps.rbac.models import Role, StaffAssignment
-from apps.rbac.serializers import StaffAssignmentSerializer
-
 from .models import AppStoreLinks, PlatformPolicy, Webhook
 from .serializers import (
     AppStoreLinksSerializer,
@@ -56,7 +53,12 @@ class WebhookViewSet(viewsets.GenericViewSet):
 
 
 class AppStoreLinksView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
+    serializer_class = AppStoreLinksSerializer
+
+    def get_permissions(self):
+        if self.action == "list":
+            return [permissions.AllowAny()]
+        return [IsAdminUser()]
 
     def list(self, request):
         obj, _ = AppStoreLinks.objects.get_or_create(pk=1)
@@ -69,11 +71,17 @@ class AppStoreLinksView(viewsets.ViewSet):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data)
+        # Canonical shape — same as GET /list.
+        return Response(AppStoreLinksSerializer(obj).data)
 
 
 class PlatformPolicyView(viewsets.ViewSet):
-    permission_classes = [IsAdminUser]
+    serializer_class = PlatformPolicySerializer
+
+    def get_permissions(self):
+        if self.action == "list":
+            return [permissions.AllowAny()]
+        return [IsAdminUser()]
 
     def list(self, request):
         obj, _ = PlatformPolicy.objects.get_or_create(pk=1)
@@ -87,51 +95,3 @@ class PlatformPolicyView(viewsets.ViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
-
-
-class SubAdminViewSet(viewsets.GenericViewSet):
-    serializer_class = StaffAssignmentSerializer
-    permission_classes = [IsAdminUser]
-
-    def get_queryset(self):
-        return StaffAssignment.objects.select_related("user", "role")
-
-    def list(self, request):
-        return Response(
-            StaffAssignmentSerializer(self.get_queryset(), many=True).data,
-        )
-
-    def create(self, request):
-        data = request.data or {}
-        user_id = data.get("user_id") or data.get("user")
-        role_key = data.get("role_key") or data.get("role")
-
-        if not user_id or not role_key:
-            return Response(
-                {"detail": "user_id na role_key zinahitajika."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        user = get_object_or_404(User, pk=user_id)
-        role = get_object_or_404(Role, key=role_key)
-
-        # NOTE: Deliberately DO NOT flip is_staff=True here.
-        # RBAC role assignment is informational until Role.permissions is
-        # enforced by permission classes. Flip is_staff only via superuser
-        # or Django admin.
-        obj, _ = StaffAssignment.objects.update_or_create(
-            user=user,
-            defaults={"role": role, "active": data.get("active", True)},
-        )
-        return Response(
-            StaffAssignmentSerializer(obj).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-    def destroy(self, request, pk=None):
-        # Only the RBAC assignment is removed. `is_staff` is NOT cleared
-        # here because the user may still be a superuser or an admin via
-        # another path. Revoke is_staff explicitly if you need to.
-        obj = get_object_or_404(StaffAssignment, pk=pk)
-        obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)

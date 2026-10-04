@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views_admin import AdminContentViewSet
+from .views_admin import AdminContentViewSet, AdminSiteContentView
 
 
 urlpatterns = [
@@ -38,6 +38,28 @@ urlpatterns = [
         }),
         {"kind": "testimonials"},
         name="admin-testimonial-detail",
+    ),
+
+    # Site content: about / terms / privacy / help
+    path(
+        "about/",
+        AdminSiteContentView.as_view({"get": "retrieve", "patch": "partial_update"}),
+        {"key": "about"}, name="admin-content-about",
+    ),
+    path(
+        "terms/",
+        AdminSiteContentView.as_view({"get": "retrieve", "patch": "partial_update"}),
+        {"key": "terms"}, name="admin-content-terms",
+    ),
+    path(
+        "privacy/",
+        AdminSiteContentView.as_view({"get": "retrieve", "patch": "partial_update"}),
+        {"key": "privacy"}, name="admin-content-privacy",
+    ),
+    path(
+        "help/",
+        AdminSiteContentView.as_view({"get": "retrieve", "patch": "partial_update"}),
+        {"key": "help"}, name="admin-content-help",
     ),
 
     # FAQs

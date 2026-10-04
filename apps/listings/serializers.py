@@ -154,6 +154,7 @@ class PropertyDetailsSerializer(serializers.ModelSerializer):
             "area_sqm",
             "furnished",
             "has_electricity",
+            "views_count",
             "has_water",
             "has_parking",
             "ownership_document",

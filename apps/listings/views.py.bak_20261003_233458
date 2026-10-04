@@ -270,7 +270,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
-    @action(
+       @action(
         detail=True,
         methods=["get"],
         url_path="similar",
@@ -279,15 +279,10 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     def similar(self, request, pk=None):
         """
         Rudisha listings zinazofanana na listing hii.
-
-        Mkakati wa hatua kwa hatua:
-        1. Category + location + price (+/- 30%)
-        2. Category + price (+/- 30%)
-        3. Category pekee (relaxed zaidi)
         """
         listing = self.get_object()
 
-        base = Listing.objects.filter(
+        similar = Listing.objects.filter(
             category=listing.category,
             status=Listing.Status.AVAILABLE,
         ).exclude(
@@ -298,65 +293,46 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             "images",
         )
 
-        results = []
-
-        # 1. Category + location + price
-        qs = base
+        # Filter kwa location (neno la kwanza)
         if listing.location:
             location_keyword = listing.location.split(",")[0].strip()
             if location_keyword:
-                qs = qs.filter(location__icontains=location_keyword)
+                similar = similar.filter(
+                    location__icontains=location_keyword
+                )
 
+        # Filter kwa price range (± 30%)
         if listing.price:
             try:
                 price = float(listing.price)
-                qs = qs.filter(
+                similar = similar.filter(
                     price__gte=price * 0.7,
                     price__lte=price * 1.3,
                 )
             except (TypeError, ValueError):
                 pass
 
-        results = list(qs.order_by("-is_featured", "-created_at")[:8])
-
-        # 2. Ondoa location, jaribu price pekee
-        if not results and listing.price:
-            try:
-                price = float(listing.price)
-                qs2 = base.filter(
-                    price__gte=price * 0.7,
-                    price__lte=price * 1.3,
-                )
-                results = list(
-                    qs2.order_by("-is_featured", "-created_at")[:8]
-                )
-            except (TypeError, ValueError):
-                pass
-
-        # 3. Category pekee
-        if not results:
-            results = list(
-                base.order_by("-is_featured", "-created_at")[:8]
-            )
+        similar = similar.order_by("-is_featured", "-created_at")[:8]
 
         serializer = ListingListSerializer(
-            results, many=True, context={"request": request},
+            similar, many=True, context={"request": request},
         )
         return Response(serializer.data)
 
-    # ========================================================================
-    # DESTROY - soft delete (default) au hard delete (admin)
+
+    # ═══════════════════════════════════════════════════════════
+    # DESTROY — soft delete (default) au hard delete (admin)
     #
     # SASISHO:
     #   - Tumia `_base_manager` ili kuona rows zote (hata zilizo
     #     soft-deleted) kwa sababu PROTECT inaangalia DB rows, si
     #     manager view.
     #   - Usimeze exceptions. Kama kitu kimeshindikana, rudisha
-    #     400 na uache operesheni isimame - usiendelee hadi
+    #     400 na uache operesheni isimame — usiendelee hadi
     #     listing.hard_delete() ambayo itatupa 500.
     #   - Catch ProtectedError mwisho kama safety net, na
     #     tumia transaction.atomic() kuzuia partial deletes.
-    # ========================================================================
+    # ═══════════════════════════════════════════════════════════
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
 
@@ -364,7 +340,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             "hard", "false"
         ).lower() in ("true", "1", "yes")
 
-        # Soft delete (default)
+        # ── Soft delete (default) ─────────────────────────────
         if not (request.user.is_staff and is_hard):
             listing.delete(
                 by=request.user,
@@ -382,12 +358,12 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        # ==================================================================
+        # ══════════════════════════════════════════════════════
         # HARD DELETE
-        # ==================================================================
+        # ══════════════════════════════════════════════════════
         try:
             with transaction.atomic():
-                # 1. ListingFee (PROTECT)
+                # ── 1. ListingFee (PROTECT) ────────────────────
                 ListingFee.objects.filter(listing=listing).delete()
 
                 # 2. Leads (PROTECT) -- HARD DELETE
@@ -424,8 +400,8 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         "[listings] leads app not available, skipping"
                     )
 
-                # 3. Transaction chain
-                # Mpangilio: InspectionPeriod -> Reservation ->
+                # ── 3. Transaction chain ───────────────────────
+                # Mpangilio: InspectionPeriod → Reservation →
                 # Transaction (kila moja ina PROTECT kwa iliyo juu).
                 try:
                     from apps.transactions.models import (
@@ -458,7 +434,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         "skipping"
                     )
 
-                # 4. DealRoom (PROTECT)
+                # ── 4. DealRoom (PROTECT) ──────────────────────
                 try:
                     from apps.deals.models import DealRoom
 
@@ -470,12 +446,13 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         "[listings] deals app not available, skipping"
                     )
 
-                # 5. Conversations + Messages
+                # ── 5. Conversations + Messages ────────────────
                 # Msg.conversation ni PROTECT, hivyo LAZIMA
                 # tufute messages kwanza, kisha conversations.
                 try:
-                    from apps.messaging.models import Conversation, Msg
+                    from apps.messaging.models import Conversation, Msg  # ⬅️ badilisha app name kama ni tofauti
 
+                    # Pata conversations zote za listing hii
                     conv_ids = list(
                         Conversation._base_manager
                         .filter(listing=listing)
@@ -483,37 +460,30 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     )
 
                     if conv_ids:
-                        for msg in Msg._base_manager.filter(
-                            conversation_id__in=conv_ids
-                        ):
+                        # 5a. Futa messages zote kwa conversations hizi
+                        for msg in Msg._base_manager.filter(conversation_id__in=conv_ids):
                             if hasattr(msg, "hard_delete"):
                                 msg.hard_delete()
                             else:
-                                Msg._base_manager.filter(
-                                    pk=msg.pk
-                                ).delete()
+                                Msg._base_manager.filter(pk=msg.pk).delete()
 
-                        for conv in Conversation._base_manager.filter(
-                            id__in=conv_ids
-                        ):
+                        # 5b. Futa conversations
+                        for conv in Conversation._base_manager.filter(id__in=conv_ids):
                             if hasattr(conv, "hard_delete"):
                                 conv.hard_delete()
                             else:
-                                Conversation._base_manager.filter(
-                                    pk=conv.pk
-                                ).delete()
+                                Conversation._base_manager.filter(pk=conv.pk).delete()
                 except ImportError:
-                    logger.warning(
-                        "[listings] messaging app not available, skipping"
-                    )
+                    logger.warning("[listings] messaging app not available, skipping")
 
-                # 6. Related models zingine
+                # ── 6. Related models zingine ──────────────────
                 related_fields = [
                     "images",
                     "boosts",
                     "waiting_list_entries",
                     "saved_by",
                     "search_matches",
+                    # "conversations",  ⬅️ IMEONDOLEWA — tumeshughulikia juu
                     "banner_ads",
                     "leading_purchases",
                 ]
@@ -536,7 +506,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         )
                         raise
 
-                # 7. Details (one-to-one)
+                # ── 7. Details (one-to-one) ────────────────────
                 detail_fields = [
                     "property_details",
                     "land_details",
@@ -552,7 +522,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     if obj is not None:
                         obj.delete()
 
-                # 8. Hatimaye: hard delete listing
+                # ── 8. Hatimaye: hard delete listing ───────────
                 listing.hard_delete()
 
         except ProtectedError as exc:
@@ -605,12 +575,15 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
     created_message = "Maelezo yameongezwa."
     deleted_message = "Maelezo yamefutwa."
 
+    # Placeholder for drf-spectacular. Real data comes from get_queryset().
     queryset = PropertyDetails.objects.none()
 
     def get_serializer_class(self):
         return self.detail_serializer
 
     def get_queryset(self):
+        # drf-spectacular calls get_queryset() during schema generation
+        # without URL kwargs. Return an empty queryset in that case.
         if getattr(self, "swagger_fake_view", False):
             if self.detail_model is not None:
                 return self.detail_model.objects.none()
@@ -879,9 +852,11 @@ class ListingImageViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser]
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
+    # Placeholder for drf-spectacular.
     queryset = ListingImage.objects.none()
 
     def get_queryset(self):
+        # drf-spectacular calls get_queryset() without URL kwargs.
         if getattr(self, "swagger_fake_view", False):
             return ListingImage.objects.none()
 
@@ -1052,6 +1027,8 @@ class ListingImageViewSet(viewsets.ModelViewSet):
                     image_object.is_primary = True
                 else:
                     if image_object.is_primary:
+                        # Cannot unset the ONLY primary image — promote
+                        # another image first.
                         return Response(
                             {"detail": (
                                 "Tangazo lazima liwe na angalau picha "
@@ -1197,7 +1174,7 @@ class ListingFeePaymentView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Credits path
+        # ── Credits path ────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
             if not consume_credit(request.user, "listing"):
@@ -1219,7 +1196,7 @@ class ListingFeePaymentView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        # Default: FimiPay
+        # ── Default: FimiPay ────────────────────────────────────
         try:
             create_listing_fee(listing)
         except DjangoValidationError as exc:

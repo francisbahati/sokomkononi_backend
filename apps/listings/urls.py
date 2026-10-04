@@ -31,6 +31,7 @@ listing_detail = ListingViewSet.as_view({
     "get": "retrieve", "put": "update",
     "patch": "partial_update", "delete": "destroy",
 })
+listing_similar = ListingViewSet.as_view({"get": "similar"})
 
 property_detail_list = PropertyDetailsViewSet.as_view({"post": "create"})
 property_detail = PropertyDetailsViewSet.as_view({
@@ -84,6 +85,12 @@ urlpatterns = [
     path("admin/pending/", admin_pending_listings, name="admin-pending-listings"),
 
     path("", listing_list, name="listing-list"),
+
+    # Similar listings — LAZIMA iwe kabla ya <int:pk>/ ili
+    # "similar" isichukuliwe kama pk (haitatokea kwa int, lakini ni
+    # best practice kuweka specific URLs kwanza).
+    path("<int:pk>/similar/", listing_similar, name="listing-similar"),
+
     path("<int:pk>/", listing_detail, name="listing-detail"),
 
     path("<int:listing_id>/property-details/", property_detail_list,

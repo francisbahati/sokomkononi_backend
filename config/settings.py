@@ -192,14 +192,22 @@ if env_bool("CSP_REPORT_ONLY", False):
     # django-csp 4.0 native report-only mode.
     CONTENT_SECURITY_POLICY_REPORT_ONLY = {
         "DIRECTIVES": _CSP_DIRECTIVES,
-        "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
     }
     CONTENT_SECURITY_POLICY = {"DIRECTIVES": {}}
 else:
     CONTENT_SECURITY_POLICY = {
         "DIRECTIVES": _CSP_DIRECTIVES,
-        "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
     }
+
+# ── django-csp 4.0 ──────────────────────────────────────────
+# Exclusions must be a TOP-LEVEL setting, NOT nested inside
+# CONTENT_SECURITY_POLICY. Without this, /api/docs/ and /admin
+# get the CSP header and their inline bootstrap scripts are
+# refused, producing a blank Swagger UI.
+CONTENT_SECURITY_POLICY_EXCLUDE_URL_PREFIXES = _EXCLUDE_URL_PREFIXES
+
+# ── django-csp 3.x backwards compatibility ──────────────────
+CSP_EXCLUDE_URL_PREFIXES = _EXCLUDE_URL_PREFIXES
 
 # ---------------- CORS ----------------
 CORS_ALLOWED_ORIGINS = env_list(

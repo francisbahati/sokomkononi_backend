@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from ..models import ListingFee, ListingFeeRule
 
 
-def get_listing_fee_rule(category_slug=None, price=None):
+def get_listing_fee_rule(category_slug=None, price=None, category=None):
     """
     Tafuta fee rule kwa category.
 
@@ -97,7 +97,7 @@ def get_listing_fee_rule(category_slug=None, price=None):
     return default_rule
 
 
-def calculate_listing_fee(price, category_slug=None):
+def calculate_listing_fee(price, category_slug=None, category=None):
     """
     Hesabu listing fee kwa listing.
 
@@ -111,7 +111,9 @@ def calculate_listing_fee(price, category_slug=None):
             "Bei ya tangazo lazima iwe kubwa kuliko sifuri."
         )
 
-    rule = get_listing_fee_rule(category_slug=category_slug, price=price)
+    rule = get_listing_fee_rule(
+        category_slug=category_slug, price=price, category=category,
+    )
     if not rule:
         raise ValidationError(
             "Hakuna kanuni ya ada inayolingana na category hii. "
@@ -139,8 +141,13 @@ def create_listing_fee(listing):
     """
     Create or update the pending listing fee for a listing.
     """
-    category_slug = listing.category.slug if listing.category else None
-    result = calculate_listing_fee(listing.price, category_slug=category_slug)
+    category_obj = listing.category if listing.category_id else None
+    category_slug = getattr(category_obj, "slug", None)
+    result = calculate_listing_fee(
+        listing.price,
+        category_slug=category_slug,
+        category=category_obj,
+    )
 
     listing_fee, created = ListingFee.objects.get_or_create(
         listing=listing,

@@ -843,12 +843,28 @@ class ListingFeeRule(SoftDeleteModel):
         verbose_name="Jina la kiwango",
     )
 
+    category = models.ForeignKey(
+        "categories.Category",
+        on_delete=models.CASCADE,
+        related_name="fee_rules",
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Kundi",
+        help_text=(
+            "Category ambayo rule hii inatumika. Hii ni authoritative — "
+            "inatumika kwanza kwenye lookup."
+        ),
+    )
+
     category_slug = models.SlugField(
         max_length=120,
         blank=True,
         db_index=True,
-        verbose_name="Slug ya kundi",
-        help_text="Slug ya Category ambayo rule hii inatumika (optional).",
+        verbose_name="Slug ya kundi (legacy)",
+        help_text=(
+            "Fallback ya slug. Tumika tu kama `category` FK haipo."
+        ),
     )
 
     min_price = models.DecimalField(

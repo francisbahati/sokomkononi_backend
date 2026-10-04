@@ -148,6 +148,25 @@ class NotificationViewSet(
         )
 
     @action(
+        detail=False, methods=["get"], url_path="admin-feed",
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def admin_feed(self, request):
+        """GET /api/notifications/admin-feed/ — all admin-audience items."""
+        qs = (
+            Notification.objects
+            .filter(audience=Notification.Audience.ADMIN)
+            .order_by("-created_at")
+        )
+        page = self.paginate_queryset(qs)
+        serializer = NotificationSerializer(
+            page if page is not None else qs, many=True,
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    @action(
         detail=False,
         methods=["get"],
         url_path="trash",

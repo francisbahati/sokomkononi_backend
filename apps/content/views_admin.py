@@ -26,6 +26,13 @@ MODEL_MAP = {
     "site-content": (SiteContent, SiteContentSerializer),
 }
 
+SITE_KEY_MAP = {
+    "about": "ABOUT",
+    "terms": "TERMS",
+    "privacy": "PRIVACY",
+    "help": "HELP",
+}
+
 
 class AdminContentViewSet(viewsets.GenericViewSet):
     """
@@ -102,3 +109,42 @@ class AdminContentViewSet(viewsets.GenericViewSet):
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class AdminSiteContentView(viewsets.GenericViewSet):
+    """
+    PATCH /api/admin/content/{about,terms,privacy,help}/
+    Admin-only update of a SiteContent singleton row.
+    """
+    serializer_class = SiteContentSerializer
+    permission_classes = [IsAdminUser]
+
+    def partial_update(self, request, key=None):
+        upper = SITE_KEY_MAP.get((key or "").lower())
+        if not upper:
+            return Response(
+                {"detail": "Sehemu haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        obj, _ = SiteContent.objects.get_or_create(key=upper)
+        serializer = SiteContentSerializer(
+            obj, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(SiteContentSerializer(obj).data)
+
+    def retrieve(self, request, key=None):
+        upper = SITE_KEY_MAP.get((key or "").lower())
+        if not upper:
+            return Response(
+                {"detail": "Sehemu haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        obj = SiteContent.objects.filter(key=upper).first()
+        if not obj:
+            return Response(
+                {"detail": "Haipo."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(SiteContentSerializer(obj).data)

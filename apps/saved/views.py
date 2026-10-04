@@ -120,8 +120,17 @@ class SavedListingViewSet(viewsets.GenericViewSet):
 
         if existing:
             existing.delete()
+            saved_ids = list(
+                SavedListing.objects
+                .filter(user=request.user)
+                .values_list("listing_id", flat=True)
+            )
             return Response(
-                {"saved": False, "listing_id": listing.id},
+                {
+                    "saved": False,
+                    "listing_id": listing.id,
+                    "saved_ids": saved_ids,
+                },
                 status=status.HTTP_200_OK,
             )
 
@@ -132,9 +141,15 @@ class SavedListingViewSet(viewsets.GenericViewSet):
             snapshot_status=listing.status,
             snapshot_title=listing.title,
         )
+        saved_ids = list(
+            SavedListing.objects
+            .filter(user=request.user)
+            .values_list("listing_id", flat=True)
+        )
         return Response(
             {
                 "saved": True,
+                "saved_ids": saved_ids,
                 "data": SavedListingSerializer(
                     saved, context={"request": request},
                 ).data,

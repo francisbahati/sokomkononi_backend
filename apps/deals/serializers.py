@@ -174,16 +174,47 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     offers = NegotiationOfferSerializer(many=True, read_only=True)
     offer_count = serializers.SerializerMethodField()
     latest_offer = serializers.SerializerMethodField()
+    deal_room_id = serializers.IntegerField(source="id", read_only=True)
+    transaction_id = serializers.SerializerMethodField()
+    payment_proof = serializers.SerializerMethodField()
 
     class Meta:
         model = DealRoom
         fields = [
-            "id", "listing", "buyer", "seller",
+            "id", "deal_room_id",
+            "listing", "buyer", "seller",
             "status", "agreed_price", "agreed_at",
             "offers", "offer_count", "latest_offer",
+            "transaction_id", "payment_proof",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
+
+    def get_transaction_id(self, obj):
+        try:
+            return obj.transaction.id
+        except Exception:
+            return None
+
+    def get_payment_proof(self, obj):
+        try:
+            txn = obj.transaction
+        except Exception:
+            return None
+        proof = getattr(txn, "final_payment_proof", None)
+        if not proof:
+            return None
+        request = self.context.get("request")
+        try:
+            url = request.build_absolute_uri(proof.url) if request else proof.url
+        except Exception:
+            url = None
+        return {
+            "url": url,
+            "reference": txn.final_payment_reference or "",
+            "uploaded_at": txn.final_payment_uploaded_at,
+            "confirmed": txn.seller_confirmed_payment,
+        }
 
     def get_offer_count(self, obj):
         return len(obj.offers.all())

@@ -92,6 +92,18 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return qs
         return qs.filter(Q(buyer=user) | Q(seller=user))
 
+    def update(self, request, *args, **kwargs):
+        """
+        Deal status may only be changed by the accept-offer / cancel
+        endpoints. Reject any other status write.
+        """
+        if "status" in request.data:
+            return Response(
+                {"detail": "Hali ya Deal Room inabadilishwa kwa endpoints maalum pekee (accept-offer / cancel)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().update(request, *args, **kwargs)
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(
             data=request.data, context={"request": request},
@@ -138,6 +150,128 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             deal_room, context={"request": request},
         )
         return Response(serializer.data)
+
+    @extend_schema(
+        responses={200: NegotiationOfferSerializer(many=True)},
+    )
+    @action(
+        detail=True, methods=["get"],
+        url_path="offers", url_name="offers-list",
+    )
+    def offers_list(self, request, pk=None):
+        """GET /api/deals/{id}/offers/ — admin sees all, participants see theirs."""
+        deal_room = self.get_object()
+        qs = (
+            NegotiationOffer.objects
+            .filter(deal_room=deal_room)
+            .select_related("offered_by")
+            .order_by("created_at")
+        )
+        serializer = NegotiationOfferSerializer(
+            qs, many=True,
+            context={"request": request, "deal_room": deal_room},
+        )
+        return Response(serializer.data)
+
+    @extend_schema(
+        responses={200: None},
+    )
+    @action(
+        detail=True, methods=["get"],
+        url_path="messages", url_name="messages-list",
+    )
+    def messages_list(self, request, pk=None):
+        """
+        GET /api/deals/{id}/messages/ — chat messages tied to the deal.
+
+        Derives messages from the linked Conversation if one exists;
+        otherwise returns the negotiation-offer thread as text lines.
+        """
+        deal_room = self.get_object()
+
+        # Try the messaging app first.
+        try:
+            from apps.messaging.models import Conversation, Message
+            conv = (
+                Conversation.objects
+                .filter(
+                    listing=deal_room.listing,
+                    buyer=deal_room.buyer,
+                    seller=deal_room.seller,
+                )
+                .first()
+            )
+            if conv:
+                msgs = (
+                    Message.objects
+                    .filter(conversation=conv)
+                    .select_related("sender")
+                    .order_by("created_at")
+                )
+                return Response([
+                    {
+                        "id": m.id,
+                        "sender_id": m.sender_id,
+                        "sender_name": getattr(m.sender, "name", ""),
+                        "text": m.text,
+                        "created_at": m.created_at,
+                    }
+                    for m in msgs
+                ])
+        except Exception:
+            pass
+
+        # Fallback: represent offers as messages.
+        offers = (
+            NegotiationOffer.objects
+            .filter(deal_room=deal_room)
+            .select_related("offered_by")
+            .order_by("created_at")
+        )
+        return Response([
+            {
+                "id": f"offer-{o.id}",
+                "sender_id": o.offered_by_id,
+                "sender_name": getattr(o.offered_by, "name", ""),
+                "text": o.message or f"Offer: {o.amount}",
+                "amount": str(o.amount),
+                "status": o.status,
+                "created_at": o.created_at,
+            }
+            for o in offers
+        ])
+
+    @extend_schema(responses={200: None})
+    @action(
+        detail=True, methods=["get"],
+        url_path="payment-proof", url_name="payment-proof",
+    )
+    def payment_proof(self, request, pk=None):
+        """GET /api/deals/{id}/payment-proof/ — proof from the linked transaction."""
+        deal_room = self.get_object()
+        try:
+            txn = deal_room.transaction
+        except Exception:
+            return Response({"detail": "Transaction haipo."}, status=404)
+
+        proof = getattr(txn, "final_payment_proof", None)
+        if not proof:
+            return Response({"detail": "Ushahidi wa malipo haupo."}, status=404)
+
+        url = None
+        try:
+            url = request.build_absolute_uri(proof.url)
+        except Exception:
+            url = None
+
+        return Response({
+            "id": txn.id,
+            "url": url,
+            "reference": txn.final_payment_reference or "",
+            "uploaded_at": txn.final_payment_uploaded_at,
+            "confirmed": txn.seller_confirmed_payment,
+            "confirmed_at": txn.seller_confirmed_at,
+        })
 
     @extend_schema(
         request=NegotiationOfferCreateSerializer,

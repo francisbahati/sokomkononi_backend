@@ -9,8 +9,18 @@ from .models import SoftDeleteModel
 
 
 def _resolve_model(type_str):
+    """
+    Accepts:
+      - "Listing"              (exact model name)
+      - "listing"              (lowercased)
+      - "listings"             (plural lowercase)
+      - "listings.Listing"     (app.Model)
+      - "listings.listing"     (app.model lowercase)
+    """
     if not type_str:
         return None
+
+    # 1) app.Model / app.model
     if "." in type_str:
         app_label, _, model_name = type_str.partition(".")
         for candidate in (model_name, model_name.lower()):
@@ -18,11 +28,23 @@ def _resolve_model(type_str):
                 return apps.get_model(app_label, candidate)
             except LookupError:
                 continue
+
     needle = type_str.lower()
+
+    # 2) match on lowercase model name OR plural of it
     for model in apps.get_models():
-        if (model._meta.model_name == needle
-                or model.__name__.lower() == needle):
+        lname = model._meta.model_name           # e.g. "listing"
+        plural = lname + "s"                     # e.g. "listings"
+        if needle in (lname, plural, model.__name__.lower()):
             return model
+
+    # 3) fallback: singularize trailing "s"
+    if needle.endswith("s"):
+        singular = needle[:-1]
+        for model in apps.get_models():
+            if model._meta.model_name == singular:
+                return model
+
     return None
 
 

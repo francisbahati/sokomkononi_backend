@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -93,9 +94,48 @@ class BundlePurchaseViewSet(viewsets.GenericViewSet):
         purchase = self.get_object()
         if purchase.user_id != request.user.id and not request.user.is_staff:
             return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Credits path — canonical contract across every pay endpoint.
+        payment_reference = (request.data.get("payment_reference") or "").strip()
+        if payment_reference == "credits":
+            from apps.credits.services import consume_credit
+            if not consume_credit(request.user, "bundle"):
+                return Response(
+                    {"detail": "Hakuna bundle credits za kutosha."},
+                    status=status.HTTP_402_PAYMENT_REQUIRED,
+                )
+            from .services import mark_purchase_paid
+            purchase = mark_purchase_paid(
+                purchase=purchase, payment_reference="credits",
+            )
+            return Response({
+                "purchase_id": purchase.id,
+                "payment_status": "SUCCESS",
+                "via": "credits",
+                "fimipay": None,
+                "purchase": BundlePurchaseSerializer(purchase).data,
+            }, status=status.HTTP_200_OK)
+
+        # Idempotency — same key -> same response, no double trigger.
+        idem_key = request.META.get("HTTP_IDEMPOTENCY_KEY")
+        idem_cache_key = (
+            f"bundle_pay:{purchase.id}:{idem_key}" if idem_key else None
+        )
+        if idem_cache_key:
+            cached = cache.get(idem_cache_key)
+            if cached:
+                return Response(cached, status=status.HTTP_200_OK)
+
         data = initiate_purchase_payment(
             purchase=purchase, user=request.user,
             payment_method=request.data.get("payment_method", "mobile"),
             phone=request.data.get("phone", ""),
         )
-        return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
+        payload = {
+            "purchase_id": purchase.id,
+            "payment_status": (data.get("payment_status") or "PENDING"),
+            "fimipay": data,
+        }
+        if idem_cache_key:
+            cache.set(idem_cache_key, payload, timeout=600)
+        return Response(payload, status=status.HTTP_201_CREATED)

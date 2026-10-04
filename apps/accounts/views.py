@@ -415,6 +415,8 @@ class VerifyPasswordResetOTPView(APIView):
 
         reset_token = create_password_reset_token(user)
 
+        # reset_token exposed at top level AND inside `data` for
+        # backward-compatible clients.
         return Response(
             {
                 "message": (
@@ -422,7 +424,9 @@ class VerifyPasswordResetOTPView(APIView):
                     "kubadilisha nenosiri lako."
                 ),
                 "reset_token": reset_token,
+                "token": reset_token,
                 "expires_in_minutes": 15,
+                "data": {"reset_token": reset_token},
             },
             status=status.HTTP_200_OK,
         )

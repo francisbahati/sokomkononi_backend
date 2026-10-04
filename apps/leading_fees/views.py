@@ -179,4 +179,8 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             payment_method=request.data.get("payment_method", "mobile"),
             phone=request.data.get("phone", ""),
         )
-        return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
+        return Response({
+            "purchase_id": leading.id,
+            "payment_status": (data.get("payment_status") or "PENDING"),
+            "fimipay": data,
+        }, status=status.HTTP_201_CREATED)

@@ -71,7 +71,8 @@ class AppStoreLinksView(viewsets.ViewSet):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data)
+        # Canonical shape — same as GET /list.
+        return Response(AppStoreLinksSerializer(obj).data)
 
 
 class PlatformPolicyView(viewsets.ViewSet):

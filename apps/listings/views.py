@@ -344,6 +344,159 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
+    # ═══════════════════════════════════════════════════════════════════
+    # B-6: CHECK DUPLICATE
+    # ═══════════════════════════════════════════════════════════════════
+    @extend_schema(
+        request=None,
+        responses={200: None},
+    )
+    @action(
+        detail=False, methods=["post"], url_path="check-duplicate",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def check_duplicate(self, request):
+        """
+        POST /api/listings/check-duplicate/
+        Body: { title, price, location, category, window_days }
+        Returns: { is_duplicate: bool, existing: {...} | null }
+        """
+        title = (request.data.get("title") or "").strip()
+        location = (request.data.get("location") or "").strip()
+        category = request.data.get("category") or request.data.get("category_id")
+        try:
+            window_days = int(request.data.get("window_days", 30))
+        except (TypeError, ValueError):
+            window_days = 30
+
+        if not title:
+            return Response(
+                {"detail": "title inahitajika."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        since = timezone.now() - __import__("datetime").timedelta(days=window_days)
+        qs = (
+            Listing.objects
+            .filter(
+                seller=request.user,
+                title__iexact=title,
+                created_at__gte=since,
+                is_deleted=False,
+            )
+        )
+        if location:
+            qs = qs.filter(location__icontains=location)
+        if category:
+            qs = qs.filter(category_id=category)
+
+        existing = qs.order_by("-created_at").first()
+        if not existing:
+            return Response({"is_duplicate": False, "existing": None})
+
+        return Response({
+            "is_duplicate": True,
+            "existing": {
+                "id": existing.id,
+                "title": existing.title,
+                "status": existing.status,
+                "price": str(existing.price),
+                "location": existing.location,
+                "created_at": existing.created_at,
+            },
+        })
+
+    # ═══════════════════════════════════════════════════════════════════
+    # B-7: PUBLISH (no-fee path)
+    # ═══════════════════════════════════════════════════════════════════
+    @action(
+        detail=True, methods=["post"], url_path="publish",
+        permission_classes=[IsVerifiedUser, IsOwnerOrAdmin],
+    )
+    def publish(self, request, pk=None):
+        """
+        POST /api/listings/{id}/publish/
+        Moves a DRAFT to PENDING_APPROVAL when fees are disabled.
+        """
+        listing = self.get_object()
+        self.check_object_permissions(request, listing)
+
+        if listing.status not in (
+            Listing.Status.DRAFT,
+            Listing.Status.REJECTED,
+        ):
+            return Response(
+                {"detail": f"Tangazo halipo kwenye DRAFT. Hali: {listing.status}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        listing.status = Listing.Status.PENDING_APPROVAL
+        listing.save(update_fields=["status", "updated_at"])
+
+        return Response(
+            ListingDetailSerializer(listing, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    # ═══════════════════════════════════════════════════════════════════
+    # B-8: DISAPPROVE (admin only)
+    # ═══════════════════════════════════════════════════════════════════
+    @extend_schema(
+        request=ListingRejectionSerializer,
+        responses={200: ListingDetailSerializer},
+    )
+    @action(
+        detail=True, methods=["post"], url_path="disapprove",
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def disapprove(self, request, pk=None):
+        """
+        POST /api/listings/{id}/disapprove/
+        Demote a live listing back to REJECTED (admin correction).
+        """
+        listing = self.get_object()
+
+        if listing.status not in (
+            Listing.Status.AVAILABLE,
+            Listing.Status.RESERVED,
+            Listing.Status.PENDING_APPROVAL,
+        ):
+            return Response(
+                {"detail": f"Tangazo halipo kwenye hali inayoweza kukataliwa. Hali: {listing.status}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ListingRejectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        listing.status = Listing.Status.REJECTED
+        listing.rejected_by = request.user
+        listing.rejected_at = timezone.now()
+        listing.rejection_reason = serializer.validated_data["rejection_reason"]
+        listing.approved_by = None
+        listing.approved_at = None
+        listing.save(update_fields=[
+            "status", "rejected_by", "rejected_at", "rejection_reason",
+            "approved_by", "approved_at", "updated_at",
+        ])
+
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="listing.disapproved",
+                target="Listing",
+                target_id=listing.id,
+                details=f"Disapproved: {listing.title}",
+            )
+        except Exception:
+            pass
+
+        return Response(
+            ListingDetailSerializer(listing, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
     # ========================================================================
     # DESTROY - soft delete (default) au hard delete (admin)
     #

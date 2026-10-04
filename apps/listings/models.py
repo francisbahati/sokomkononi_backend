@@ -843,6 +843,14 @@ class ListingFeeRule(SoftDeleteModel):
         verbose_name="Jina la kiwango",
     )
 
+    category_slug = models.SlugField(
+        max_length=120,
+        blank=True,
+        db_index=True,
+        verbose_name="Slug ya kundi",
+        help_text="Slug ya Category ambayo rule hii inatumika (optional).",
+    )
+
     min_price = models.DecimalField(
         max_digits=15,
         decimal_places=2,

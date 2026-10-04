@@ -82,3 +82,49 @@ def consume_credit(user, service_key, required=1):
     credit.remaining -= required
     credit.save(update_fields=["remaining", "updated_at"])
     return True
+
+@transaction.atomic
+def grant_bundle_credits(
+    *,
+    user,
+    credits,
+    services,
+    expires_at=None,
+    bundle_code="",
+    bundle_name="",
+):
+    """
+    Apply a bundle's credits + services to a user.
+
+    `credits` is a dict like {"listing": 5, "boost": 2, "ads": 1}.
+    `services` is a list of service keys to grant for the bundle window.
+    """
+    for key, qty in (credits or {}).items():
+        try:
+            qty = int(qty)
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+
+        uc, _ = UserCredit.objects.select_for_update().get_or_create(
+            user=user,
+            service_key=key,
+            defaults={"remaining": 0, "total": 0},
+        )
+        uc.remaining += qty
+        uc.total += qty
+        if expires_at:
+            candidates = [d for d in (uc.expires_at, expires_at) if d]
+            if candidates:
+                uc.expires_at = max(candidates)
+        uc.last_bundle_code = bundle_code
+        uc.last_bundle_name = bundle_name
+        uc.save()
+
+    for key in (services or []):
+        UserService.objects.update_or_create(
+            user=user,
+            service_key=key,
+            defaults={"expires_at": expires_at},
+        )

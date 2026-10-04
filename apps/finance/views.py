@@ -286,8 +286,8 @@ class SuccessFeeConfigView(APIView):
     POST  /api/finance/success-fee-config/toggle/  (admin only)
     """
 
-    # FIX: reading is allowed for any authenticated user (was admin-only → 403).
-    # Writing (PATCH / toggle) stays admin-only.
+    serializer_class = SuccessFeeConfigSerializer
+
     def get_permissions(self):
         if self.request.method == "GET":
             return [permissions.IsAuthenticated()]

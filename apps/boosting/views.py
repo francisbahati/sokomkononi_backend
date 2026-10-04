@@ -140,7 +140,9 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
                     {"detail": "Hakuna boost credits za kutosha."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            boost = mark_boost_as_paid(boost=boost)
+            boost = mark_boost_as_paid(
+                boost=boost, payment_reference="credits",
+            )
             boost = activate_boost(boost=boost)
             return Response(
                 {

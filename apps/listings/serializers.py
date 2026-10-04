@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.categories.models import Category
+
 from .models import (
     BusinessDetails,
     EquipmentDetails,
@@ -154,7 +156,6 @@ class PropertyDetailsSerializer(serializers.ModelSerializer):
             "area_sqm",
             "furnished",
             "has_electricity",
-            "views_count",
             "has_water",
             "has_parking",
             "ownership_document",
@@ -383,12 +384,7 @@ class ListingDetailSerializer(serializers.ModelSerializer):
 class ListingWriteSerializer(serializers.ModelSerializer):
     category_id = serializers.PrimaryKeyRelatedField(
         source="category",
-        queryset=__import__(
-            "apps.categories.models",
-            fromlist=["Category"],
-        ).Category.objects.filter(
-            is_active=True
-        ),
+        queryset=Category.objects.filter(is_active=True),
         write_only=True,
     )
 

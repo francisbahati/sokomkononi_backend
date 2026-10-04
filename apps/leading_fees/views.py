@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -28,7 +30,11 @@ class LeadingFeeConfigViewSet(viewsets.ModelViewSet):
     """
     queryset = LeadingFeeConfig.objects.all()
     serializer_class = LeadingFeeConfigSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [permissions.AllowAny()]
+        return [permissions.IsAdminUser()]
 
     def get_object(self):
         obj, _ = LeadingFeeConfig.objects.get_or_create(
@@ -148,7 +154,7 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             leading.paid_at = timezone.now()
             leading.status = "ACTIVE"
             leading.starts_at = timezone.now()
-            leading.expires_at = timezone.now() + timezone.timedelta(
+            leading.expires_at = timezone.now() + timedelta(
                 days=leading.days or 7
             )
             leading.save(update_fields=[

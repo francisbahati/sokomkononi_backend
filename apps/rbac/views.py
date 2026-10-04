@@ -59,6 +59,18 @@ class RoleViewSet(viewsets.GenericViewSet):
             permissions=d.get("permissions", []),
             is_system=False,
         )
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="rbac.role.created",
+                target="Role",
+                target_id=obj.id,
+                details=f"Role: {obj.key}",
+            )
+        except Exception:
+            pass
+
         return Response(
             RoleSerializer(obj).data,
             status=status.HTTP_201_CREATED,
@@ -116,10 +128,19 @@ class StaffViewSet(viewsets.GenericViewSet):
             user=user,
             defaults={"role": role, "active": d.get("active", True)},
         )
-        # Grant admin access on assignment.
-        if not user.is_staff:
-            user.is_staff = True
-            user.save(update_fields=["is_staff", "updated_at"])
+        # NOTE: is_staff is NOT flipped here. RBAC assignment is
+        # informational until role permissions are enforced separately.
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="rbac.staff.assigned",
+                target="User",
+                target_id=user.id,
+                details=f"Role: {role.key}",
+            )
+        except Exception:
+            pass
         return Response(
             StaffAssignmentSerializer(obj).data,
             status=status.HTTP_201_CREATED,
@@ -143,5 +164,14 @@ class StaffViewSet(viewsets.GenericViewSet):
 
     def destroy(self, request, pk=None):
         obj = get_object_or_404(StaffAssignment, pk=pk)
+        user = obj.user
         obj.delete()
+        # Revoke is_staff only if no other active assignment remains
+        # and the user is not a superuser.
+        still_active = StaffAssignment.objects.filter(
+            user=user, active=True,
+        ).exists()
+        if not still_active and not user.is_superuser:
+            user.is_staff = False
+            user.save(update_fields=["is_staff", "updated_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)

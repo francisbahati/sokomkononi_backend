@@ -17,7 +17,10 @@ from django.apps import apps
 from django.db.models import ProtectedError
 from django.utils import timezone
 
-from .constants import SOFT_DELETE_RETENTION_DAYS
+from .constants import (
+    SOFT_DELETE_RETENTION_DAYS,
+    AUDIT_PROTECTED_MODEL_NAMES,
+)
 from .models import SoftDeleteModel
 
 

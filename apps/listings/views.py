@@ -474,7 +474,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 # Msg.conversation ni PROTECT, hivyo LAZIMA
                 # tufute messages kwanza, kisha conversations.
                 try:
-                    from apps.messaging.models import Conversation, Msg
+                    from apps.messaging.models import Conversation, Message
 
                     conv_ids = list(
                         Conversation._base_manager
@@ -483,13 +483,13 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     )
 
                     if conv_ids:
-                        for msg in Msg._base_manager.filter(
+                        for msg in Message._base_manager.filter(
                             conversation_id__in=conv_ids
                         ):
                             if hasattr(msg, "hard_delete"):
                                 msg.hard_delete()
                             else:
-                                Msg._base_manager.filter(
+                                Message._base_manager.filter(
                                     pk=msg.pk
                                 ).delete()
 
@@ -546,7 +546,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 ]
                 for field_name in detail_fields:
                     try:
-                        obj = getattr(listing, field_name, None)
+                        obj = getattr(listing, field_name)
                     except Exception:
                         obj = None
                     if obj is not None:
@@ -1205,10 +1205,21 @@ class ListingFeePaymentView(APIView):
                     {"detail": "Hakuna listing credits za kutosha."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            fee = create_listing_fee(listing)
+            fee.payment_status = ListingFee.PaymentStatus.PAID
+            fee.payment_reference = (
+                f"credits-{request.user.id}-{timezone.now().timestamp()}"
+            )
+            fee.paid_at = timezone.now()
+            fee.save(update_fields=[
+                "payment_status", "payment_reference",
+                "paid_at", "updated_at",
+            ])
+
             listing.status = Listing.Status.PENDING_APPROVAL
-            if hasattr(listing, "paid_at"):
-                listing.paid_at = timezone.now()
-            listing.save()
+            listing.save(update_fields=["status", "updated_at"])
+
             return Response(
                 {
                     "payment_status": "SUCCESS",
@@ -1251,6 +1262,7 @@ class ListingFeePaymentView(APIView):
 
 class AdminPendingListingsView(GenericAPIView):
     permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdminPendingListingSerializer
 
     def get(self, request):
         listings = (
@@ -1314,6 +1326,18 @@ class AdminApproveListingView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="listing.approved",
+                target="Listing",
+                target_id=listing.id,
+                details=f"Approved: {listing.title}",
+            )
+        except Exception:
+            pass
+
         serializer = ListingDetailSerializer(
             listing, context={"request": request},
         )
@@ -1370,6 +1394,18 @@ class AdminRejectListingView(APIView):
                 {"detail": detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="listing.rejected",
+                target="Listing",
+                target_id=listing.id,
+                details=f"Rejected: {listing.title} | Reason: {serializer.validated_data.get('rejection_reason', '')}",
+            )
+        except Exception:
+            pass
 
         response_serializer = ListingDetailSerializer(
             listing, context={"request": request},

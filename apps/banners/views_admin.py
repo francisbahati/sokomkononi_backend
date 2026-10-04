@@ -26,6 +26,7 @@ class AdminPromotionsView(APIView):
     Aggregated view of boosted / leading / advertised listings + campaigns.
     """
     permission_classes = [IsAdminUser]
+    serializer_class = None  # suppresses drf-spectacular warning
 
     def get(self, request):
         now = timezone.now()

@@ -74,6 +74,12 @@ def mark_purchase_paid(*, purchase, payment_reference=""):
     expires_at = now + timedelta(days=purchase.bundle.validity_days)
 
     ref = (payment_reference or "").strip()
+    if ref and BundlePurchase.objects.filter(
+        payment_reference=ref,
+    ).exclude(pk=purchase.pk).exists():
+        raise ValidationError(
+            "Payment reference hii tayari imetumika."
+        )
     if ref:
         purchase.payment_reference = ref
     purchase.status = BundlePurchase.Status.PAID

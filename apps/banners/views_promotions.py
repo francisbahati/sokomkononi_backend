@@ -45,6 +45,7 @@ def _serialize_campaign(obj):
 
 class PromotionsAnalyticsView(viewsets.ViewSet):
     permission_classes = [IsAdminUser]
+    serializer_class = None
 
     def list(self, request):
         now = timezone.now()
@@ -112,6 +113,7 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
 
 class CampaignViewSet(viewsets.ViewSet):
     permission_classes = [IsAdminOrReadOnly]
+    serializer_class = None
 
     def list(self, request):
         qs = Campaign.objects.all().order_by("-created_at")

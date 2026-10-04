@@ -330,7 +330,7 @@ def pay_boost_with_credits(*, boost, user):
         raise ValidationError("Boost hii haiwezi kulipiwa.")
 
     # Consume 1 boost credit (raises ValidationError if not enough)
-    consume_credit(user=user, service_key="boost", amount=1)
+    consume_credit(user=user, service_key="boost", required=1)
 
     boost.payment_status = ListingBoost.PaymentStatus.PAID
     boost.payment_reference = f"credits_{boost.pk}_{timezone.now().timestamp()}"

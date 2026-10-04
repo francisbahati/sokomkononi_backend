@@ -14,7 +14,22 @@ def get_listing_fee_rule(category_slug=None, price=None):
 
     Fallback (legacy): tafuta kwa bei (min_price/max_price).
     """
-    # 1. Tafuta kwa category slug (primary)
+    # 1a. Tafuta kwa category_slug field (primary, new)
+    if category_slug:
+        rule = (
+            ListingFeeRule.objects
+            .filter(
+                is_active=True,
+                is_deleted=False,
+                category_slug=category_slug,
+            )
+            .order_by("priority")
+            .first()
+        )
+        if rule:
+            return rule
+
+    # 1b. Fallback: match by name (legacy behavior)
     if category_slug:
         rule = (
             ListingFeeRule.objects
@@ -88,12 +103,6 @@ def calculate_listing_fee(price, category_slug=None):
         fee_amount = (
             price * rule.percentage / Decimal("100")
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    # Cap kwa min/max kama zipo
-    if rule.min_price and fee_amount < rule.min_price:
-        fee_amount = Decimal(rule.min_price)
-    if rule.max_price and fee_amount > rule.max_price:
-        fee_amount = Decimal(rule.max_price)
 
     return {
         "rule": rule,

@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -23,10 +24,14 @@ class SoftDeleteViewSetMixin:
 
     @action(detail=True, methods=["post"], url_path="restore")
     def restore(self, request, pk=None):
-        instance = self.get_queryset_with_deleted().get(pk=pk)
+        instance = get_object_or_404(
+            self.get_queryset_with_deleted(), pk=pk,
+        )
 
         if not self._can_restore(instance):
-            raise PermissionDenied("Huna ruhusa ya kurejesha kitu hiki.")
+            raise PermissionDenied(
+                "Huna ruhusa ya kurejesha kitu hiki."
+            )
 
         instance.restore()
         return Response(
@@ -51,5 +56,7 @@ class SoftDeleteViewSetMixin:
         return Response(serializer.data)
 
     def get_queryset_with_deleted(self):
-        model = self.get_serializer_class().Meta.model
+        model = getattr(self, "model", None)
+        if model is None:
+            model = self.queryset.model
         return model.all_objects.all()

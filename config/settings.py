@@ -81,7 +81,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "apps.core.csp_exempt_middleware.CSPExemptMiddleware",
+    "csp.middleware.CSPMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -188,7 +188,7 @@ _CSP_DIRECTIVES = {
 
 _EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin")
 
-if env_bool("CSP_REPORT_ONLY", False):
+if env_bool("CSP_REPORT_ONLY", True):  # TEMP: unblock Swagger UI
     # django-csp 4.0 native report-only mode.
     CONTENT_SECURITY_POLICY_REPORT_ONLY = {
         "DIRECTIVES": _CSP_DIRECTIVES,

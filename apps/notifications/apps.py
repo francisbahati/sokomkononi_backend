@@ -6,3 +6,6 @@ class NotificationsConfig(AppConfig):
     name = "apps.notifications"
     label = "notifications"
     verbose_name = "Taarifa"
+
+    def ready(self):
+        import apps.notifications.signals  # noqa

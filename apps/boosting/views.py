@@ -1,18 +1,21 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 from apps.core.mixins import SoftDeleteViewSetMixin
 from apps.credits.services import consume_credit
 from apps.listings.models import Listing
 
-from .models import BoostPackage, ListingBoost
+from .models import BoostFeeConfig, BoostPackage, ListingBoost
 from .serializers import (
     BoostCancelSerializer,
     BoostCreateSerializer,
+    BoostFeeConfigSerializer,
     BoostPackageSerializer,
     BoostPaymentSerializer,
     ListingBoostSerializer,
@@ -21,8 +24,10 @@ from .services.boost import (
     activate_boost,
     cancel_boost,
     create_boost,
+    is_boost_fee_enabled,
     mark_boost_as_paid,
     initiate_boost_payment,
+    pay_boost_free,
 )
 
 
@@ -66,6 +71,36 @@ class BoostPackageViewSet(
         if self.action in ["trash", "restore"]:
             return [permissions.IsAdminUser()]
         return super().get_permissions()
+
+
+class BoostFeeConfigView(APIView):
+    """
+    GET   /boosting/fee-config/  -> anyone: is the boost fee enabled?
+    PATCH /boosting/fee-config/  -> admin only: {"is_active": true|false}
+    """
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAdminUser()]
+
+    @extend_schema(responses=BoostFeeConfigSerializer)
+    def get(self, request):
+        return Response(
+            BoostFeeConfigSerializer(BoostFeeConfig.get_solo()).data
+        )
+
+    @extend_schema(
+        request=BoostFeeConfigSerializer,
+        responses=BoostFeeConfigSerializer,
+    )
+    def patch(self, request):
+        serializer = BoostFeeConfigSerializer(
+            BoostFeeConfig.get_solo(), data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class ListingBoostViewSet(viewsets.ModelViewSet):
@@ -132,18 +167,38 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
     def pay(self, request, pk=None):
         boost = get_object_or_404(self.get_queryset(), pk=pk)
 
+        # ── Free path: boost fee disabled by admin ──────────────
+        # No payment and no credit is consumed, whatever the client sent.
+        if not is_boost_fee_enabled():
+            boost = pay_boost_free(boost=boost, user=request.user)
+            if boost.status != ListingBoost.BoostStatus.ACTIVE:
+                boost = activate_boost(boost=boost)
+            return Response(
+                {
+                    "payment_status": "SUCCESS",
+                    "via": "free",
+                    "boost": ListingBoostSerializer(
+                        boost, context={"request": request}
+                    ).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
         # ── Credits path ────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
-            if not consume_credit(request.user, "boost"):
-                return Response(
-                    {"detail": "Hakuna boost credits za kutosha."},
-                    status=status.HTTP_402_PAYMENT_REQUIRED,
+            # Atomic: if marking paid / activating fails, the credit
+            # is rolled back instead of being lost.
+            with transaction.atomic():
+                if not consume_credit(request.user, "boost"):
+                    return Response(
+                        {"detail": "Hakuna boost credits za kutosha."},
+                        status=status.HTTP_402_PAYMENT_REQUIRED,
+                    )
+                boost = mark_boost_as_paid(
+                    boost=boost, payment_reference="credits",
                 )
-            boost = mark_boost_as_paid(
-                boost=boost, payment_reference="credits",
-            )
-            boost = activate_boost(boost=boost)
+                boost = activate_boost(boost=boost)
             return Response(
                 {
                     "payment_status": "SUCCESS",
@@ -174,7 +229,9 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="activate")
     def activate(self, request, pk=None):
         boost = get_object_or_404(self.get_queryset(), pk=pk)
-        boost = activate_boost(boost=boost)
+        # Idempotent: the webhook may already have activated it.
+        if boost.status != ListingBoost.BoostStatus.ACTIVE:
+            boost = activate_boost(boost=boost)
         return Response(
             self.get_serializer(boost).data,
             status=status.HTTP_200_OK,

@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -14,7 +15,14 @@ except (ImportError, LookupError):
     def create_notification(**kwargs):
         return None
 
-from ..models import BoostPackage, ListingBoost
+from ..models import BoostFeeConfig, BoostPackage, ListingBoost
+
+logger = logging.getLogger(__name__)
+
+
+def is_boost_fee_enabled():
+    """True when boosts must be paid; False when boosting is free."""
+    return BoostFeeConfig.get_solo().is_active
 
 
 def calculate_boost_fee(*, package):
@@ -23,6 +31,10 @@ def calculate_boost_fee(*, package):
 
     if not package.is_active:
         raise ValidationError("Boost package hii haipo active.")
+
+    # Fee disabled by admin -> boosting is free.
+    if not is_boost_fee_enabled():
+        return Decimal("0.00")
 
     amount = Decimal(package.price).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP,
@@ -138,6 +150,53 @@ def mark_boost_as_paid(*, boost, payment_reference):
 
     boost.save(update_fields=[
         "payment_status", "payment_reference", "paid_at", "updated_at",
+    ])
+
+    return boost
+
+
+@db_transaction.atomic
+def pay_boost_free(*, boost, user):
+    """
+    Settle a boost without payment. Only valid while the boost fee is
+    disabled. Marks the boost PAID with amount 0 so it can be activated
+    through the normal activate_boost() flow.
+    """
+    boost = (
+        ListingBoost.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "seller", "package")
+        .get(pk=boost.pk)
+    )
+
+    if not user or not user.is_authenticated:
+        raise ValidationError("Lazima uwe umeingia kwenye akaunti.")
+    if boost.seller_id != user.id:
+        raise ValidationError("Huruhusiwi kuwasha boost hii.")
+
+    if is_boost_fee_enabled():
+        raise ValidationError("Ada ya boost imewashwa. Boost lazima ilipiwe.")
+
+    # Idempotent retry.
+    if boost.payment_status == ListingBoost.PaymentStatus.PAID:
+        return boost
+
+    if boost.status in [
+        ListingBoost.BoostStatus.CANCELLED,
+        ListingBoost.BoostStatus.EXPIRED,
+    ]:
+        raise ValidationError("Boost hii haiwezi kuwashwa kwa sababu imefungwa.")
+
+    if not boost.package.is_active:
+        raise ValidationError("Boost package hii haipo active.")
+
+    boost.amount = Decimal("0.00")
+    boost.payment_status = ListingBoost.PaymentStatus.PAID
+    boost.payment_reference = f"free-{boost.pk}"
+    boost.paid_at = timezone.now()
+    boost.save(update_fields=[
+        "amount", "payment_status", "payment_reference",
+        "paid_at", "updated_at",
     ])
 
     return boost
@@ -365,6 +424,17 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
     if boost.payment_status == ListingBoost.PaymentStatus.PAID:
         raise ValidationError("Boost hii tayari imelipiwa.")
 
+    if not is_boost_fee_enabled():
+        raise ValidationError(
+            "Ada ya boost imezimwa. Hakuna malipo yanayohitajika."
+        )
+
+    # Boost may have been created while the fee was off (amount 0).
+    # Re-price it now that the fee is on.
+    if boost.amount <= Decimal("0.00"):
+        boost.amount = calculate_boost_fee(package=boost.package)
+        boost.save(update_fields=["amount", "updated_at"])
+
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
     existing_ref = (boost.payment_reference or "").strip()
@@ -406,4 +476,17 @@ def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
     boost.save(update_fields=[
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
+
+    # Activate right away. Without this, a customer who pays and then
+    # closes the browser is charged but never boosted, because the
+    # frontend is the only other place that calls /activate/.
+    # A failure here (e.g. listing no longer AVAILABLE) must not undo
+    # the recorded payment, so it is logged and left for review.
+    try:
+        boost = activate_boost(boost=boost)
+    except ValidationError:
+        logger.exception(
+            "Boost %s paid via webhook but could not be activated", boost.pk,
+        )
+
     return boost

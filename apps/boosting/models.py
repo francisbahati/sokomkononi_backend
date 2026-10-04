@@ -79,6 +79,37 @@ class BoostPackage(SoftDeleteModel):
         return f"{self.name} - TZS {self.price}"
 
 
+class BoostFeeConfig(models.Model):
+    """
+    Singleton (pk=1): global on/off switch for the boost fee.
+
+    is_active=True  -> boosts must be paid (flat fee, bundle or credits).
+    is_active=False -> boosts are free; no payment is required.
+
+    Individual BoostPackage.is_active only controls whether a package
+    is available at all; it does not decide whether a boost is paid.
+    """
+
+    is_active = models.BooleanField(default=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "boost_fee_config"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={"is_active": True})
+        return obj
+
+    def __str__(self):
+        return f"Boost fee: {'ON' if self.is_active else 'OFF (free)'}"
+
+
 class ListingBoost(models.Model):
     """
     Represents a seller's request/payment for boosting a listing.
@@ -116,10 +147,11 @@ class ListingBoost(models.Model):
         related_name="listing_boosts",
     )
 
+    # 0.00 is allowed: boosts are free while the boost fee is disabled.
     amount = models.DecimalField(
         max_digits=15,
         decimal_places=2,
-        validators=[MinValueValidator(Decimal("0.01"))],
+        validators=[MinValueValidator(Decimal("0.00"))],
     )
 
     payment_status = models.CharField(

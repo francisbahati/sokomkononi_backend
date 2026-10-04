@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import BoostPackage, ListingBoost
+from .models import BoostFeeConfig, BoostPackage, ListingBoost
 
 
 class BoostPackageSerializer(serializers.ModelSerializer):
@@ -79,6 +79,13 @@ class BoostCreateSerializer(serializers.Serializer):
             )
 
         return attrs
+
+
+class BoostFeeConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BoostFeeConfig
+        fields = ["is_active", "updated_at"]
+        read_only_fields = ["updated_at"]
 
 
 class BoostPaymentSerializer(serializers.Serializer):

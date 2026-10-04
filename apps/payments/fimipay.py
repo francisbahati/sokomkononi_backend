@@ -99,10 +99,24 @@ def create_order(*, order_id, amount, buyer_phone, buyer_email="", buyer_name=""
     if not order_id:
         raise ValidationError({"order_id": "order_id inahitajika."})
 
+    # Safety net for every caller: never send a zero/negative charge
+    # (e.g. a boost that is free because the admin disabled the fee).
+    amount_int = int(Decimal(str(amount)))
+    if amount_int <= 0:
+        raise ValidationError({"detail": "Kiasi cha malipo si sahihi."})
+
+    # Phone is optional on the account now, so mobile-money payments
+    # must get it from the payment form.
+    buyer_phone = str(buyer_phone or "").strip()
+    if payment_method == "mobile" and not buyer_phone:
+        raise ValidationError({
+            "detail": "Namba ya simu inahitajika kwa malipo ya simu."
+        })
+
     payload = {
         "order_id": str(order_id)[:64],
-        "amount": int(Decimal(str(amount))),
-        "buyer_phone": str(buyer_phone),
+        "amount": amount_int,
+        "buyer_phone": buyer_phone,
         "payment_method": payment_method,
         "currency": currency or settings.FIMIPAY_CURRENCY,
     }

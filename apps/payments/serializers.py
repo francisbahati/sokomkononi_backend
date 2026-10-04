@@ -5,7 +5,9 @@ from .models import Payout
 
 class CreateOrderSerializer(serializers.Serializer):
     order_id = serializers.CharField(max_length=64)
-    amount = serializers.DecimalField(max_digits=15, decimal_places=2)
+    amount = serializers.DecimalField(
+        max_digits=15, decimal_places=2, min_value=1,
+    )
     buyer_phone = serializers.CharField(max_length=20)
     buyer_email = serializers.EmailField(required=False, allow_blank=True)
     buyer_name = serializers.CharField(max_length=150, required=False, allow_blank=True)

@@ -15,12 +15,18 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.payments.fimipay import create_order
 from apps.listings.models import ListingFee
 from apps.boosting.models import ListingBoost
 from apps.transactions.models import Reservation
 
 from .models import SuccessFeeConfig
+from .services_success_fee import (
+    DEFAULT_PURPOSE,
+    compute_download_fee,
+    create_success_fee_payment,
+    has_valid_success_fee_payment,
+    initiate_success_fee_payment,
+)
 
 
 # ============================================================
@@ -125,21 +131,30 @@ class SuccessFeeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        purpose = (request.data.get("purpose") or "").strip()
-        amount = request.data.get("amount")
-        if not purpose or not amount:
+        config = _get_success_fee_config()
+
+        # Fee disabled by admin -> nothing to pay (same rule as boosts).
+        if not config.is_enabled:
             return Response(
-                {"detail": "purpose na amount zinahitajika."},
+                {"detail": "Ada ya mafanikio imezimwa. Hakuna malipo yanayohitajika."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        order_id = f"SF-{request.user.id}-{purpose[:20]}"
-        data = create_order(
-            order_id=order_id,
-            amount=amount,
-            buyer_phone=request.user.phone or "",
-            buyer_email=request.user.email or "",
-            buyer_name=request.user.name or "",
-            payment_method="mobile",
+
+        purpose = (request.data.get("purpose") or DEFAULT_PURPOSE)
+        purpose = str(purpose).strip() or DEFAULT_PURPOSE
+
+        # The amount is decided by the server. Any "amount" sent by the
+        # client is ignored.
+        payment = create_success_fee_payment(
+            user=request.user,
+            purpose=purpose,
+            amount=compute_download_fee(config),
+        )
+        data = initiate_success_fee_payment(
+            payment=payment,
+            user=request.user,
+            payment_method=request.data.get("payment_method", "mobile"),
+            phone=request.data.get("phone", ""),
         )
         return Response({"fimipay": data}, status=status.HTTP_201_CREATED)
 
@@ -179,7 +194,8 @@ class SuccessFeeDownloadView(APIView):
     - Kama true → 402 Payment Required (frontend inaomba malipo kwanza)
 
     Baada ya malipo (kupitia POST /api/finance/success-fee/), user anaweza
-    kupakua kwa kuita endpoint hii tena na `payment_reference`.
+    kupakua kwa kuita endpoint hii tena. Malipo yanathibitishwa na
+    backend (webhook / FimiPay), si na client; yanatumika kwa saa 24.
 
     NOTE: requires REST_FRAMEWORK["URL_FORMAT_OVERRIDE"] = None in settings,
     otherwise DRF intercepts ?format= and returns 404.
@@ -197,20 +213,15 @@ class SuccessFeeDownloadView(APIView):
         config = _get_success_fee_config()
 
         # ── Check payment ──
-        if config.is_enabled:
-            payment_ref = (request.query_params.get("payment_reference") or "").strip()
-            # FIX: reference must belong to this user (format SF-<user_id>-...).
-            # TODO: verify against a stored PAID order (FimiPay webhook) for
-            # real protection; this only blocks made-up / other users' refs.
-            if not payment_ref or not payment_ref.startswith(f"SF-{request.user.id}-"):
-                return Response(
-                    {
-                        "requires_payment": True,
-                        "fee": str(config.min_fee),
-                        "message": "Lipa ada ya mafanikio kwanza ili kupakua.",
-                    },
-                    status=status.HTTP_402_PAYMENT_REQUIRED,
-                )
+        if config.is_enabled and not has_valid_success_fee_payment(request.user):
+            return Response(
+                {
+                    "requires_payment": True,
+                    "fee": str(config.min_fee),
+                    "message": "Lipa ada ya mafanikio kwanza ili kupakua.",
+                },
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
 
         # ── Chukua miamala ──
         records = _get_user_transactions(request.user)

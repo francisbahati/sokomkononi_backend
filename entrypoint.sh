@@ -65,6 +65,9 @@ fi
 echo "Applying database migrations..."
 python manage.py migrate --noinput
 
+echo "Fixing orphan listings (category=NULL)..."
+python manage.py fix_orphan_listings --apply || echo "WARN: orphan fix failed, continuing."
+
 echo "Seeding categories + fee rules..."
 python manage.py seed_all_fee_rules || echo "WARN: seed failed, continuing."
 

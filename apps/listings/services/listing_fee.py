@@ -5,6 +5,11 @@ from django.core.exceptions import ValidationError
 from ..models import ListingFee, ListingFeeRule
 
 
+# Used when a category has no explicit fee rule. The first
+# lookup creates a real row so an admin can edit it later.
+DEFAULT_FLAT_FEE = 3000
+
+
 def get_listing_fee_rule(category_slug=None, price=None, category=None):
     """
     Tafuta fee rule kwa category.
@@ -81,20 +86,43 @@ def get_listing_fee_rule(category_slug=None, price=None, category=None):
             if rule.max_price is None or price_dec <= rule.max_price:
                 return rule
 
-    # 5. Last resort: auto-create a system default rule so listings
-    #    NEVER fail to get a fee. Admins can edit it later.
-    default_rule, _ = ListingFeeRule.objects.get_or_create(
-        category_slug="__default__",
-        defaults={
-            "name": "Default Listing Fee",
-            "fee_mode": "FLAT",
-            "flat_fee": 5000,
-            "percentage": 0,
-            "is_active": True,
-            "priority": 9999,
-        },
-    )
-    return default_rule
+    # 5. Last resort: auto-create a rule for THIS category so every
+    #    listing always gets a real fee. Admins can edit the amount
+    #    later in the Revenue section.
+    if category is not None:
+        rule, _ = ListingFeeRule.objects.get_or_create(
+            category=category,
+            defaults={
+                "name": category.name,
+                "category_slug": category.slug,
+                "fee_mode": "FLAT",
+                "flat_fee": DEFAULT_FLAT_FEE,
+                "percentage": 0,
+                "min_price": 0,
+                "is_active": True,
+                "priority": 9999,
+            },
+        )
+        return rule
+
+    # 5b. No Category object at all — create a system default keyed by
+    #     the fallback slug so nothing ever 404s.
+    if category_slug:
+        rule, _ = ListingFeeRule.objects.get_or_create(
+            category_slug=category_slug,
+            defaults={
+                "name": category_slug,
+                "fee_mode": "FLAT",
+                "flat_fee": DEFAULT_FLAT_FEE,
+                "percentage": 0,
+                "is_active": True,
+                "priority": 9999,
+            },
+        )
+        return rule
+
+    # 5c. Truly nothing to hang a rule on — give up cleanly.
+    return None
 
 
 def calculate_listing_fee(price, category_slug=None, category=None):

@@ -372,67 +372,67 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         "[listings] deals app not available, skipping"
                     )
 
-            # ── 5. Conversations + Messages ────────────────
-# Msg.conversation ni PROTECT, hivyo LAZIMA
-# tufute messages kwanza, kisha conversations.
-try:
-    from apps.messaging.models import Conversation, Msg  # ⬅️ badilisha app name kama ni tofauti
+                # ── 5. Conversations + Messages ────────────────
+                # Msg.conversation ni PROTECT, hivyo LAZIMA
+                # tufute messages kwanza, kisha conversations.
+                try:
+                    from apps.messaging.models import Conversation, Msg  # ⬅️ badilisha app name kama ni tofauti
 
-    # Pata conversations zote za listing hii
-    conv_ids = list(
-        Conversation._base_manager
-        .filter(listing=listing)
-        .values_list("id", flat=True)
-    )
+                    # Pata conversations zote za listing hii
+                    conv_ids = list(
+                        Conversation._base_manager
+                        .filter(listing=listing)
+                        .values_list("id", flat=True)
+                    )
 
-    if conv_ids:
-        # 5a. Futa messages zote kwa conversations hizi
-        for msg in Msg._base_manager.filter(conversation_id__in=conv_ids):
-            if hasattr(msg, "hard_delete"):
-                msg.hard_delete()
-            else:
-                Msg._base_manager.filter(pk=msg.pk).delete()
+                    if conv_ids:
+                        # 5a. Futa messages zote kwa conversations hizi
+                        for msg in Msg._base_manager.filter(conversation_id__in=conv_ids):
+                            if hasattr(msg, "hard_delete"):
+                                msg.hard_delete()
+                            else:
+                                Msg._base_manager.filter(pk=msg.pk).delete()
 
-        # 5b. Futa conversations
-        for conv in Conversation._base_manager.filter(id__in=conv_ids):
-            if hasattr(conv, "hard_delete"):
-                conv.hard_delete()
-            else:
-                Conversation._base_manager.filter(pk=conv.pk).delete()
-except ImportError:
-    logger.warning("[listings] messaging app not available, skipping")
+                        # 5b. Futa conversations
+                        for conv in Conversation._base_manager.filter(id__in=conv_ids):
+                            if hasattr(conv, "hard_delete"):
+                                conv.hard_delete()
+                            else:
+                                Conversation._base_manager.filter(pk=conv.pk).delete()
+                except ImportError:
+                    logger.warning("[listings] messaging app not available, skipping")
 
-# ── 6. Related models zingine ──────────────────
-related_fields = [
-    "images",
-    "boosts",
-    "waiting_list_entries",
-    "saved_by",
-    "search_matches",
-    # "conversations",  ⬅️ IMEONDOLEWA — tumeshughulikia juu
-    "banner_ads",
-    "leading_purchases",
-]
+                # ── 6. Related models zingine ──────────────────
+                related_fields = [
+                    "images",
+                    "boosts",
+                    "waiting_list_entries",
+                    "saved_by",
+                    "search_matches",
+                    # "conversations",  ⬅️ IMEONDOLEWA — tumeshughulikia juu
+                    "banner_ads",
+                    "leading_purchases",
+                ]
 
-for field_name in related_fields:
-    manager = getattr(listing, field_name, None)
-    if manager is None:
-        continue
-    try:
-        for obj in manager.all():
-            if hasattr(obj, "hard_delete"):
-                obj.hard_delete()
-            else:
-                obj.delete()
-    except Exception as exc:
-        logger.warning(
-            "[listings] delete %s for listing %s "
-            "failed: %s",
-            field_name, listing.id, exc,
-        )
-        raise
+                for field_name in related_fields:
+                    manager = getattr(listing, field_name, None)
+                    if manager is None:
+                        continue
+                    try:
+                        for obj in manager.all():
+                            if hasattr(obj, "hard_delete"):
+                                obj.hard_delete()
+                            else:
+                                obj.delete()
+                    except Exception as exc:
+                        logger.warning(
+                            "[listings] delete %s for listing %s "
+                            "failed: %s",
+                            field_name, listing.id, exc,
+                        )
+                        raise
 
-                # ── 6. Details (one-to-one) ────────────────────
+                # ── 7. Details (one-to-one) ────────────────────
                 detail_fields = [
                     "property_details",
                     "land_details",
@@ -448,7 +448,7 @@ for field_name in related_fields:
                     if obj is not None:
                         obj.delete()
 
-                # ── 7. Hatimaye: hard delete listing ───────────
+                # ── 8. Hatimaye: hard delete listing ───────────
                 listing.hard_delete()
 
         except ProtectedError as exc:

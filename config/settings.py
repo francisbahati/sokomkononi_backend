@@ -156,7 +156,7 @@ _default_storage = (
 
 STORAGES = {
     "default": {"BACKEND": _default_storage},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
 }
 
 # ---------------- CSP ----------------

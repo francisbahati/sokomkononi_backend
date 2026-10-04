@@ -63,3 +63,62 @@ def get_unread_notification_count(*, user):
     return Notification.objects.filter(
         recipient=user, is_read=False,
     ).count()
+
+# ============================================================
+# ADMIN NOTIFICATIONS — broadcast kwa admins wote
+# ============================================================
+
+def create_notification_for_admins(
+    *,
+    notification_type,
+    title,
+    message,
+    priority=Notification.Priority.NORMAL,
+    related_object_type="",
+    related_object_id=None,
+    action_url="",
+    exclude_user_id=None,
+):
+    """
+    Tuma notification kwa admins wote (is_staff=True).
+
+    Args:
+        exclude_user_id: Kama ipo, mruke admin huyu (mfano kama
+            admin mwenyewe ndiye aliyeunda kitendo).
+
+    Returns:
+        list ya Notification zilizoundwa.
+    """
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+
+    admins = User.objects.filter(
+        is_staff=True,
+        is_active=True,
+    )
+
+    if exclude_user_id is not None:
+        admins = admins.exclude(pk=exclude_user_id)
+
+    admins = admins.distinct()
+
+    notifications = [
+        Notification(
+            recipient=admin,
+            notification_type=notification_type,
+            title=title,
+            message=message,
+            priority=priority,
+            audience=Notification.Audience.ADMIN,
+            related_object_type=related_object_type,
+            related_object_id=related_object_id,
+            action_url=action_url,
+        )
+        for admin in admins
+    ]
+
+    if not notifications:
+        return []
+
+    return Notification.objects.bulk_create(notifications)

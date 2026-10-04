@@ -27,9 +27,9 @@ class NotificationViewSet(
         GET    unread-count/        count unread
         GET    unread/              list unread
         GET    priority/<X>/        filter by priority
-        DELETE <pk>/                soft delete
-        POST   <pk>/restore/        restore from trash
-        GET    trash/               staff only
+        DELETE <pk>/                hard delete (permanent)
+        DELETE clear-all/           hard delete all (permanent)
+        GET    trash/               staff only (soft-deleted archive)
     """
 
     serializer_class = NotificationSerializer
@@ -90,20 +90,19 @@ class NotificationViewSet(
         return Response(serializer.data)
 
     def destroy(self, request, *args, **kwargs):
+        """
+        Futa notification PERMANENTLY.
+
+        User anafuta kabisa — record inaondolewa kwenye DB,
+        hairudishwi kwenye trash.
+        """
         notification = self.get_object()
 
-        notification.delete(
-            by=request.user,
-            reason="",
-        )
+        # Hard delete — ondoa kabisa DB
+        notification.hard_delete()
 
         return Response(
-            {
-                "detail": (
-                    "Arifa imewekwa kwenye kikapu. "
-                    "Itaondolewa kabisa baada ya siku 90."
-                )
-            },
+            {"detail": "Arifa imefutwa kabisa."},
             status=status.HTTP_200_OK,
         )
 
@@ -148,7 +147,41 @@ class NotificationViewSet(
         )
 
     @action(
-        detail=False, methods=["get"], url_path="admin-feed",
+        detail=False,
+        methods=["delete"],
+        url_path="clear-all",
+    )
+    def clear_all(self, request):
+        """
+        Futa notifications zote za user PERMANENTLY.
+
+        Query params:
+            audience (optional): "admin" au "user" — filter kwa audience.
+            Kama haipo, futa zote.
+        """
+        qs = self.get_queryset()
+
+        # Filter kwa audience kama imetolewa
+        audience = request.query_params.get("audience")
+        if audience:
+            qs = qs.filter(audience=audience.upper())
+
+        count = qs.count()
+        for notification in qs:
+            notification.hard_delete()
+
+        return Response(
+            {
+                "detail": f"Arifa {count} zimefutwa kabisa.",
+                "deleted_count": count,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="admin-feed",
         permission_classes=[permissions.IsAdminUser],
     )
     def admin_feed(self, request):
@@ -172,6 +205,13 @@ class NotificationViewSet(
         url_path="trash",
     )
     def trash(self, request):
+        """
+        Archive ya notifications zilizo soft-deleted.
+
+        NOTE: Kwa sasa destroy() inafanya hard delete, hivyo trash
+        itakuwa tupu kwa kawaida. Hii inabaki kwa mabadiliko ya baadaye
+        kama tutarudisha soft delete kwa baadhi ya notifications.
+        """
         # Only the owner's deleted notifications, unless the caller is
         # an admin who explicitly wants the global view (?scope=all).
         if request.user.is_staff and request.query_params.get("scope") == "all":

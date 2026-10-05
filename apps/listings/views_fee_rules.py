@@ -97,8 +97,14 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             drf_status.HTTP_200_OK,
             drf_status.HTTP_202_ACCEPTED,
         ):
-            new_snapshot = self._snapshot(instance)
-            diff = self._diff(old_snapshot, new_snapshot)
+            # `super().update()` inapakia kitu chake kipya kutoka database,
+            # kwa hiyo `instance` yetu ni ya zamani — i-refresh la sivyo
+            # diff itasema "no change" kila mara.
+            try:
+                instance.refresh_from_db()
+                diff = self._diff(old_snapshot, self._snapshot(instance))
+            except Exception:
+                diff = "diff haipatikani"
             _log(
                 request,
                 action="fee.updated",
@@ -113,6 +119,11 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         return response
 
     def partial_update(self, request, *args, **kwargs):
+        # MUHIMU: PATCH lazima iwe `partial=True`. DRF inaiweka hivi kwa
+        # default; kuiandika upya bila hiyo kunafanya serializer idai fields
+        # ZOTE zinazohitajika, kwa hiyo toggle ya `is_active` peke yake
+        # inarudi 400 Bad Request.
+        kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
 
     # ══════════════════════════════════════════════════════════

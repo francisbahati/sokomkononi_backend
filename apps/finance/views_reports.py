@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db.models import Count, Sum
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.response import Response
@@ -24,9 +24,37 @@ class IsAdminUser(permissions.BasePermission):
         )
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+# Statuses ambazo zinahesabiwa kama "listing halisi" (hai/active)
+# DRAFT hazijachapishwa — hazipaswi kuhesabiwa kwenye reports.
+VISIBLE_LISTING_STATUSES = [
+    Listing.Status.AVAILABLE,
+    Listing.Status.RESERVED,
+    Listing.Status.SOLD,
+]
+
+
+def _visible_listings_qs():
+    """
+    Listings zinazohesabiwa kwenye Reports:
+    - Hazijafutwa (is_deleted=False)
+    - Sio DRAFT
+    """
+    return Listing.objects.filter(
+        is_deleted=False,
+    ).exclude(
+        status=Listing.Status.DRAFT,
+    )
+
+
+# ============================================================
+# REPORTS VIEW
+# ============================================================
 class ReportsView(APIView):
     """
-    GET /api/admin/reports/
+    GET /api/finance/reports/
     Returns dashboard aggregates for ReportsSection.jsx
     """
     permission_classes = [IsAdminUser]
@@ -44,7 +72,6 @@ class ReportsView(APIView):
         total_buyers = max(0, total_users - total_sellers)
 
         # Growth: cumulative users per day for last 30 days
-        from django.db.models.functions import TruncDate
         start_day = (now - timedelta(days=29)).date()
         growth_rows = dict(
             User.all_objects
@@ -69,18 +96,22 @@ class ReportsView(APIView):
             })
 
         # ---------- Listings ----------
-        total_listings = Listing.objects.count()
-        live_listings = Listing.objects.filter(
+        # ⬇️ MUHIMU: Tumia `_visible_listings_qs()` — sio Listing.objects.count()
+        visible_qs = _visible_listings_qs()
+
+        total_listings = visible_qs.count()
+        live_listings = visible_qs.filter(
             status=Listing.Status.AVAILABLE,
         ).count()
-        sold_listings = Listing.objects.filter(
+        sold_listings = visible_qs.filter(
             status=Listing.Status.SOLD,
         ).count()
 
+        # Growth: listings zinahesabiwa tu kama visible (sio DRAFT)
         listings_growth = []
         for i in range(29, -1, -1):
             day = (now - timedelta(days=i)).date()
-            count = Listing.objects.filter(created_at__date=day).count()
+            count = visible_qs.filter(created_at__date=day).count()
             listings_growth.append({
                 "label": day.strftime("%d/%m"),
                 "count": count,
@@ -144,8 +175,10 @@ class ReportsView(APIView):
         )
 
         # ---------- Top sellers (by views) ----------
+        # ⬇️ Tumia visible_qs — sio Listing.objects
         top_sellers_qs = (
-            Listing.objects.values("seller__id", "seller__name")
+            visible_qs
+            .values("seller__id", "seller__name")
             .annotate(
                 views=Coalesce(Sum("views_count"), 0),
                 listings=Count("id"),
@@ -162,7 +195,8 @@ class ReportsView(APIView):
         ]
 
         # ---------- Most viewed listings ----------
-        most_viewed_qs = Listing.objects.order_by("-views_count")[:5]
+        # ⬇️ Tumia visible_qs
+        most_viewed_qs = visible_qs.order_by("-views_count")[:5]
         most_viewed = [
             {
                 "id": l.id,
@@ -174,8 +208,10 @@ class ReportsView(APIView):
         ]
 
         # ---------- Top categories ----------
+        # ⬇️ Tumia visible_qs
         cat_qs = (
-            Listing.objects.values("category__slug", "category__name")
+            visible_qs
+            .values("category__slug", "category__name")
             .annotate(count=Count("id"), views=Sum("views_count"))
             .order_by("-views")[:5]
         )
@@ -190,8 +226,10 @@ class ReportsView(APIView):
         ]
 
         # ---------- Top locations ----------
+        # ⬇️ Tumia visible_qs
         loc_qs = (
-            Listing.objects.values("location")
+            visible_qs
+            .values("location")
             .annotate(count=Count("id"), views=Sum("views_count"))
             .order_by("-views")[:5]
         )
@@ -210,9 +248,9 @@ class ReportsView(APIView):
             "totalBuyers": total_buyers,
             "usersGrowth": users_growth,
 
-            "totalListings": total_listings,
-            "liveListings": live_listings,
-            "soldListings": sold_listings,
+            "totalListings": total_listings,     # ⬅️ Sasa 6 (sio 58)
+            "liveListings": live_listings,       # ⬅️ 6
+            "soldListings": sold_listings,       # ⬅️ 0
             "listingsGrowth": listings_growth,
 
             "totalDeals": total_deals,

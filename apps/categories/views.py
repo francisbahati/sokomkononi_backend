@@ -31,6 +31,27 @@ class IsAdminOrReadOnly(permissions.BasePermission):
         )
 
 
+# ============================================================
+# AUDIT LOG HELPER
+# ============================================================
+def _log(request, action, target="", target_id=None, details=""):
+    """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=target,
+            target_id=target_id,
+            details=details,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to write audit log: %s", action,
+        )
+
+
 @extend_schema_view(
     list=extend_schema(
         summary="Orodha ya makundi",
@@ -64,6 +85,99 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     def _can_restore(self, instance):
         return bool(self.request.user.is_staff)
 
+    # ══════════════════════════════════════════════════════════
+    # CREATE — log category.created
+    # ══════════════════════════════════════════════════════════
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+
+        if response.status_code == status.HTTP_201_CREATED:
+            data = response.data or {}
+            _log(
+                request,
+                action="category.created",
+                target="Category",
+                target_id=data.get("id"),
+                details=(
+                    f"Created category: "
+                    f"{data.get('name') or data.get('slug') or '—'}"
+                ),
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # UPDATE — log category.updated
+    # ══════════════════════════════════════════════════════════
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        old_name = instance.name
+        response = super().update(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_200_OK,
+            status.HTTP_202_ACCEPTED,
+        ):
+            _log(
+                request,
+                action="category.updated",
+                target="Category",
+                target_id=instance.id,
+                details=f"Updated category: {old_name}",
+            )
+
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        old_name = instance.name
+        response = super().partial_update(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_200_OK,
+            status.HTTP_202_ACCEPTED,
+        ):
+            _log(
+                request,
+                action="category.updated",
+                target="Category",
+                target_id=instance.id,
+                details=f"Updated category (partial): {old_name}",
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # DESTROY — log category.deleted
+    # ══════════════════════════════════════════════════════════
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        cat_id = instance.id
+        cat_name = instance.name
+        cat_slug = instance.slug
+
+        response = super().destroy(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_204_NO_CONTENT,
+            status.HTTP_200_OK,
+        ):
+            _log(
+                request,
+                action="category.deleted",
+                target="Category",
+                target_id=cat_id,
+                details=(
+                    f"Deleted category: {cat_name} "
+                    f"(slug={cat_slug})"
+                ),
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # UPLOAD IMAGE — (hiari) log category.updated
+    # ══════════════════════════════════════════════════════════
     @action(
         detail=False,
         methods=["post"],
@@ -150,6 +264,14 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 cat.ordering = idx
                 cat.save(update_fields=["ordering"])
                 updated += 1
+
+        _log(
+            request,
+            action="category.reordered",
+            target="Category",
+            target_id=None,
+            details=f"Reordered {updated} categories",
+        )
 
         return Response({
             "detail": f"Categories {updated} zimepangwa upya.",

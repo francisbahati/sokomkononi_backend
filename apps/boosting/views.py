@@ -31,6 +31,27 @@ from .services.boost import (
 )
 
 
+# ============================================================
+# AUDIT LOG HELPER
+# ============================================================
+def _log(request, action, target="", target_id=None, details=""):
+    """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=target,
+            target_id=target_id,
+            details=details,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to write audit log: %s", action,
+        )
+
+
 class IsAdminOrReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         if request.method in permissions.SAFE_METHODS:
@@ -72,6 +93,101 @@ class BoostPackageViewSet(
             return [permissions.IsAdminUser()]
         return super().get_permissions()
 
+    # ══════════════════════════════════════════════════════════
+    # CREATE — log fee.created (boost package)
+    # ══════════════════════════════════════════════════════════
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+
+        if response.status_code == status.HTTP_201_CREATED:
+            data = response.data or {}
+            _log(
+                request,
+                action="fee.created",
+                target="BoostPackage",
+                target_id=data.get("id"),
+                details=(
+                    f"Created boost package: "
+                    f"{data.get('name') or '—'} "
+                    f"(price: {data.get('price') or 0})"
+                ),
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # UPDATE — log fee.updated (boost package)
+    # ══════════════════════════════════════════════════════════
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        old_snapshot = self._snapshot(instance)
+
+        response = super().update(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_200_OK,
+            status.HTTP_202_ACCEPTED,
+        ):
+            new_snapshot = self._snapshot(instance)
+            diff = self._diff(old_snapshot, new_snapshot)
+            _log(
+                request,
+                action="fee.updated",
+                target="BoostPackage",
+                target_id=instance.id,
+                details=(
+                    f"Updated boost package: "
+                    f"{instance.name or '—'} ({diff})"
+                ),
+            )
+
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    # ══════════════════════════════════════════════════════════
+    # DESTROY — log fee.deleted (boost package)
+    # ══════════════════════════════════════════════════════════
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        pkg_id = instance.id
+        pkg_name = instance.name
+
+        response = super().destroy(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_204_NO_CONTENT,
+            status.HTTP_200_OK,
+        ):
+            _log(
+                request,
+                action="fee.deleted",
+                target="BoostPackage",
+                target_id=pkg_id,
+                details=f"Deleted boost package: {pkg_name}",
+            )
+
+        return response
+
+    @staticmethod
+    def _snapshot(instance):
+        return {
+            "price": str(getattr(instance, "price", "") or ""),
+            "duration_hours": str(getattr(instance, "duration_hours", "") or ""),
+            "is_active": bool(getattr(instance, "is_active", True)),
+            "ordering": str(getattr(instance, "ordering", "") or ""),
+        }
+
+    @staticmethod
+    def _diff(old, new):
+        changes = []
+        for key in old:
+            if old[key] != new[key]:
+                changes.append(f"{key}: {old[key]} → {new[key]}")
+        return ", ".join(changes) if changes else "no change"
+
 
 class BoostFeeConfigView(APIView):
     """
@@ -95,11 +211,28 @@ class BoostFeeConfigView(APIView):
         responses=BoostFeeConfigSerializer,
     )
     def patch(self, request):
+        obj = BoostFeeConfig.get_solo()
+        old_state = bool(obj.is_active)
+
         serializer = BoostFeeConfigSerializer(
-            BoostFeeConfig.get_solo(), data=request.data, partial=True,
+            obj, data=request.data, partial=True,
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
+
+        new_state = bool(obj.is_active)
+        if old_state != new_state:
+            _log(
+                request,
+                action="fee.updated",
+                target="BoostFeeConfig",
+                target_id=obj.id,
+                details=(
+                    f"Boost fee toggle: "
+                    f"is_active: {old_state} → {new_state}"
+                ),
+            )
+
         return Response(serializer.data)
 
 
@@ -167,8 +300,7 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
     def pay(self, request, pk=None):
         boost = get_object_or_404(self.get_queryset(), pk=pk)
 
-        # ── Free path: boost fee disabled by admin ──────────────
-        # No payment and no credit is consumed, whatever the client sent.
+        # ── Free path ───────────────────────────────────────────
         if not is_boost_fee_enabled():
             boost = pay_boost_free(boost=boost, user=request.user)
             if boost.status != ListingBoost.BoostStatus.ACTIVE:
@@ -187,8 +319,6 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
         # ── Credits path ────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
-            # Atomic: if marking paid / activating fails, the credit
-            # is rolled back instead of being lost.
             with transaction.atomic():
                 if not consume_credit(request.user, "boost"):
                     return Response(
@@ -229,7 +359,6 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="activate")
     def activate(self, request, pk=None):
         boost = get_object_or_404(self.get_queryset(), pk=pk)
-        # Idempotent: the webhook may already have activated it.
         if boost.status != ListingBoost.BoostStatus.ACTIVE:
             boost = activate_boost(boost=boost)
         return Response(

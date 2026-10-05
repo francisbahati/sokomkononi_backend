@@ -17,6 +17,27 @@ class IsAdminOrReadOnly(permissions.BasePermission):
         )
 
 
+# ============================================================
+# AUDIT LOG HELPER
+# ============================================================
+def _log(request, action, target="", target_id=None, details=""):
+    """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=target,
+            target_id=target_id,
+            details=details,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to write audit log: %s", action,
+        )
+
+
 class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     serializer_class = ListingFeeRuleSerializer
     permission_classes = [IsAdminOrReadOnly]
@@ -36,3 +57,115 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             self.request.user.is_authenticated
             and self.request.user.is_staff
         )
+
+    # ══════════════════════════════════════════════════════════
+    # CREATE — log fee.created
+    # ══════════════════════════════════════════════════════════
+    def create(self, request, *args, **kwargs):
+        from rest_framework import status as drf_status
+        response = super().create(request, *args, **kwargs)
+
+        if response.status_code == drf_status.HTTP_201_CREATED:
+            data = response.data or {}
+            name = (
+                data.get("name")
+                or data.get("category_slug")
+                or data.get("category")
+                or "—"
+            )
+            _log(
+                request,
+                action="fee.created",
+                target="ListingFeeRule",
+                target_id=data.get("id"),
+                details=f"Created listing fee rule: {name}",
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # UPDATE / PARTIAL_UPDATE — log fee.updated
+    # ══════════════════════════════════════════════════════════
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        old_snapshot = self._snapshot(instance)
+
+        response = super().update(request, *args, **kwargs)
+
+        from rest_framework import status as drf_status
+        if response.status_code in (
+            drf_status.HTTP_200_OK,
+            drf_status.HTTP_202_ACCEPTED,
+        ):
+            new_snapshot = self._snapshot(instance)
+            diff = self._diff(old_snapshot, new_snapshot)
+            _log(
+                request,
+                action="fee.updated",
+                target="ListingFeeRule",
+                target_id=instance.id,
+                details=(
+                    f"Updated listing fee rule: {instance.name or instance.category_slug or '—'} "
+                    f"({diff})"
+                ),
+            )
+
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    # ══════════════════════════════════════════════════════════
+    # DESTROY — log fee.deleted
+    # ══════════════════════════════════════════════════════════
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        rule_id = instance.id
+        rule_name = (
+            instance.name
+            or instance.category_slug
+            or getattr(instance, "category_id", None)
+            or "—"
+        )
+
+        response = super().destroy(request, *args, **kwargs)
+
+        from rest_framework import status as drf_status
+        if response.status_code in (
+            drf_status.HTTP_204_NO_CONTENT,
+            drf_status.HTTP_200_OK,
+        ):
+            _log(
+                request,
+                action="fee.deleted",
+                target="ListingFeeRule",
+                target_id=rule_id,
+                details=f"Deleted listing fee rule: {rule_name}",
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # HELPERS
+    # ══════════════════════════════════════════════════════════
+    @staticmethod
+    def _snapshot(instance):
+        """Chukua snapshot ya fields za fee kwa diff."""
+        return {
+            "fee_mode": getattr(instance, "fee_mode", None),
+            "flat_fee": str(getattr(instance, "flat_fee", "") or ""),
+            "percentage": str(getattr(instance, "percentage", "") or ""),
+            "min_price": str(getattr(instance, "min_price", "") or ""),
+            "max_price": str(getattr(instance, "max_price", "") or ""),
+            "is_active": bool(getattr(instance, "is_active", True)),
+        }
+
+    @staticmethod
+    def _diff(old, new):
+        """Rudisha mabadiliko kama string fupi."""
+        changes = []
+        for key in old:
+            if old[key] != new[key]:
+                changes.append(f"{key}: {old[key]} → {new[key]}")
+        return ", ".join(changes) if changes else "no change"

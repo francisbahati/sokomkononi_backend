@@ -38,6 +38,27 @@ from .services.notifications import (
 )
 
 
+# ============================================================
+# AUDIT LOG HELPER
+# ============================================================
+def _log(request, action, target="", target_id=None, details=""):
+    """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=target,
+            target_id=target_id,
+            details=details,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to write audit log: %s", action,
+        )
+
+
 @extend_schema_view(
     list=extend_schema(responses={200: DealRoomListSerializer(many=True)}),
     retrieve=extend_schema(responses={200: DealRoomDetailSerializer}),
@@ -606,7 +627,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
 
     # ========================================================
-    # CANCEL — POST
+    # CANCEL — POST (na LOG)
+    # Admin anaye-cancel dispute ana-logiwa.
     # ========================================================
     @extend_schema(
         request=DealRoomCancelSerializer,
@@ -654,6 +676,20 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             status=NegotiationOffer.Status.CANCELLED,
             updated_at=timezone.now(),
         )
+
+        # ⬇️ LOG: admin actions pekee (staff)
+        if request.user.is_staff:
+            _log(
+                request,
+                action="dispute.resolved",
+                target="DealRoom",
+                target_id=deal_room.id,
+                details=(
+                    f"Admin cancelled Deal Room #{deal_room.id} "
+                    f"(listing: {deal_room.listing.title}). "
+                    f"Reason: {cancellation_reason or '—'}"
+                ),
+            )
 
         transaction.on_commit(
             lambda: notify_deal_room_cancelled(

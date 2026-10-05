@@ -32,6 +32,26 @@ class IsAdminUser(permissions.BasePermission):
         )
 
 
+# ============================================================
+# AUDIT LOG HELPER
+# ============================================================
+def _log(request, action, target="", target_id=None, details=""):
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=target,
+            target_id=target_id,
+            details=details,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to write audit log: %s", action,
+        )
+
+
 class FinancialDashboardView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -87,7 +107,6 @@ class RevenueReportView(APIView):
 
         records = get_revenue_records(period=period, source=source)
 
-        # Cap the response — paginate further if needed.
         try:
             limit = min(int(request.query_params.get("limit", 500)), 2000)
         except ValueError:
@@ -115,16 +134,12 @@ class MyTransactionsPagination(PageNumberPagination):
 class MyTransactionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    @extend_schema(
-        responses=MyTransactionSerializer(many=True),
-    )
+    @extend_schema(responses=MyTransactionSerializer(many=True))
     def get(self, request):
         user = request.user
         records = []
 
-        # ══════════════════════════════════════════════════════════
-        # 1. LISTING FEES
-        # ══════════════════════════════════════════════════════════
+        # LISTING FEES
         for item in ListingFee.objects.filter(
             seller=user,
         ).select_related("listing").order_by("-created_at"):
@@ -145,9 +160,7 @@ class MyTransactionsView(APIView):
                 "created_at": item.created_at,
             })
 
-        # ══════════════════════════════════════════════════════════
-        # 2. BOOSTS
-        # ══════════════════════════════════════════════════════════
+        # BOOSTS
         for item in ListingBoost.objects.filter(
             seller=user,
         ).select_related("listing", "package").order_by("-created_at"):
@@ -168,9 +181,7 @@ class MyTransactionsView(APIView):
                 "created_at": item.created_at,
             })
 
-        # ══════════════════════════════════════════════════════════
-        # 3. RESERVATIONS
-        # ══════════════════════════════════════════════════════════
+        # RESERVATIONS
         for item in Reservation.objects.filter(
             transaction__buyer=user,
         ).select_related(
@@ -194,9 +205,7 @@ class MyTransactionsView(APIView):
                 "created_at": item.created_at,
             })
 
-        # ══════════════════════════════════════════════════════════
-        # 4. BUNDLE PURCHASES — MPYA
-        # ══════════════════════════════════════════════════════════
+        # BUNDLE PURCHASES
         from apps.bundles.models import BundlePurchase
 
         for item in BundlePurchase.objects.filter(
@@ -242,9 +251,6 @@ class MyTransactionsView(APIView):
                 "credits": credits,
             })
 
-        # ══════════════════════════════════════════════════════════
-        # SORT + PAGINATE
-        # ══════════════════════════════════════════════════════════
         records.sort(key=lambda r: r["created_at"], reverse=True)
 
         paginator = MyTransactionsPagination()
@@ -274,14 +280,11 @@ class MyTransactionsView(APIView):
 
 
 # ============================================================
-# REVENUE — SUCCESS FEE CONFIG VIEW (Singleton)
+# SUCCESS FEE CONFIG VIEW (Singleton) — na LOG
 # ============================================================
-
 class SuccessFeeConfigView(APIView):
     """
-    Singleton viewset — SuccessFeeConfig moja (pk=1).
-
-    GET   /api/finance/success-fee-config/         (any logged-in user)
+    GET   /api/finance/success-fee-config/
     PATCH /api/finance/success-fee-config/         (admin only)
     POST  /api/finance/success-fee-config/toggle/  (admin only)
     """
@@ -314,38 +317,77 @@ class SuccessFeeConfigView(APIView):
 
     def patch(self, request):
         obj = self.get_object()
+        old_snapshot = self._snapshot(obj)
+
         serializer = SuccessFeeConfigSerializer(
             obj, data=request.data, partial=True,
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
+
+        new_snapshot = self._snapshot(obj)
+        diff = self._diff(old_snapshot, new_snapshot)
+        if diff != "no change":
+            _log(
+                request,
+                action="fee.updated",
+                target="SuccessFeeConfig",
+                target_id=obj.id,
+                details=f"Updated success fee config ({diff})",
+            )
+
         return Response(serializer.data)
 
     def post(self, request):
         if request.path.endswith("/toggle/"):
             obj = self.get_object()
+            old_state = bool(obj.is_enabled)
             obj.is_enabled = not obj.is_enabled
             obj.save(update_fields=["is_enabled", "updated_at"])
+            new_state = bool(obj.is_enabled)
+
+            if old_state != new_state:
+                _log(
+                    request,
+                    action="fee.updated",
+                    target="SuccessFeeConfig",
+                    target_id=obj.id,
+                    details=(
+                        f"Success fee toggle: "
+                        f"is_enabled: {old_state} → {new_state}"
+                    ),
+                )
+
             return Response({
                 "key": obj.key,
                 "is_enabled": obj.is_enabled,
             })
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
+    @staticmethod
+    def _snapshot(obj):
+        return {
+            "percentage": str(getattr(obj, "percentage", "") or ""),
+            "min_fee": str(getattr(obj, "min_fee", "") or ""),
+            "max_fee": str(getattr(obj, "max_fee", "") or ""),
+            "is_enabled": bool(getattr(obj, "is_enabled", True)),
+        }
+
+    @staticmethod
+    def _diff(old, new):
+        changes = []
+        for key in old:
+            if old[key] != new[key]:
+                changes.append(f"{key}: {old[key]} → {new[key]}")
+        return ", ".join(changes) if changes else "no change"
+
 
 # ============================================================
-# REVENUE — SYSTEM FEATURE TOGGLE VIEWSET
+# SYSTEM FEATURE TOGGLE VIEWSET — na LOG
 # ============================================================
-
 class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
     """
-    Toggles za jumla.
-
-    GET    /api/finance/toggles/                      list
-    GET    /api/finance/toggles/{key}/                retrieve
-    PATCH  /api/finance/toggles/{key}/                partial update (is_enabled)
-    POST   /api/finance/toggles/{key}/toggle/         toggle (or set)
-    POST   /api/finance/toggles/bulk-toggle/          bulk toggle
+    Toggles za jumla (mfano listing_fee_enabled, boost_fee, n.k.)
     """
     queryset = SystemFeatureToggle.objects.all()
     serializer_class = SystemFeatureToggleSerializer
@@ -355,22 +397,51 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
 
     def partial_update(self, request, key=None):
         toggle = self.get_object()
+        old_state = bool(toggle.is_enabled)
+
         if "is_enabled" in request.data:
             toggle.is_enabled = bool(request.data["is_enabled"])
             toggle.save(update_fields=["is_enabled", "updated_at"])
+
+        new_state = bool(toggle.is_enabled)
+        if old_state != new_state:
+            _log(
+                request,
+                action="fee.updated",
+                target="SystemFeatureToggle",
+                target_id=toggle.id,
+                details=(
+                    f"Feature toggle '{toggle.key}': "
+                    f"is_enabled: {old_state} → {new_state}"
+                ),
+            )
+
         return Response(SystemFeatureToggleSerializer(toggle).data)
 
     @action(detail=True, methods=["post"])
     def toggle(self, request, key=None):
         toggle = self.get_object()
-        # Explicit value wins over flip.
+        old_state = bool(toggle.is_enabled)
+
         if "is_enabled" in request.data:
             toggle.is_enabled = bool(request.data["is_enabled"])
         else:
             toggle.is_enabled = not toggle.is_enabled
         toggle.save(update_fields=["is_enabled", "updated_at"])
 
-        # Return the full toggles payload so the frontend can replace its cache.
+        new_state = bool(toggle.is_enabled)
+        if old_state != new_state:
+            _log(
+                request,
+                action="fee.updated",
+                target="SystemFeatureToggle",
+                target_id=toggle.id,
+                details=(
+                    f"Feature toggle '{toggle.key}': "
+                    f"is_enabled: {old_state} → {new_state}"
+                ),
+            )
+
         from .models import SystemFeatureToggle
         from .serializers import SystemFeatureToggleSerializer
         return Response({
@@ -383,17 +454,28 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bulk-toggle")
     def bulk_toggle(self, request):
-        """
-        POST /api/finance/toggles/bulk-toggle/
-        Body: { listing_fee: true, boost_fee: false, ... }
-        """
         updates = request.data
         updated = []
         for key, value in updates.items():
             try:
                 toggle = SystemFeatureToggle.objects.get(key=key)
+                old_state = bool(toggle.is_enabled)
                 toggle.is_enabled = bool(value)
                 toggle.save(update_fields=["is_enabled", "updated_at"])
+                new_state = bool(toggle.is_enabled)
+
+                if old_state != new_state:
+                    _log(
+                        request,
+                        action="fee.updated",
+                        target="SystemFeatureToggle",
+                        target_id=toggle.id,
+                        details=(
+                            f"Bulk toggle '{toggle.key}': "
+                            f"is_enabled: {old_state} → {new_state}"
+                        ),
+                    )
+
                 updated.append({
                     "key": key,
                     "is_enabled": toggle.is_enabled,
@@ -403,15 +485,7 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
         return Response({"updated": updated})
 
 
-# ============================================================
-# REVENUE — OVERVIEW (Bulk)
-# ============================================================
-
 class RevenueOverviewView(APIView):
-    """
-    GET /api/finance/revenue-overview/
-    Returns everything in one go.
-    """
     permission_classes = [IsAdminUser]
 
     def get(self, request):

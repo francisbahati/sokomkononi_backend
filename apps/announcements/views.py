@@ -19,6 +19,27 @@ from .serializers import (
 )
 
 
+# ============================================================
+# AUDIT LOG HELPER
+# ============================================================
+def _log(request, action, target="", target_id=None, details=""):
+    """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=target,
+            target_id=target_id,
+            details=details,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to write audit log: %s", action,
+        )
+
+
 class AnnouncementViewSet(viewsets.GenericViewSet):
     """
         GET     /api/announcements/          public: sent ones; admin: all
@@ -77,6 +98,18 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
             sent=d.get("sent", True),
             created_by=request.user,
         )
+
+        _log(
+            request,
+            action="announcement.sent",
+            target="Announcement",
+            target_id=obj.id,
+            details=(
+                f"Announcement: {obj.title} "
+                f"(type={obj.type}, sent={obj.sent})"
+            ),
+        )
+
         return Response(
             AnnouncementSerializer(obj).data,
             status=status.HTTP_201_CREATED,
@@ -84,5 +117,18 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
 
     def destroy(self, request, pk=None):
         obj = self.get_object()
+
+        obj_id = obj.id
+        obj_title = obj.title
+
         obj.delete()
+
+        _log(
+            request,
+            action="announcement.deleted",
+            target="Announcement",
+            target_id=obj_id,
+            details=f"Deleted announcement: {obj_title}",
+        )
+
         return Response(status=status.HTTP_204_NO_CONTENT)

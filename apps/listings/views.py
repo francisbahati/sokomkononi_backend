@@ -410,15 +410,24 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     # ═══════════════════════════════════════════════════════════════════
     # B-7: PUBLISH (no-fee path)
     # ═══════════════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════════════
+    # B-7: PUBLISH
+    # ═══════════════════════════════════════════════════════════════════
     @action(
-        detail=True, methods=["post"], url_path="publish",
+        detail=True,
+        methods=["post"],
+        url_path="publish",
         permission_classes=[IsVerifiedUser, IsOwnerOrAdmin],
     )
     def publish(self, request, pk=None):
         """
         POST /api/listings/{id}/publish/
-        Moves a DRAFT to PENDING_APPROVAL when fees are disabled.
+        Moves a DRAFT to PENDING_APPROVAL if no fee is required,
+        otherwise to PENDING_PAYMENT.
         """
+        from .services.listing_fee import create_listing_fee
+        from .services.listing_moderation import _is_listing_fee_required_for
+
         listing = self.get_object()
         self.check_object_permissions(request, listing)
 
@@ -431,6 +440,32 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Angalia kama fee inahitajika kwa category hii
+        fee_required = _is_listing_fee_required_for(listing)
+
+        if fee_required:
+            # Unda ListingFee record (itakuwa PENDING — muuzaji atalipa)
+            try:
+                create_listing_fee(listing)
+            except Exception as exc:
+                logger.warning(
+                    "[listings] create_listing_fee failed for %s: %s",
+                    listing.id, exc,
+                )
+
+            listing.status = Listing.Status.PENDING_PAYMENT
+            listing.save(update_fields=["status", "updated_at"])
+
+            return Response(
+                {
+                    "detail": "Malipo ya ada yanahitajika kabla ya kuwasilisha.",
+                    "payment_required": True,
+                    "listing_id": listing.id,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # Fee haihitajiki — nenda moja kwa moja PENDING_APPROVAL
         listing.status = Listing.Status.PENDING_APPROVAL
         listing.save(update_fields=["status", "updated_at"])
 
@@ -438,7 +473,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             ListingDetailSerializer(listing, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
-
     # ═══════════════════════════════════════════════════════════════════
     # B-8: DISAPPROVE (admin only)
     # ═══════════════════════════════════════════════════════════════════
@@ -500,14 +534,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
     # ========================================================================
     # DESTROY - soft delete (default) au hard delete (admin)
-    #
-    # SASISHO:
-    #   - Tumia `_base_manager` ili kuona rows zote (hata zilizo
-    #     soft-deleted) kwa sababu PROTECT inaangalia DB rows, si
-    #     manager view.
-    #   - Usimeze exceptions. Kama kitu kimeshindikana, rudisha
-    #     400 na uache operesheni isimame - usiendelee hadi
-    #     listing.hard_delete() ambayo itatupa 500.
     #   - Catch ProtectedError mwisho kama safety net, na
     #     tumia transaction.atomic() kuzuia partial deletes.
     # ========================================================================

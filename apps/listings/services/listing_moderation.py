@@ -5,9 +5,71 @@ from rest_framework.exceptions import ValidationError
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
-from ..models import Listing, ListingFee
+from ..models import Listing, ListingFee, ListingFeeRule
 
 
+# ═════════════════════════════════════════════════════════════════
+# HELPER: Angalia kama fee inahitajika kwa listing hii
+# ═════════════════════════════════════════════════════════════════
+def _is_listing_fee_required_for(listing):
+    """
+    Rudisha True kama fee inahitajika kwa category ya listing hii.
+
+    Kanuni:
+      1. Kama category ina ListingFeeRule active → fee inahitajika
+      2. Kama hakuna rule yoyote active → fee HAIHITAJIKI (bure)
+      3. Kama rule.flat_fee == 0 na rule.percentage == 0 → fee HAIHITAJIKI
+    """
+    if not listing.category_id:
+        # Listing haina category — kwa kawaida fee inahitajika
+        return True
+
+    category = listing.category
+    category_slug = getattr(category, "slug", None)
+
+    # Tafuta rule active ya category hii
+    rule = None
+
+    if category is not None:
+        rule = (
+            ListingFeeRule.objects
+            .filter(category=category, is_active=True, is_deleted=False)
+            .order_by("priority")
+            .first()
+        )
+
+    if not rule and category_slug:
+        rule = (
+            ListingFeeRule.objects
+            .filter(
+                category_slug=category_slug,
+                is_active=True,
+                is_deleted=False,
+            )
+            .order_by("priority")
+            .first()
+        )
+
+    if not rule:
+        # Hakuna rule — fee haihitajiki
+        return False
+
+    # Rule ipo — angalia kama bei ni 0
+    flat = float(rule.flat_fee or 0)
+    pct = float(rule.percentage or 0)
+
+    if rule.fee_mode == "FLAT" and flat == 0:
+        return False
+
+    if rule.fee_mode == "PERCENTAGE" and pct == 0:
+        return False
+
+    return True
+
+
+# ═════════════════════════════════════════════════════════════════
+# APPROVE LISTING
+# ═════════════════════════════════════════════════════════════════
 @transaction.atomic
 def approve_listing(listing_id, admin_user):
     if not admin_user or not admin_user.is_authenticated:
@@ -29,21 +91,33 @@ def approve_listing(listing_id, admin_user):
             "Tangazo hili halipo kwenye hali ya kusubiri idhini."
         )
 
-    try:
-        listing_fee = (
-            ListingFee.objects
-            .select_for_update()
-            .get(listing=listing)
-        )
-    except ListingFee.DoesNotExist:
-        raise ValidationError("Tangazo hili halina ada ya tangazo.")
+    # ─────────────────────────────────────────────────────────
+    # Angalia kama fee inahitajika kwa category hii
+    # ─────────────────────────────────────────────────────────
+    fee_required = _is_listing_fee_required_for(listing)
 
-    if listing_fee.payment_status != ListingFee.PaymentStatus.PAID:
-        raise ValidationError(
-            "Tangazo hili haliwezi kuidhinishwa kwa sababu ada ya "
-            "tangazo haijalipwa."
-        )
+    if fee_required:
+        try:
+            listing_fee = (
+                ListingFee.objects
+                .select_for_update()
+                .get(listing=listing)
+            )
+        except ListingFee.DoesNotExist:
+            raise ValidationError(
+                "Tangazo hili halina ada ya tangazo. "
+                "Tafadhali hakikisha muuzaji amelipa ada kwanza."
+            )
 
+        if listing_fee.payment_status != ListingFee.PaymentStatus.PAID:
+            raise ValidationError(
+                "Tangazo hili haliwezi kuidhinishwa kwa sababu ada ya "
+                "tangazo haijalipwa."
+            )
+
+    # ─────────────────────────────────────────────────────────
+    # Endelea na approve
+    # ─────────────────────────────────────────────────────────
     listing.status = Listing.Status.AVAILABLE
     listing.approved_by = admin_user
     listing.approved_at = timezone.now()
@@ -81,6 +155,9 @@ def approve_listing(listing_id, admin_user):
     return listing
 
 
+# ═════════════════════════════════════════════════════════════════
+# REJECT LISTING
+# ═════════════════════════════════════════════════════════════════
 @transaction.atomic
 def reject_listing(listing_id, admin_user, rejection_reason):
     if not admin_user or not admin_user.is_authenticated:

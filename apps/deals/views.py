@@ -77,7 +77,13 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [permissions.IsAuthenticated(), IsVerifiedDealUser()]
-        if self.action in ["retrieve", "offer", "accept_offer", "cancel"]:
+        if self.action in ["retrieve", "offer", "accept_offer", "cancel", "messages_create"]:
+            return [
+                permissions.IsAuthenticated(),
+                IsVerifiedDealUser(),
+                IsDealParticipant(),
+            ]
+        if self.action == "messages_list":
             return [
                 permissions.IsAuthenticated(),
                 IsVerifiedDealUser(),
@@ -99,7 +105,12 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         """
         if "status" in request.data:
             return Response(
-                {"detail": "Hali ya Deal Room inabadilishwa kwa endpoints maalum pekee (accept-offer / cancel)."},
+                {
+                    "detail": (
+                        "Hali ya Deal Room inabadilishwa kwa endpoints "
+                        "maalum pekee (accept-offer / cancel)."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return super().update(request, *args, **kwargs)
@@ -138,7 +149,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             pass
 
         response_serializer = DealRoomDetailSerializer(
-            deal_room, context={"request": request},
+            deal_room,
+            context={"request": request, "deal_room": deal_room},
         )
         return Response(
             response_serializer.data, status=status.HTTP_201_CREATED,
@@ -147,7 +159,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         deal_room = self.get_object()
         serializer = self.get_serializer_class()(
-            deal_room, context={"request": request},
+            deal_room,
+            context={"request": request, "deal_room": deal_room},
         )
         return Response(serializer.data)
 
@@ -173,6 +186,9 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
+    # ========================================================
+    # MESSAGES — GET (list)
+    # ========================================================
     @extend_schema(
         responses={200: None},
     )
@@ -241,6 +257,77 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             for o in offers
         ])
 
+    # ========================================================
+    # MESSAGES — POST (create)
+    # ========================================================
+    @extend_schema(request=None, responses={201: None})
+    @action(
+        detail=True, methods=["post"],
+        url_path="messages", url_name="messages-create",
+    )
+    def messages_create(self, request, pk=None):
+        """
+        POST /api/deals/{id}/messages/ — send a chat message.
+
+        Creates the linked Conversation on first use, then appends
+        a Message. Returns the created message in the same shape as
+        messages_list so the frontend can update the bubble in place.
+        """
+        deal_room = self.get_object()
+
+        text = (request.data.get("text") or "").strip()
+        if not text:
+            return Response(
+                {"detail": "Ujumbe hauwezi kuwa tupu."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from apps.messaging.models import Conversation, Message
+        except ImportError:
+            return Response(
+                {"detail": "Messaging app haipatikani."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        with transaction.atomic():
+            conv = (
+                Conversation.objects
+                .select_for_update(of=("self",))
+                .filter(
+                    listing=deal_room.listing,
+                    buyer=deal_room.buyer,
+                    seller=deal_room.seller,
+                )
+                .first()
+            )
+            if not conv:
+                conv = Conversation.objects.create(
+                    listing=deal_room.listing,
+                    buyer=deal_room.buyer,
+                    seller=deal_room.seller,
+                )
+
+            msg = Message.objects.create(
+                conversation=conv,
+                sender=request.user,
+                text=text,
+            )
+
+        return Response(
+            {
+                "id": msg.id,
+                "sender_id": msg.sender_id,
+                "sender_name": getattr(request.user, "name", ""),
+                "text": msg.text,
+                "created_at": msg.created_at,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ========================================================
+    # PAYMENT PROOF — GET
+    # ========================================================
     @extend_schema(responses={200: None})
     @action(
         detail=True, methods=["get"],
@@ -249,14 +336,15 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def payment_proof(self, request, pk=None):
         """GET /api/deals/{id}/payment-proof/ — proof from the linked transaction."""
         deal_room = self.get_object()
-        try:
-            txn = deal_room.transaction
-        except Exception:
+        txn = getattr(deal_room, "transaction", None)
+        if not txn:
             return Response({"detail": "Transaction haipo."}, status=404)
 
         proof = getattr(txn, "final_payment_proof", None)
         if not proof:
-            return Response({"detail": "Ushahidi wa malipo haupo."}, status=404)
+            return Response(
+                {"detail": "Ushahidi wa malipo haupo."}, status=404,
+            )
 
         url = None
         try:
@@ -273,6 +361,9 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             "confirmed_at": txn.seller_confirmed_at,
         })
 
+    # ========================================================
+    # OFFER — POST (create)
+    # ========================================================
     @extend_schema(
         request=NegotiationOfferCreateSerializer,
         responses={201: NegotiationOfferSerializer},
@@ -358,11 +449,15 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
         return Response(
             NegotiationOfferSerializer(
-                new_offer, context={"request": request, "deal_room": deal_room},
+                new_offer,
+                context={"request": request, "deal_room": deal_room},
             ).data,
             status=status.HTTP_201_CREATED,
         )
 
+    # ========================================================
+    # ACCEPT OFFER — POST
+    # ========================================================
     @extend_schema(
         request=DealRoomAcceptOfferSerializer,
         responses={200: DealRoomDetailSerializer},
@@ -504,11 +599,15 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
         return Response(
             DealRoomDetailSerializer(
-                deal_room, context={"request": request},
+                deal_room,
+                context={"request": request, "deal_room": deal_room},
             ).data,
             status=status.HTTP_200_OK,
         )
 
+    # ========================================================
+    # CANCEL — POST
+    # ========================================================
     @extend_schema(
         request=DealRoomCancelSerializer,
         responses={200: DealRoomDetailSerializer},
@@ -566,7 +665,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
         return Response(
             DealRoomDetailSerializer(
-                deal_room, context={"request": request},
+                deal_room,
+                context={"request": request, "deal_room": deal_room},
             ).data,
             status=status.HTTP_200_OK,
         )

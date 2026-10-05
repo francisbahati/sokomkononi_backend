@@ -8,6 +8,9 @@ from apps.listings.models import Listing
 from .models import DealRoom, NegotiationOffer
 
 
+# ============================================================
+# LISTING
+# ============================================================
 class DealListingSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
 
@@ -20,13 +23,55 @@ class DealListingSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+# ============================================================
+# USER — na `phone` yenye masharti
+# Namba ya simu inaonekana TU:
+#   - kwa mshiriki wa deal (buyer au seller)
+#   - baada ya Reservation kulipwa (au zaidi)
+# ============================================================
 class DealUserSerializer(serializers.ModelSerializer):
+    phone = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ["id", "name"]
+        fields = ["id", "name", "phone"]
         read_only_fields = fields
 
+    def get_phone(self, obj):
+        request = self.context.get("request")
+        deal_room = self.context.get("deal_room")
 
+        # Lazima kuwe na request + deal_room
+        if not request or not request.user.is_authenticated:
+            return None
+        if not deal_room:
+            return None
+
+        # Mwombaji LAZIMA awe mshiriki wa deal hii
+        if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
+            return None
+
+        # Namba ya simu inaonekana baada ya Reservation kulipwa
+        try:
+            from apps.transactions.models import Transaction
+            txn = deal_room.transaction
+        except Exception:
+            return None
+
+        if txn.status not in [
+            Transaction.Status.RESERVED,
+            Transaction.Status.INSPECTION,
+            Transaction.Status.READY_FOR_FINAL_PAYMENT,
+            Transaction.Status.COMPLETED,
+        ]:
+            return None
+
+        return getattr(obj, "phone", None)
+
+
+# ============================================================
+# OFFERS
+# ============================================================
 class NegotiationOfferSerializer(serializers.ModelSerializer):
     offered_by_name = serializers.CharField(
         source="offered_by.name", read_only=True,
@@ -97,6 +142,7 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
                 "Deal Room hii haipokei offers mpya."
             )
 
+        # CHAGUO A: buyer NA seller wote wanaweza kutuma offers
         if request.user.id not in [
             deal_room.buyer_id,
             deal_room.seller_id,
@@ -135,6 +181,9 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
         return attrs
 
 
+# ============================================================
+# DEAL ROOM LIST
+# ============================================================
 class DealRoomListSerializer(serializers.ModelSerializer):
     listing_title = serializers.CharField(
         source="listing.title", read_only=True,
@@ -167,6 +216,9 @@ class DealRoomListSerializer(serializers.ModelSerializer):
         ).data
 
 
+# ============================================================
+# DEAL ROOM DETAIL
+# ============================================================
 class DealRoomDetailSerializer(serializers.ModelSerializer):
     listing = DealListingSerializer(read_only=True)
     buyer = DealUserSerializer(read_only=True)
@@ -191,15 +243,12 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_transaction_id(self, obj):
-        try:
-            return obj.transaction.id
-        except Exception:
-            return None
+        txn = getattr(obj, "transaction", None)
+        return txn.id if txn else None
 
     def get_payment_proof(self, obj):
-        try:
-            txn = obj.transaction
-        except Exception:
+        txn = getattr(obj, "transaction", None)
+        if not txn:
             return None
         proof = getattr(txn, "final_payment_proof", None)
         if not proof:
@@ -229,6 +278,9 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
         ).data
 
 
+# ============================================================
+# DEAL ROOM CREATE
+# ============================================================
 class DealRoomCreateSerializer(serializers.Serializer):
     listing_id = serializers.IntegerField(required=True)
 
@@ -286,6 +338,9 @@ class DealRoomCreateSerializer(serializers.Serializer):
         )
 
 
+# ============================================================
+# DEAL ROOM CANCEL
+# ============================================================
 class DealRoomCancelSerializer(serializers.Serializer):
     reason = serializers.CharField(
         required=False, allow_blank=True, trim_whitespace=True, max_length=500,
@@ -295,6 +350,10 @@ class DealRoomCancelSerializer(serializers.Serializer):
         return value.strip()
 
 
+# ============================================================
+# ACCEPT OFFER — CHAGUO A
+# Yeyote aliye UPANDE WA PILI wa offer anaweza kukubali.
+# ============================================================
 class DealRoomAcceptOfferSerializer(serializers.Serializer):
     offer_id = serializers.IntegerField(required=True)
 
@@ -318,11 +377,13 @@ class DealRoomAcceptOfferSerializer(serializers.Serializer):
                 "Ni lazima uwe umeingia kwenye akaunti."
             )
 
+        # Lazima awe mshiriki wa deal
         if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
             raise serializers.ValidationError(
                 "Huruhusiwi kukubali offer kwenye Deal Room hii."
             )
 
+        # Hauwezi kukubali offer yako mwenyewe
         if offer.offered_by_id == request.user.id:
             raise serializers.ValidationError(
                 "Huwezi kukubali offer yako mwenyewe."

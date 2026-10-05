@@ -50,6 +50,10 @@ _SUCCESS_HANDLERS = {
         "apps.finance.services_success_fee",
         "mark_success_fee_paid_from_webhook",
     ),
+    "RSV": (
+        "apps.transactions.services.reservation",
+        "mark_reservation_paid_from_webhook",
+    ),
 }
 
 OK = "ok"

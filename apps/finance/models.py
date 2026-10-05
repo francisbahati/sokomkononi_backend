@@ -75,56 +75,6 @@ class SuccessFeeConfig(models.Model):
         return f"Success Fee — {self.percentage}% (min TZS {self.min_fee})"
 
 
-class SystemFeatureToggle(models.Model):
-    """
-    Toggles za jumla kwa mfumo:
-    - listing_fee
-    - reservation_fee
-    - boost_fee
-    - leading_fee
-    - advertisement_fee
-    - success_fee
-    """
-    key = models.CharField(
-        max_length=50,
-        unique=True,
-        verbose_name="Ufunguo",
-    )
-    label_sw = models.CharField(
-        max_length=100,
-        verbose_name="Jina (Kiswahili)",
-    )
-    label_en = models.CharField(
-        max_length=100,
-        blank=True,
-        verbose_name="Jina (Kiingereza)",
-    )
-    desc_sw = models.TextField(
-        blank=True,
-        verbose_name="Maelezo (Kiswahili)",
-    )
-    desc_en = models.TextField(
-        blank=True,
-        verbose_name="Maelezo (Kiingereza)",
-    )
-    is_enabled = models.BooleanField(
-        default=True,
-        verbose_name="Inatumika",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "system_feature_toggles"
-        verbose_name = "Kipengele cha Mfumo"
-        verbose_name_plural = "Vipengele vya Mfumo"
-        ordering = ["key"]
-
-    def __str__(self):
-        status = "ON" if self.is_enabled else "OFF"
-        return f"{self.key} — {status}"
-
-
 class SuccessFeePayment(models.Model):
     """
     One attempt to pay the success fee (transactions report download).
@@ -133,7 +83,7 @@ class SuccessFeePayment(models.Model):
     by the FimiPay webhook (or by a server-side status check against
     FimiPay). The download endpoint trusts this table, never the client.
 
-    Financial record - never deleted.
+    Financial record — never deleted.
     """
 
     class PaymentStatus(models.TextChoices):
@@ -184,4 +134,57 @@ class SuccessFeePayment(models.Model):
         ]
 
     def __str__(self):
-        return f"SuccessFeePayment #{self.pk} - {self.user_id} - {self.payment_status}"
+        return (
+            f"SuccessFeePayment #{self.pk} - "
+            f"{self.user_id} - {self.payment_status}"
+        )
+
+
+class SystemFeatureToggle(models.Model):
+    """
+    Toggles za jumla kwa mfumo:
+    - listing_fee
+    - reservation_fee
+    - boost_fee
+    - leading_fee
+    - advertisement_fee
+    - success_fee
+    """
+    key = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name="Ufunguo",
+    )
+    label_sw = models.CharField(
+        max_length=100,
+        verbose_name="Jina (Kiswahili)",
+    )
+    label_en = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Jina (Kiingereza)",
+    )
+    desc_sw = models.TextField(
+        blank=True,
+        verbose_name="Maelezo (Kiswahili)",
+    )
+    desc_en = models.TextField(
+        blank=True,
+        verbose_name="Maelezo (Kiingereza)",
+    )
+    is_enabled = models.BooleanField(
+        default=True,
+        verbose_name="Inatumika",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "system_feature_toggles"
+        verbose_name = "Kipengele cha Mfumo"
+        verbose_name_plural = "Vipengele vya Mfumo"
+        ordering = ["key"]
+
+    def __str__(self):
+        status = "ON" if self.is_enabled else "OFF"
+        return f"{self.key} — {status}"

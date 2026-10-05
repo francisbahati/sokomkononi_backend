@@ -8,6 +8,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
     sender = serializers.SerializerMethodField()
     text = serializers.SerializerMethodField()
     at = serializers.DateTimeField(source="created_at", read_only=True)
+    offerAmount = serializers.SerializerMethodField()
 
     class Meta:
         model = NegotiationOffer
@@ -27,10 +28,8 @@ class AdminOfferSerializer(serializers.ModelSerializer):
     def get_text(self, obj):
         return obj.message or ""
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data["offerAmount"] = float(instance.amount)
-        return data
+    def get_offerAmount(self, obj):
+        return float(obj.amount)
 
 
 class AdminDealRoomSerializer(serializers.ModelSerializer):
@@ -46,12 +45,6 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     reservationFee = serializers.SerializerMethodField()
     reservationHours = serializers.SerializerMethodField()
     reservationMethod = serializers.SerializerMethodField()
-
-    def get_reservationMethod(self, obj):
-        try:
-            return obj.transaction.reservation.payment_method
-        except Exception:
-            return None
     reservationExpiresAt = serializers.SerializerMethodField()
     paymentProof = serializers.SerializerMethodField()
     disputeNote = serializers.SerializerMethodField()
@@ -66,53 +59,67 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
 
+    # ── Helpers ────────────────────────────────────────────
+    def _txn(self, obj):
+        return getattr(obj, "transaction", None)
+
+    def _reservation(self, obj):
+        txn = self._txn(obj)
+        return getattr(txn, "reservation", None) if txn else None
+
+    # ── Current offer ──────────────────────────────────────
     def get_currentOffer(self, obj):
         latest = obj.offers.order_by("-created_at").first()
         if not latest:
-            return float(obj.agreed_price or obj.listing.price)
+            return float(obj.agreed_price) if obj.agreed_price else 0
         return float(latest.amount)
 
+    # ── Messages (offers as bubbles) ───────────────────────
     def get_messages(self, obj):
         return [
             AdminOfferSerializer(o, context={"deal_room": obj}).data
             for o in obj.offers.order_by("created_at")
         ]
 
+    # ── Reservation fields ─────────────────────────────────
     def get_reservationFee(self, obj):
-        try:
-            r = obj.transaction.reservation
-            return float(r.deposit_amount)
-        except Exception:
-            return None
+        r = self._reservation(obj)
+        return float(r.deposit_amount) if r else None
 
     def get_reservationHours(self, obj):
-        try:
-            return obj.transaction.reservation.duration_hours
-        except Exception:
-            return None
+        r = self._reservation(obj)
+        return r.duration_hours if r else None
+
+    def get_reservationMethod(self, obj):
+        r = self._reservation(obj)
+        return getattr(r, "payment_method", None) if r else None
 
     def get_reservationExpiresAt(self, obj):
-        try:
-            return obj.transaction.reservation.expires_at
-        except Exception:
-            return None
+        r = self._reservation(obj)
+        return r.expires_at if r else None
 
+    # ── Payment proof ──────────────────────────────────────
     def get_paymentProof(self, obj):
+        txn = self._txn(obj)
+        if not txn:
+            return None
+        proof = getattr(txn, "final_payment_proof", None)
+        if not proof:
+            return None
         try:
-            t = obj.transaction
-            if t.final_payment_proof:
-                return {
-                    "method": "Bank/Card",
-                    "reference": t.final_payment_reference or "",
-                    "submittedAt": t.final_payment_uploaded_at,
-                    "url": t.final_payment_proof.url,
-                }
+            url = proof.url
         except Exception:
-            pass
-        return None
+            url = None
+        return {
+            "method": "Bank/Card",
+            "reference": txn.final_payment_reference or "",
+            "submittedAt": txn.final_payment_uploaded_at,
+            "url": url,
+        }
 
+    # ── Dispute note ───────────────────────────────────────
     def get_disputeNote(self, obj):
-        try:
-            return obj.transaction.cancellation_reason or ""
-        except Exception:
+        txn = self._txn(obj)
+        if not txn:
             return ""
+        return txn.cancellation_reason or ""

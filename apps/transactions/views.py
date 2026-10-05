@@ -33,6 +33,7 @@ from .services.reservation import (
     create_reservation,
     expire_inspection_period,
     expire_reservation,
+    initiate_reservation_payment,
     start_inspection_period,
 )
 from .services.transaction import (
@@ -227,17 +228,48 @@ class TransactionViewSet(viewsets.GenericViewSet):
         if not reservation:
             raise ValidationError("Transaction hii haina Reservation.")
 
-        payment_reference = request.data.get("payment_reference", "")
-        reservation = confirm_reservation_payment(
-            reservation=reservation,
-            payment_reference=payment_reference,
-        )
+        # Idempotent: already paid (e.g. the fee is disabled, so the
+        # reservation was activated as soon as it was created).
+        if reservation.payment_status == Reservation.PaymentStatus.PAID:
+            return Response(
+                ReservationSerializer(
+                    reservation, context={"request": request},
+                ).data,
+                status=status.HTTP_200_OK,
+            )
 
+        payment_reference = (request.data.get("payment_reference") or "").strip()
+
+        # Credits, or manual confirmation by staff. Any other reference
+        # typed by a client is rejected by the service.
+        if payment_reference:
+            reservation = confirm_reservation_payment(
+                reservation=reservation,
+                payment_reference=payment_reference,
+                user=request.user,
+            )
+            return Response(
+                ReservationSerializer(
+                    reservation, context={"request": request},
+                ).data,
+                status=status.HTTP_200_OK,
+            )
+
+        # Default: FimiPay. The reservation is activated by the webhook
+        # once the payment succeeds.
+        data = initiate_reservation_payment(
+            reservation=reservation,
+            user=request.user,
+            payment_method=request.data.get("payment_method", "mobile"),
+            phone=request.data.get("phone", ""),
+        )
         return Response(
-            ReservationSerializer(
-                reservation, context={"request": request},
-            ).data,
-            status=status.HTTP_200_OK,
+            {
+                "reservation_id": reservation.id,
+                "payment_status": (data.get("payment_status") or "PENDING"),
+                "fimipay": data,
+            },
+            status=status.HTTP_201_CREATED,
         )
 
     @action(detail=True, methods=["post"], url_path="inspection")

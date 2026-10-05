@@ -66,8 +66,6 @@ class ListingImageSerializer(serializers.ModelSerializer):
 
 class ListingCategorySerializer(serializers.ModelSerializer):
     class Meta:
-        from apps.categories.models import Category
-
         model = Category
         fields = [
             "id",
@@ -99,7 +97,7 @@ class ListingListSerializer(serializers.ModelSerializer):
             "title",
             "price",
             "location",
-            "attributes",   # ⬅️ MPYA
+            "attributes",
             "status",
             "is_featured",
             "is_boosted",
@@ -330,7 +328,7 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "description",
             "price",
             "location",
-            "attributes",   # ⬅️ MPYA
+            "attributes",
             "status",
             "is_featured",
             "is_boosted",
@@ -379,6 +377,7 @@ class ListingDetailSerializer(serializers.ModelSerializer):
 
 # ============================================================================
 # LISTING WRITE
+# Kubali `category` AU `category_id` kutoka frontend.
 # ============================================================================
 
 class ListingWriteSerializer(serializers.ModelSerializer):
@@ -387,26 +386,40 @@ class ListingWriteSerializer(serializers.ModelSerializer):
         required=True,
         write_only=True,
     )
-    # Defensive alias — some clients still send `category_id`.
-    category_id = serializers.PrimaryKeyRelatedField(
-        queryset=Category.objects.filter(is_active=True),
-        required=False,
-        allow_null=True,
-        write_only=True,
-        source="category",
-    )
 
     class Meta:
         model = Listing
         fields = [
             "category",
-            "category_id",
             "title",
             "description",
             "price",
             "location",
             "attributes",
         ]
+
+    # ---------------------------------------------------------------
+    # NORMALIZE INPUT
+    # Kubali `category_id` kama alias ya `category` (frontend
+    # inatuma `category_id`, DRF inatarajia `category`).
+    # ---------------------------------------------------------------
+    def to_internal_value(self, data):
+        # Copy data ili tusi-mutate original request
+        try:
+            normalized = data.copy()
+        except AttributeError:
+            # QueryDict au dict
+            normalized = dict(data)
+
+        # Kama `category_id` imetumwa lakini `category` haipo,
+        # badilisha.
+        if "category_id" in normalized and "category" not in normalized:
+            normalized["category"] = normalized["category_id"]
+
+        # Ondoa `category_id` ili DRF isilalamike (haipo kwenye fields)
+        normalized.pop("category_id", None)
+
+        return super().to_internal_value(normalized)
 
     def validate_title(self, value):
         value = value.strip()
@@ -587,7 +600,7 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
             "description",
             "price",
             "location",
-            "attributes",   # ⬅️ MPYA
+            "attributes",
             "status",
             "seller",
             "seller_name",

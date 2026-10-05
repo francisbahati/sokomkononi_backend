@@ -3,45 +3,24 @@ from rest_framework import serializers
 from .models import Bundle, BundlePurchase
 
 
+# ============================================================================
+# BUNDLE
+# ============================================================================
+
 class BundleSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
     description = serializers.SerializerMethodField()
-    validityDays = serializers.IntegerField(source="validity_days")
-    discountPercent = serializers.IntegerField(source="discount_percent")
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        # Canonical credits shape: {service_key: count}
-        credits = data.get("credits")
-        if isinstance(credits, list):
-            normalised = {}
-            for item in credits:
-                if isinstance(item, dict):
-                    key = item.get("service") or item.get("service_key") or item.get("key")
-                    count = item.get("count") or item.get("amount") or 1
-                    if key:
-                        normalised[str(key)] = int(count)
-            data["credits"] = normalised
-        elif not isinstance(credits, dict):
-            data["credits"] = {}
-        return data
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        # Canonical credits shape: {service_key: count}
-        credits = data.get("credits")
-        if isinstance(credits, list):
-            normalised = {}
-            for item in credits:
-                if isinstance(item, dict):
-                    key = item.get("service") or item.get("service_key") or item.get("key")
-                    count = item.get("count") or item.get("amount") or 1
-                    if key:
-                        normalised[str(key)] = int(count)
-            data["credits"] = normalised
-        elif not isinstance(credits, dict):
-            data["credits"] = {}
-        return data
+    # Camel-case fields for output (frontend inasoma camelCase).
+    # Kwa input, tunatumia `to_internal_value` kubadilisha camelCase → snake_case.
+    validityDays = serializers.IntegerField(
+        source="validity_days",
+        required=False,
+    )
+    discountPercent = serializers.IntegerField(
+        source="discount_percent",
+        required=False,
+    )
 
     class Meta:
         model = Bundle
@@ -55,6 +34,59 @@ class BundleSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
+    # ---------------------------------------------------------------
+    # NORMALIZE INPUT
+    # Kubali `validityDays` AU `validity_days` (na vivyo hivyo kwa
+    # `discountPercent`/`discount_percent`).
+    # ---------------------------------------------------------------
+    def to_internal_value(self, data):
+        try:
+            normalized = data.copy()
+        except AttributeError:
+            normalized = dict(data)
+
+        # Normalize validity days
+        if "validityDays" in normalized and "validity_days" not in normalized:
+            normalized["validity_days"] = normalized["validityDays"]
+        normalized.pop("validityDays", None)
+
+        # Normalize discount percent
+        if "discountPercent" in normalized and "discount_percent" not in normalized:
+            normalized["discount_percent"] = normalized["discountPercent"]
+        normalized.pop("discountPercent", None)
+
+        return super().to_internal_value(normalized)
+
+    # ---------------------------------------------------------------
+    # NORMALIZE OUTPUT
+    # Canonical credits shape: {service_key: count}
+    # ---------------------------------------------------------------
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        credits = data.get("credits")
+        if isinstance(credits, list):
+            normalized = {}
+            for item in credits:
+                if isinstance(item, dict):
+                    key = (
+                        item.get("service")
+                        or item.get("service_key")
+                        or item.get("key")
+                    )
+                    count = (
+                        item.get("count")
+                        or item.get("amount")
+                        or 1
+                    )
+                    if key:
+                        normalized[str(key)] = int(count)
+            data["credits"] = normalized
+        elif not isinstance(credits, dict):
+            data["credits"] = {}
+
+        return data
+
     def get_name(self, obj):
         return {"sw": obj.name_sw, "en": obj.name_en}
 
@@ -62,9 +94,20 @@ class BundleSerializer(serializers.ModelSerializer):
         return {"sw": obj.description_sw, "en": obj.description_en}
 
 
+# ============================================================================
+# BUNDLE PURCHASE
+# ============================================================================
+
 class BundlePurchaseSerializer(serializers.ModelSerializer):
     bundle_code = serializers.CharField(source="bundle.code", read_only=True)
     bundle_name = serializers.CharField(source="bundle.name_sw", read_only=True)
+
+    # `credits` mirrors `credits_snapshot` under the canonical name the
+    # frontend reads.
+    credits = serializers.JSONField(source="credits_snapshot", read_only=True)
+    services = serializers.JSONField(source="services_snapshot", read_only=True)
+    payment_status = serializers.CharField(source="status", read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
 
     class Meta:
         model = BundlePurchase
@@ -77,13 +120,10 @@ class BundlePurchaseSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-    # `credits` mirrors `credits_snapshot` under the canonical name the
-    # frontend reads.
-    credits = serializers.JSONField(source="credits_snapshot", read_only=True)
-    services = serializers.JSONField(source="services_snapshot", read_only=True)
-    payment_status = serializers.CharField(source="status", read_only=True)
-    updated_at = serializers.DateTimeField(read_only=True)
 
+# ============================================================================
+# BUNDLE PURCHASE — CREATE
+# ============================================================================
 
 class BundlePurchaseCreateSerializer(serializers.Serializer):
     bundle = serializers.PrimaryKeyRelatedField(

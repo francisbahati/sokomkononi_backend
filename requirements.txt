@@ -52,3 +52,6 @@ whitenoise==6.8.2
 drf-spectacular-sidecar==2024.7.1
 reportlab==4.0.9
 python-docx==1.1.0
+
+# Optional error tracking (activated only when SENTRY_DSN is set)
+sentry-sdk==2.19.2

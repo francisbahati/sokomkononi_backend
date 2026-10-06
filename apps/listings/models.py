@@ -16,6 +16,7 @@ class Listing(SoftDeleteModel):
 
     class Status(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
+        PENDING_PAYMENT = "PENDING_PAYMENT", "Pending payment"
         PENDING_APPROVAL = "PENDING_APPROVAL", "Pending approval"
         AVAILABLE = "AVAILABLE", "Available"
         RESERVED = "RESERVED", "Reserved"
@@ -941,6 +942,17 @@ class ListingFeeRule(SoftDeleteModel):
             models.Index(
                 fields=["is_active", "priority"],
                 name="fee_rule_active_prio_idx",
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["category"],
+                condition=models.Q(
+                    is_deleted=False, is_active=True,
+                    category__isnull=False,
+                ),
+                name="unique_active_rule_per_category",
             ),
         ]
 

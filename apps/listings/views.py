@@ -1065,7 +1065,9 @@ class ListingImageViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return ListingImage.objects.none()
 
-        listing_id = self.kwargs.get("listing_id")
+        listing_id, err = require_int_listing_id(self.kwargs.get("listing_id"))
+        if err:
+            return ListingImage.objects.none()
         listing = get_object_or_404(Listing, pk=listing_id)
         user = self.request.user
 
@@ -1380,25 +1382,28 @@ class ListingFeePaymentView(APIView):
         # Credits path
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
-            if not consume_credit(request.user, "listing"):
-                return Response(
-                    {"detail": "Hakuna listing credits za kutosha."},
-                    status=status.HTTP_400_BAD_REQUEST,
+            import uuid
+            from django.db import transaction
+            with transaction.atomic():
+                if not consume_credit(request.user, "listing"):
+                    return Response(
+                        {"detail": "Hakuna listing credits za kutosha."},
+                        status=status.HTTP_402_PAYMENT_REQUIRED,
+                    )
+
+                fee = create_listing_fee(listing)
+                fee.payment_status = ListingFee.PaymentStatus.PAID
+                fee.payment_reference = (
+                    f"credits-{fee.pk}-{uuid.uuid4().hex[:12]}"
                 )
+                fee.paid_at = timezone.now()
+                fee.save(update_fields=[
+                    "payment_status", "payment_reference",
+                    "paid_at", "updated_at",
+                ])
 
-            fee = create_listing_fee(listing)
-            fee.payment_status = ListingFee.PaymentStatus.PAID
-            fee.payment_reference = (
-                f"credits-{request.user.id}-{timezone.now().timestamp()}"
-            )
-            fee.paid_at = timezone.now()
-            fee.save(update_fields=[
-                "payment_status", "payment_reference",
-                "paid_at", "updated_at",
-            ])
-
-            listing.status = Listing.Status.PENDING_APPROVAL
-            listing.save(update_fields=["status", "updated_at"])
+                listing.status = Listing.Status.PENDING_APPROVAL
+                listing.save(update_fields=["status", "updated_at"])
 
             return Response(
                 {

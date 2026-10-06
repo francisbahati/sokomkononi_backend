@@ -10,6 +10,7 @@ and transient failures are answered with HTTP 500 so FimiPay can retry.
 import importlib
 import json
 import logging
+from decimal import Decimal
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
@@ -61,6 +62,65 @@ IGNORED = "ignored"   # permanent: retrying will not help
 RETRY = "retry"       # transient: ask FimiPay to send it again
 
 
+def _verify_amount(prefix, ref_id_int, reported_amount, order_id):
+    """
+    Compare FimiPay-reported amount against the DB-stored amount.
+    Returns True if acceptable, False if we must reject.
+    """
+    if reported_amount is None:
+        # FimiPay did not send an amount — allow but log loudly.
+        logger.warning("Webhook missing amount for order_id=%s", order_id)
+        return True
+
+    try:
+        reported = Decimal(str(reported_amount))
+    except Exception:
+        logger.error("Webhook non-numeric amount for order_id=%s: %r",
+                     order_id, reported_amount)
+        return False
+
+    expected = _lookup_expected_amount(prefix, ref_id_int)
+    if expected is None:
+        return True
+
+    if reported < expected:
+        logger.error(
+            "UNDERPAYMENT order_id=%s expected=%s reported=%s",
+            order_id, expected, reported,
+        )
+        return False
+    return True
+
+
+def _lookup_expected_amount(prefix, ref_id_int):
+    """Fetch the DB-stored amount for the given order prefix + ref."""
+    try:
+        if prefix == "LSF":
+            from apps.listings.models import ListingFee
+            return ListingFee.objects.get(listing_id=ref_id_int).amount
+        if prefix == "BST":
+            from apps.boosting.models import ListingBoost
+            return ListingBoost.objects.get(pk=ref_id_int).amount
+        if prefix == "LDS":
+            from apps.leading_fees.models import ListingLeading
+            return ListingLeading.objects.get(pk=ref_id_int).price
+        if prefix == "BND":
+            from apps.bundles.models import BundlePurchase
+            return BundlePurchase.objects.get(pk=ref_id_int).amount
+        if prefix == "ADV":
+            from apps.banners.models import BannerAd
+            return BannerAd.objects.get(pk=ref_id_int).amount
+        if prefix == "SFE":
+            from apps.finance.models import SuccessFeePayment
+            return SuccessFeePayment.objects.get(pk=ref_id_int).amount
+        if prefix == "RSV":
+            from apps.transactions.models import Reservation
+            return Reservation.objects.get(pk=ref_id_int).deposit_amount
+    except Exception:
+        return None
+    return None
+
+
 def _route_success(order_id, event):
     """Route a SUCCESS webhook to the right SokoMkononi service."""
     if not order_id:
@@ -83,6 +143,12 @@ def _route_success(order_id, event):
         logger.warning(
             "Unknown webhook prefix %r (order_id=%s) - payment NOT applied",
             prefix, order_id,
+        )
+        return IGNORED
+
+    if not _verify_amount(prefix, ref_id_int, event.get("amount"), order_id):
+        logger.error(
+            "Webhook REJECTED for order_id=%s (amount mismatch)", order_id,
         )
         return IGNORED
 

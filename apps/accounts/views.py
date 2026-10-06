@@ -473,15 +473,11 @@ class AvatarUploadView(APIView):
                 {"detail": "Picha inahitajika."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        allowed = ["image/jpeg", "image/png", "image/webp"]
-        if f.content_type not in allowed:
+        from apps.core.image_utils import validate_image, MAX_AVATAR_BYTES
+        ok, err = validate_image(f, max_bytes=MAX_AVATAR_BYTES, field="avatar")
+        if not ok:
             return Response(
-                {"detail": "Aina ya picha hairuhusiwi. Tumia JPG, PNG au WEBP."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if f.size > 3 * 1024 * 1024:
-            return Response(
-                {"detail": "Picha haiwezi kuzidi 3 MB."},
+                {"detail": err},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -506,3 +502,44 @@ class AvatarUploadView(APIView):
             {"detail": "Picha imeondolewa."},
             status=status.HTTP_200_OK,
         )
+
+# ============================================================
+# RESEND OTP (registration)
+# ============================================================
+
+class ResendOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_scope = "otp_send"
+
+    @extend_schema(
+        request=ForgotPasswordSerializer,
+        responses={200: OpenApiResponse(description="OTP resent if pending.")},
+    )
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["identifier"]
+
+        from .models import PendingRegistration
+        pending = PendingRegistration.objects.filter(
+            email__iexact=email,
+        ).first()
+
+        if pending:
+            try:
+                send_registration_otp(pending)
+            except OTPThrottled as exc:
+                return Response(
+                    getattr(exc, "detail", {"detail": str(exc)}),
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+            except Exception:
+                logger.exception("Resend OTP failed for %s", email)
+
+        # Always return generic — do not leak whether the email is pending.
+        return Response({
+            "message": (
+                "Kama kuna usajili unaosubiri kwa barua pepe hii, "
+                "OTP mpya imetumwa."
+            ),
+        }, status=status.HTTP_200_OK)

@@ -12,6 +12,7 @@ from .serializers import (
 
 
 class ContactViewSet(viewsets.GenericViewSet):
+    throttle_scope = "contact"
     """
         POST    /api/contact/                public: submit message
         GET     /api/contact/                admin: list

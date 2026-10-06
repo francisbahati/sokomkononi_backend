@@ -205,6 +205,18 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
             # Clear deleted_email either way — either reclaimed or lost.
             self.deleted_email = None
 
+        # If the phone has been reclaimed by another active user,
+        # drop it so the unique_active_user_phone constraint holds.
+        if self.phone:
+            phone_taken = (
+                User.all_objects
+                .filter(phone=self.phone, is_deleted=False)
+                .exclude(pk=self.pk)
+                .exists()
+            )
+            if phone_taken:
+                self.phone = None
+
         self.is_deleted = False
         self.deleted_at = None
         self.deleted_by = None
@@ -214,6 +226,7 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
             update_fields=[
                 "email",
                 "deleted_email",
+                "phone",
                 "is_deleted",
                 "deleted_at",
                 "deleted_by",

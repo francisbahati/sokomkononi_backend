@@ -145,22 +145,31 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
         # ── Credits path ──────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
-            if not consume_credit(request.user, "leading"):
-                return Response(
-                    {"detail": "Hakuna leading credits za kutosha."},
-                    status=status.HTTP_400_BAD_REQUEST,
+            import uuid
+            from django.db import transaction
+
+            with transaction.atomic():
+                if not consume_credit(request.user, "leading"):
+                    return Response(
+                        {"detail": "Hakuna leading credits za kutosha."},
+                        status=status.HTTP_402_PAYMENT_REQUIRED,
+                    )
+                now = timezone.now()
+                leading.payment_status = "PAID"
+                leading.payment_reference = (
+                    f"credits-{leading.pk}-{uuid.uuid4().hex[:12]}"
                 )
-            leading.payment_status = "PAID"
-            leading.paid_at = timezone.now()
-            leading.status = "ACTIVE"
-            leading.starts_at = timezone.now()
-            leading.expires_at = timezone.now() + timedelta(
-                days=leading.days or 7
-            )
-            leading.save(update_fields=[
-                "payment_status", "paid_at", "status",
-                "starts_at", "expires_at", "updated_at",
-            ])
+                leading.paid_at = now
+                leading.status = "ACTIVE"
+                leading.starts_at = now
+                leading.expires_at = now + timedelta(
+                    days=leading.days or 7
+                )
+                leading.save(update_fields=[
+                    "payment_status", "payment_reference",
+                    "paid_at", "status", "starts_at",
+                    "expires_at", "updated_at",
+                ])
             return Response(
                 {
                     "payment_status": "SUCCESS",

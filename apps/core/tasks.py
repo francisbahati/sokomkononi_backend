@@ -59,8 +59,8 @@ def purge_soft_deleted():
 
         for obj in qs.iterator():
             try:
-                obj.hard_delete()
                 _audit_purge(model, obj)
+                obj.hard_delete()
                 deleted += 1
             except ProtectedError:
                 skipped += 1

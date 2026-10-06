@@ -128,8 +128,11 @@ class StaffViewSet(viewsets.GenericViewSet):
             user=user,
             defaults={"role": role, "active": d.get("active", True)},
         )
-        # NOTE: is_staff is NOT flipped here. RBAC assignment is
-        # informational until role permissions are enforced separately.
+        # Grant admin access so role.permissions can be enforced by
+        # IsAdminUser / IsAdminOrReadOnly checks throughout the codebase.
+        if not user.is_staff:
+            user.is_staff = True
+            user.save(update_fields=["is_staff", "updated_at"])
         try:
             from apps.audit.services.audit import log_action
             log_action(

@@ -90,5 +90,27 @@ class Category(SoftDeleteModel):
 
         return slug
 
+    def restore(self):
+        """
+        Restore the category. If the slug has been reclaimed by another
+        active row, regenerate it before flipping is_deleted back to False.
+        """
+        if not self.is_deleted:
+            return
+
+        if self.slug and Category.all_objects.filter(
+            slug=self.slug, is_deleted=False,
+        ).exclude(pk=self.pk).exists():
+            self.slug = self._generate_unique_slug()
+
+        self.is_deleted = False
+        self.deleted_at = None
+        self.deleted_by = None
+        self.deletion_reason = ""
+        self.save(update_fields=[
+            "slug", "is_deleted", "deleted_at", "deleted_by",
+            "deletion_reason", "updated_at",
+        ])
+
     def __str__(self):
         return self.name

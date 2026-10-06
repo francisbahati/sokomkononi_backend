@@ -38,9 +38,6 @@ class ReservationRateViewSet(viewsets.GenericViewSet):
     def list(self, request):
         return Response(ReservationRateSerializer(self.get_object()).data)
 
-    def retrieve(self, request, pk=None):
-        return Response(ReservationRateSerializer(self.get_object()).data)
-
     def partial_update(self, request, pk=None):
         obj = self.get_object()
         serializer = ReservationRateSerializer(

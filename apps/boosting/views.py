@@ -319,14 +319,16 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
         # ── Credits path ────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
+            import uuid
             with transaction.atomic():
                 if not consume_credit(request.user, "boost"):
                     return Response(
                         {"detail": "Hakuna boost credits za kutosha."},
                         status=status.HTTP_402_PAYMENT_REQUIRED,
                     )
+                ref = f"credits-{boost.pk}-{uuid.uuid4().hex[:12]}"
                 boost = mark_boost_as_paid(
-                    boost=boost, payment_reference="credits",
+                    boost=boost, payment_reference=ref,
                 )
                 boost = activate_boost(boost=boost)
             return Response(

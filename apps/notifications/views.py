@@ -167,8 +167,7 @@ class NotificationViewSet(
             qs = qs.filter(audience=audience.upper())
 
         count = qs.count()
-        for notification in qs:
-            notification.hard_delete()
+        qs.hard_delete()
 
         return Response(
             {

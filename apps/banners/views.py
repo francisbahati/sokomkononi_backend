@@ -81,18 +81,30 @@ class BannerAdViewSet(viewsets.ModelViewSet):
         # ── Credits path ──────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
-            if not consume_credit(request.user, "ads"):
-                return Response(
-                    {"detail": "Hakuna ads credits za kutosha."},
-                    status=status.HTTP_400_BAD_REQUEST,
+            import uuid
+            from django.db import transaction
+            from .services import _get_ad_fee_config
+
+            with transaction.atomic():
+                if not consume_credit(request.user, "ads"):
+                    return Response(
+                        {"detail": "Hakuna ads credits za kutosha."},
+                        status=status.HTTP_402_PAYMENT_REQUIRED,
+                    )
+                cfg = _get_ad_fee_config()
+                banner.payment_status = "PAID"
+                banner.payment_reference = (
+                    f"credits-{banner.pk}-{uuid.uuid4().hex[:12]}"
                 )
-            banner.payment_status = "PAID"
-            banner.paid_at = timezone.now()
-            banner.active = True
-            banner.expires_at = timezone.now() + timedelta(days=7)
-            banner.save(update_fields=[
-                "payment_status", "paid_at", "active", "expires_at",
-            ])
+                banner.paid_at = timezone.now()
+                banner.active = True
+                banner.expires_at = (
+                    timezone.now() + timedelta(days=cfg.days)
+                )
+                banner.save(update_fields=[
+                    "payment_status", "payment_reference",
+                    "paid_at", "active", "expires_at",
+                ])
             return Response(
                 {
                     "payment_status": "SUCCESS",

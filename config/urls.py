@@ -11,7 +11,10 @@ from drf_spectacular.views import (
 )
 
 
+from apps.core.health import health as _health
+
 urlpatterns = [
+    path("health/", _health, name="health"),
     path("admin/", admin.site.urls),
 
     # Schema / docs

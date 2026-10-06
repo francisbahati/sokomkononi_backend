@@ -163,18 +163,8 @@ def create_listing_fee(listing):
     )
 
     if not created:
-        if listing_fee.payment_status == ListingFee.PaymentStatus.PAID:
-            return listing_fee
-
-        listing_fee.seller = listing.seller
-        listing_fee.amount = result["fee_amount"]
-        listing_fee.rule = result["rule"]
-        listing_fee.percentage = result["percentage"]
-        listing_fee.payment_status = ListingFee.PaymentStatus.PENDING
-
-        listing_fee.save(update_fields=[
-            "seller", "amount", "rule", "percentage",
-            "payment_status", "updated_at",
-        ])
+        # Freeze the quoted amount — do NOT recompute on subsequent
+        # calls. The user saw this number in the pay dialog.
+        return listing_fee
 
     return listing_fee

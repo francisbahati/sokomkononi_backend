@@ -16,11 +16,12 @@ from .views import (
     RegisterView,
     VerifyOTPView,
     VerifyPasswordResetOTPView,
+    ResendOTPView,
 )
 
 
 class ThrottledTokenRefreshView(TokenRefreshView):
-    throttle_scope = "login"
+    throttle_scope = "refresh"
 
 
 app_name = "accounts"
@@ -29,6 +30,7 @@ app_name = "accounts"
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
     path("verify-otp/", VerifyOTPView.as_view(), name="verify-otp"),
+    path("resend-otp/", ResendOTPView.as_view(), name="resend-otp"),
 
     path("login/", LoginView.as_view(), name="login"),
     path("social/", SocialLoginView.as_view(), name="social-login"),

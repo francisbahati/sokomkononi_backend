@@ -242,46 +242,6 @@ def notify_reservation_created(sender, instance, created, **kwargs):
 
 
 # ============================================================
-# 7. BOOST ACTIVATED
-# ============================================================
-@receiver(post_save, sender="listings.Listing")
-def notify_boost_activated(sender, instance, created, **kwargs):
-    """Seller anajulishwa boost yake imeanza kufanya kazi."""
-    if created:
-        return
-
-    if not instance.boosted_until:
-        return
-
-    from django.utils import timezone
-    from datetime import timedelta
-
-    now = timezone.now()
-    if instance.boosted_until <= now:
-        return  # boost imeisha
-
-    # Kama ilibadilishwa hivi karibuni
-    if instance.updated_at and (now - instance.updated_at) > timedelta(minutes=5):
-        return
-
-    _safe_create(
-        recipient=instance.seller,
-        notification_type=Notification.NotificationType.BOOST_ACTIVATED,
-        title="Boost yako imeanza kufanya kazi",
-        message=(
-            f'Tangazo lako "{instance.title}" litaonekana kwa '
-            f"wanunuzi wengi zaidi hadi "
-            f"{instance.boosted_until.strftime('%d/%m/%Y')}."
-        ),
-        priority=Notification.Priority.NORMAL,
-        related_object_type="listings.Listing",
-        related_object_id=instance.id,
-        action_url=f"/mali/{instance.id}",
-    )
-
-
-
-# ============================================================
 # 8. VERIFICATION REQUEST — mpya imewasilishwa (admin)
 # ============================================================
 @receiver(post_save, sender="verifications.VerificationRequest")

@@ -5,17 +5,16 @@ from .api import (
     PayoutDetailView,
     PayoutListCreateView,
     PayoutSyncView,
-    create_order_view,
-    order_status_view,
     transactions_view,
 )
 from .views import fimipay_webhook
 
 
 urlpatterns = [
-    # Collections
-    path("create-order/", create_order_view, name="fimipay-create-order"),
-    path("order-status/", order_status_view, name="fimipay-order-status"),
+    # NOTE: create_order / order_status are intentionally NOT routed.
+    # Every payment initiation goes through app-specific services
+    # (initiate_boost_payment, initiate_purchase_payment, etc.) which
+    # use the DB-stored amount, never client input.
 
     # Merchant transactions (read-only, staff-only)
     path("transactions/", transactions_view, name="fimipay-transactions"),

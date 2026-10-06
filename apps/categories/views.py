@@ -89,7 +89,14 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     # CREATE — log category.created
     # ══════════════════════════════════════════════════════════
     def create(self, request, *args, **kwargs):
-        response = super().create(request, *args, **kwargs)
+        from django.db import IntegrityError, transaction
+        try:
+            with transaction.atomic():
+                response = super().create(request, *args, **kwargs)
+        except IntegrityError:
+            # Race on slug uniqueness — retry once.
+            with transaction.atomic():
+                response = super().create(request, *args, **kwargs)
 
         if response.status_code == status.HTTP_201_CREATED:
             data = response.data or {}

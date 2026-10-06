@@ -222,6 +222,16 @@ def expire_unpaid_reservations():
             if listing and listing.status == Listing.Status.RESERVED:
                 listing.status = Listing.Status.AVAILABLE
                 listing.save(update_fields=["status", "updated_at"])
+                try:
+                    from apps.waiting_list.services.notifications import (
+                        notify_waiting_buyers,
+                    )
+                    notify_waiting_buyers(listing=listing)
+                except Exception:
+                    logger.exception(
+                        "waiting-list notify failed for listing %s",
+                        listing.pk,
+                    )
 
             cancelled += 1
         except Exception:

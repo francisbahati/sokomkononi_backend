@@ -65,11 +65,15 @@ fi
 echo "Applying database migrations..."
 python manage.py migrate --noinput
 
-echo "Fixing orphan listings (category=NULL)..."
-python manage.py fix_orphan_listings --apply || echo "WARN: orphan fix failed, continuing."
+if [ "${SOKO_RUN_SEEDERS:-0}" = "1" ]; then
+    echo "Fixing orphan listings (category=NULL)..."
+    python manage.py fix_orphan_listings --apply || echo "WARN: orphan fix failed, continuing."
 
-echo "Seeding categories + fee rules..."
-python manage.py seed_all_fee_rules || echo "WARN: seed failed, continuing."
+    echo "Seeding categories + fee rules..."
+    python manage.py seed_all_fee_rules || echo "WARN: seed failed, continuing."
+else
+    echo "Skipping destructive seeders (set SOKO_RUN_SEEDERS=1 to enable)."
+fi
 
 # Only CREATE a superuser if one does not already exist.
 # We deliberately do NOT reset the password of an existing superuser.

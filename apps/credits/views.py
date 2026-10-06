@@ -34,7 +34,7 @@ class UserCreditViewSet(viewsets.GenericViewSet):
             "has": has_service(request.user, service),
         })
 
-    @action(detail=False, methods=["post"], url_path="consume")
+
     def consume(self, request):
         """
         POST /api/credits/consume/

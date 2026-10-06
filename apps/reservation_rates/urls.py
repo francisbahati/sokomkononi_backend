@@ -20,10 +20,4 @@ urlpatterns = [
         ReservationRateViewSet.as_view({"post": "toggle"}),
         name="reservation-rate-toggle",
     ),
-    # Detail — PATCH (kwa pk)
-    path(
-        "<str:pk>/",
-        ReservationRateViewSet.as_view({"patch": "partial_update"}),
-        name="reservation-rate-detail",
-    ),
 ]

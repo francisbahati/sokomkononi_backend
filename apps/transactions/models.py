@@ -162,7 +162,7 @@ class Reservation(models.Model):
     )
     deposit_amount = models.DecimalField(
         max_digits=15, decimal_places=2,
-        validators=[MinValueValidator(Decimal("0.01"))],
+        validators=[MinValueValidator(Decimal("0.00"))],
         verbose_name="Kiasi cha deposit",
     )
     payment_status = models.CharField(
@@ -170,7 +170,8 @@ class Reservation(models.Model):
         default=PaymentStatus.PENDING, verbose_name="Hali ya malipo",
     )
     payment_reference = models.CharField(
-        max_length=255, blank=True, verbose_name="Payment reference",
+        max_length=255, blank=True, null=True, unique=True,
+        verbose_name="Payment reference",
     )
     paid_at = models.DateTimeField(
         null=True, blank=True, verbose_name="Muda wa kulipa",
@@ -213,6 +214,10 @@ class Reservation(models.Model):
             models.Index(
                 fields=["payment_status", "created_at"],
                 name="res_pay_created_idx",
+            ),
+            models.Index(
+                fields=["payment_reference"],
+                name="res_payment_ref_idx",
             ),
         ]
 

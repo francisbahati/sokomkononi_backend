@@ -47,7 +47,9 @@ class BannerAd(models.Model):
         verbose_name="Hali ya malipo",
     )
     paid_at = models.DateTimeField(null=True, blank=True)
-    payment_reference = models.CharField(max_length=255, blank=True)
+    payment_reference = models.CharField(
+        max_length=255, blank=True, null=True, unique=True,
+    )
 
     active = models.BooleanField(default=True, verbose_name="Hai")
 

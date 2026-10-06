@@ -92,6 +92,10 @@ class WaitingListCreateSerializer(serializers.Serializer):
         if WaitingListEntry.objects.filter(
             listing=listing,
             buyer=request.user,
+            status__in=[
+                WaitingListEntry.Status.WAITING,
+                WaitingListEntry.Status.NOTIFIED,
+            ],
         ).exists():
             raise serializers.ValidationError(
                 {

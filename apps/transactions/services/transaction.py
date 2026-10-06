@@ -263,12 +263,8 @@ def _fire_completion_side_effects(*, transaction, listing):
             transaction.pk,
         )
 
-    try:
-        notify_waiting_buyers(listing=listing)
-    except Exception:
-        logger.exception(
-            "Waiting-list notification failed for listing %s", listing.pk
-        )
+    # NOTE: listing is SOLD here — no waiting-list notification. Waiting
+    # buyers are only notified when a listing is re-opened (AVAILABLE).
 
 
 @db_transaction.atomic

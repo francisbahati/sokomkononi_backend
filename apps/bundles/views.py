@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.db import transaction
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -98,16 +99,20 @@ class BundlePurchaseViewSet(viewsets.GenericViewSet):
         # Credits path — canonical contract across every pay endpoint.
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
+            import uuid
             from apps.credits.services import consume_credit
-            if not consume_credit(request.user, "bundle"):
-                return Response(
-                    {"detail": "Hakuna bundle credits za kutosha."},
-                    status=status.HTTP_402_PAYMENT_REQUIRED,
-                )
             from .services import mark_purchase_paid
-            purchase = mark_purchase_paid(
-                purchase=purchase, payment_reference="credits",
-            )
+
+            with transaction.atomic():
+                if not consume_credit(request.user, "bundle"):
+                    return Response(
+                        {"detail": "Hakuna bundle credits za kutosha."},
+                        status=status.HTTP_402_PAYMENT_REQUIRED,
+                    )
+                ref = f"credits-{purchase.pk}-{uuid.uuid4().hex[:12]}"
+                purchase = mark_purchase_paid(
+                    purchase=purchase, payment_reference=ref,
+                )
             return Response({
                 "purchase_id": purchase.id,
                 "payment_status": "SUCCESS",

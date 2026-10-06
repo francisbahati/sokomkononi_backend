@@ -81,8 +81,16 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
     if listing_fee.payment_status == ListingFee.PaymentStatus.PAID:
         return listing_fee
 
+    ref = (payment_reference or listing_fee.payment_reference or "").strip()
+    if ref and ListingFee.objects.filter(
+        payment_reference=ref,
+    ).exclude(pk=listing_fee.pk).exists():
+        # Duplicate transid — keep ours; add a suffix so uniqueness holds.
+        import uuid
+        ref = f"{ref}-{uuid.uuid4().hex[:8]}"
+
     listing_fee.payment_status = ListingFee.PaymentStatus.PAID
-    listing_fee.payment_reference = payment_reference or listing_fee.payment_reference
+    listing_fee.payment_reference = ref
     listing_fee.paid_at = timezone.now()
     listing_fee.save(update_fields=[
         "payment_status", "payment_reference", "paid_at", "updated_at",

@@ -35,10 +35,6 @@ def normalize_email(email):
 
 
 def normalize_tanzania_phone(phone):
-    """
-    Phone is contact info only (never used for OTP or login), but it is
-    unique, so it must be stored in one canonical format.
-    """
     if not phone:
         return None
 
@@ -108,11 +104,6 @@ def _create_otp_record(email, verification_type):
 
 
 def _check_otp(email, otp_code, verification_type):
-    """
-    Validate the latest unused OTP for this email and type.
-    Must be called inside a transaction (uses select_for_update).
-    Returns the OTP record; the caller marks it used on success.
-    """
     identifier = normalize_email(email)
 
     otp_record = (
@@ -164,14 +155,33 @@ def _mark_otp_used(otp_record):
 # ============================================================
 
 def send_email_otp(email, otp):
-    subject = "SokoMkononi - Nambari ya Uthibitishaji"
+    subject = "SokoMkononi - Nambari ya Uthibitisho"
+
     message = (
-        "Habari,\n\n"
-        "Nambari yako ya uthibitishaji wa SokoMkononi ni:\n\n"
-        f"{otp}\n\n"
-        f"Nambari hii itaisha baada ya {OTP_EXPIRY_MINUTES} dakika.\n\n"
-        "Usimpe mtu mwingine nambari hii.\n\nSokoMkononi"
+        "Habari,\n"
+        "\n"
+        "Karibu SokoMkononi \u2014 Mahali pa Kununua na Kuuza kwa Kujiamini.\n"
+        "\n"
+        "Ili kukamilisha usajili wa akaunti yako, tafadhali tumia nambari "
+        "hii ya uthibitisho:\n"
+        "\n"
+        f"{otp}\n"
+        "\n"
+        "Nambari hii ni halali kwa dakika 10 pekee.\n"
+        "\n"
+        "Muhimu kwa usalama wako:\n"
+        "Usimshirikishe mtu mwingine nambari hii. Timu ya SokoMkononi "
+        "haitakuomba nambari yako ya uthibitisho kupitia simu, WhatsApp, "
+        "SMS au njia nyingine yoyote.\n"
+        "\n"
+        "Ikiwa hukuomba nambari hii, unaweza kupuuza ujumbe huu.\n"
+        "\n"
+        "Asante kwa kuchagua SokoMkononi.\n"
+        "\n"
+        "SokoMkononi Team\n"
+        "Mahali pa Kununua na Kuuza kwa Kujiamini."
     )
+
     send_mail(
         subject=subject,
         message=message,
@@ -183,15 +193,33 @@ def send_email_otp(email, otp):
 
 def send_password_reset_email(email, otp):
     subject = "SokoMkononi - Kubadilisha Nenosiri"
+
     message = (
-        "Habari,\n\n"
-        "Umeomba kubadilisha nenosiri lako la SokoMkononi.\n\n"
-        "Nambari yako ya uthibitishaji ni:\n\n"
-        f"{otp}\n\n"
-        f"Nambari hii itaisha baada ya {OTP_EXPIRY_MINUTES} dakika.\n\n"
-        "Kama hukuomba kubadilisha nenosiri, puuza ujumbe huu.\n\n"
-        "SokoMkononi"
+        "Habari,\n"
+        "\n"
+        "Tumepokea ombi la kubadilisha nenosiri la akaunti yako "
+        "ya SokoMkononi.\n"
+        "\n"
+        "Nambari yako ya uthibitisho ni:\n"
+        "\n"
+        f"{otp}\n"
+        "\n"
+        "Nambari hii ni halali kwa dakika 10 pekee.\n"
+        "\n"
+        "Muhimu kwa usalama wako:\n"
+        "Usimshirikishe mtu mwingine nambari hii. Timu ya SokoMkononi "
+        "haitakuomba nambari yako ya uthibitisho kupitia simu, WhatsApp, "
+        "SMS au njia nyingine yoyote.\n"
+        "\n"
+        "Ikiwa hukuomba kubadilisha nenosiri, puuza ujumbe huu \u2014 "
+        "nenosiri lako halitabadilika.\n"
+        "\n"
+        "Asante kwa kuchagua SokoMkononi.\n"
+        "\n"
+        "SokoMkononi Team\n"
+        "Mahali pa Kununua na Kuuza kwa Kujiamini."
     )
+
     send_mail(
         subject=subject,
         message=message,

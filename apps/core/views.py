@@ -1,4 +1,5 @@
 from django.apps import apps
+from django.db import transaction
 from django.db.models import ProtectedError
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -8,19 +9,29 @@ from .constants import AUDIT_PROTECTED_MODEL_NAMES
 from .models import SoftDeleteModel
 
 
+# ----------------------------------------------------------------
+# Audit helper — used by every destructive trash action
+# ----------------------------------------------------------------
+def _audit(request, action, model, pk, details):
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=model.__name__,
+            target_id=pk,
+            details=details,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "trash audit log failed for %s#%s", model.__name__, pk,
+        )
+
+
 def _resolve_model(type_str):
-    """
-    Accepts:
-      - "Listing"              (exact model name)
-      - "listing"              (lowercased)
-      - "listings"             (plural lowercase)
-      - "listings.Listing"     (app.Model)
-      - "listings.listing"     (app.model lowercase)
-    """
     if not type_str:
         return None
-
-    # 1) app.Model / app.model
     if "." in type_str:
         app_label, _, model_name = type_str.partition(".")
         for candidate in (model_name, model_name.lower()):
@@ -28,23 +39,16 @@ def _resolve_model(type_str):
                 return apps.get_model(app_label, candidate)
             except LookupError:
                 continue
-
     needle = type_str.lower()
-
-    # 2) match on lowercase model name OR plural of it
     for model in apps.get_models():
-        lname = model._meta.model_name           # e.g. "listing"
-        plural = lname + "s"                     # e.g. "listings"
-        if needle in (lname, plural, model.__name__.lower()):
+        lname = model._meta.model_name
+        if needle in (lname, lname + "s", model.__name__.lower()):
             return model
-
-    # 3) fallback: singularize trailing "s"
     if needle.endswith("s"):
         singular = needle[:-1]
         for model in apps.get_models():
             if model._meta.model_name == singular:
                 return model
-
     return None
 
 
@@ -110,6 +114,8 @@ class TrashRestoreView(APIView):
             return Response({"detail": "Haipatikani kwenye kikapu."},
                             status=status.HTTP_404_NOT_FOUND)
         obj.restore()
+        _audit(request, "trash.restored", model, obj.pk,
+               f"Restored {model.__name__}#{obj.pk}")
         return Response({"detail": "Imerejeshwa."})
 
 
@@ -131,7 +137,10 @@ class TrashPermanentDeleteView(APIView):
             return Response({"detail": "Haipatikani kwenye kikapu."},
                             status=status.HTTP_404_NOT_FOUND)
         try:
-            obj.hard_delete()
+            with transaction.atomic():
+                _audit(request, "trash.hard_deleted", model, obj.pk,
+                       f"Hard-deleted {model.__name__}#{obj.pk}")
+                obj.hard_delete()
         except ProtectedError:
             return Response({"detail": "Haifutiki — inatumika mahali pengine."},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -154,7 +163,10 @@ class TrashEmptyByTypeView(APIView):
         deleted = skipped = 0
         for obj in model.all_objects.filter(is_deleted=True).iterator():
             try:
-                obj.hard_delete()
+                with transaction.atomic():
+                    _audit(request, "trash.hard_deleted", model, obj.pk,
+                           f"Empty-by-type: {model.__name__}#{obj.pk}")
+                    obj.hard_delete()
                 deleted += 1
             except ProtectedError:
                 skipped += 1
@@ -181,7 +193,10 @@ class TrashEmptyAllView(APIView):
                 continue
             for obj in model.all_objects.filter(is_deleted=True).iterator():
                 try:
-                    obj.hard_delete()
+                    with transaction.atomic():
+                        _audit(request, "trash.hard_deleted", model, obj.pk,
+                               f"Empty-all: {model.__name__}#{obj.pk}")
+                        obj.hard_delete()
                     deleted += 1
                 except ProtectedError:
                     skipped += 1

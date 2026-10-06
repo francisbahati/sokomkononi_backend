@@ -24,6 +24,12 @@ GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 APPLE_ISSUER = "https://appleid.apple.com"
 APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
 
+try:
+    from jwt import PyJWKClient as _PyJWKClient
+    _APPLE_JWKS_CLIENT = _PyJWKClient(APPLE_KEYS_URL)
+except Exception:
+    _APPLE_JWKS_CLIENT = None
+
 
 class SocialLoginView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -115,7 +121,7 @@ class SocialLoginView(APIView):
             raise ValidationError({"id_token": "PyJWT haijasakinishwa."})
 
         try:
-            jwks_client = PyJWKClient(APPLE_KEYS_URL)
+            jwks_client = _APPLE_JWKS_CLIENT or PyJWKClient(APPLE_KEYS_URL)
             signing_key = jwks_client.get_signing_key_from_jwt(id_token)
         except Exception:
             logger.exception("Apple JWKS lookup failed")

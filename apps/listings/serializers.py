@@ -644,13 +644,9 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
         return url
 
     def get_fee_status(self, obj):
-        try:
-            return obj.listing_fee.payment_status
-        except ListingFee.DoesNotExist:
-            return None
+        fee = getattr(obj, "listing_fee", None)
+        return fee.payment_status if fee else None
 
     def get_fee_amount(self, obj):
-        try:
-            return obj.listing_fee.amount
-        except ListingFee.DoesNotExist:
-            return None
+        fee = getattr(obj, "listing_fee", None)
+        return fee.amount if fee else None

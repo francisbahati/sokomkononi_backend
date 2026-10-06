@@ -208,7 +208,7 @@ CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:3000,http://localhost:5173,https://sokomkononi.co.tz,https://www.sokomkononi.co.tz",
 )
-CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", False)
+CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
 CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
 CORS_ALLOW_HEADERS = [
     "accept", "accept-encoding", "authorization", "content-type", "dnt",
@@ -252,6 +252,8 @@ REST_FRAMEWORK = {
         "anon": "100/min",
         "user": "1000/hour",
         "support_ticket": "5/hour",
+        "contact": "5/hour",
+        "refresh": "60/min",
     },
 }
 
@@ -342,7 +344,7 @@ SPECTACULAR_SETTINGS = {
 }
 
 # Docs are PUBLIC by default. Flip RESTRICT_DOCS=True in .env to lock down.
-if not DEBUG and env_bool("RESTRICT_DOCS", False):
+if not DEBUG and env_bool("RESTRICT_DOCS", True):
     SPECTACULAR_SETTINGS["SERVE_PERMISSIONS"] = [
         "rest_framework.permissions.IsAdminUser",
     ]
@@ -359,7 +361,8 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "SokoMkononi <info@sok
 if not DEBUG and not EMAIL_HOST:
     raise ImproperlyConfigured("EMAIL_HOST must be set when DEBUG=False.")
 
-ADMINS = [("SokoMkononi Admin", os.environ.get("ADMIN_EMAIL", DEFAULT_FROM_EMAIL))]
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "info@sokomkononi.co.tz")
+ADMINS = [("SokoMkononi Admin", ADMIN_EMAIL)]
 MANAGERS = ADMINS
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -408,7 +411,9 @@ CELERY_BEAT_SCHEDULE = {
         "task": "payments.refresh_pending_payouts",
         "schedule": crontab(minute="*/10"),
     },
-    "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
+        "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
+    "cleanup-otp": {"task": "accounts.cleanup_old_otps", "schedule": crontab(hour=2, minute=15)},
+    "cleanup-outstanding-tokens": {"task": "accounts.cleanup_expired_tokens", "schedule": crontab(hour=2, minute=25)},
 }
 
 # ---------------- SECURITY (prod) ----------------
@@ -418,9 +423,9 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
+    SECURE_HSTS_SECONDS = 300
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
+    SECURE_HSTS_PRELOAD = False
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
     SECURE_REFERRER_POLICY = "same-origin"
@@ -439,3 +444,21 @@ LOGGING = {
         "apps": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
+
+# ---------------- SENTRY (optional) ----------------
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.django import DjangoIntegration
+        from sentry_sdk.integrations.celery import CeleryIntegration
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[DjangoIntegration(), CeleryIntegration()],
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_RATE", "0.1")),
+            send_default_pii=False,
+            environment=os.environ.get("SENTRY_ENV", "production" if not DEBUG else "local"),
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Sentry init failed")

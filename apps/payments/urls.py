@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .api import (
+    order_status_view,
     PayoutCreateView,
     PayoutDetailView,
     PayoutListCreateView,
@@ -15,6 +16,11 @@ urlpatterns = [
     # Every payment initiation goes through app-specific services
     # (initiate_boost_payment, initiate_purchase_payment, etc.) which
     # use the DB-stored amount, never client input.
+
+    # Merchant transactions (read-only, staff-only)
+    # Scoped polling endpoint — frontend polls this after a payment is
+    # initiated. Restricted to the order's owner (or staff).
+    path("order-status/", order_status_view, name="fimipay-order-status"),
 
     # Merchant transactions (read-only, staff-only)
     path("transactions/", transactions_view, name="fimipay-transactions"),

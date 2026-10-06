@@ -23,7 +23,7 @@ class Ticket(SoftDeleteModel):
         OPEN = "OPEN", "Open"
         IN_PROGRESS = "IN_PROGRESS", "In Progress"
         RESOLVED = "RESOLVED", "Resolved"
-        CLOSED = "CLOSED", "Closed"
+        CLOSED = "COMPLETED", "Closed"
 
     code = models.CharField(
         max_length=20,

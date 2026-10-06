@@ -368,9 +368,25 @@ class ForgotPasswordView(APIView):
 
         try:
             send_password_reset_otp(user)
+        except OTPThrottled as exc:
+            # Normal rate limit — return 429 so the frontend can show
+            # a "wait 60 seconds" countdown.
+            return Response(
+                getattr(exc, "detail", {"detail": str(exc)}),
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
         except Exception:
             logger.exception(
                 "Failed to send password reset OTP for user %s", user.pk,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "Imeshindwa kutuma OTP kwa sasa. "
+                        "Tafadhali jaribu tena baada ya muda mfupi."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
         return Response(generic_response, status=status.HTTP_200_OK)

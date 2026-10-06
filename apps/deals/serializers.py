@@ -294,7 +294,7 @@ class DealRoomCreateSerializer(serializers.Serializer):
         except Listing.DoesNotExist:
             raise serializers.ValidationError("Tangazo halijapatikana.")
 
-        if listing.status != Listing.Status.AVAILABLE:
+        if listing.status != Listing.Status.LIVE:
             raise serializers.ValidationError(
                 "Deal Room inaweza kuanzishwa kwa tangazo "
                 "lililo AVAILABLE pekee."

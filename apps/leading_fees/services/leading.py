@@ -24,7 +24,7 @@ def _validate_seller(listing, user):
         raise ValidationError("Akaunti yako lazima iwe imethibitishwa.")
     if listing.seller_id != user.id and not user.is_staff:
         raise ValidationError("Huruhusiwi kupandisha tangazo ambalo si lako.")
-    if listing.status != Listing.Status.AVAILABLE:
+    if listing.status != Listing.Status.LIVE:
         raise ValidationError("Tangazo lazima liwe AVAILABLE.")
 
 
@@ -99,7 +99,7 @@ def _activate(leading):
         return leading
 
     listing = Listing.objects.select_for_update().get(pk=leading.listing_id)
-    if listing.status != Listing.Status.AVAILABLE:
+    if listing.status != Listing.Status.LIVE:
         raise ValidationError("Tangazo lazima liwe AVAILABLE wakati leading ina-activate.")
 
     now = timezone.now()

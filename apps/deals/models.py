@@ -16,9 +16,17 @@ class DealRoom(models.Model):
     class Status(models.TextChoices):
         OPEN = "OPEN", "Open"
         NEGOTIATING = "NEGOTIATING", "Negotiating"
-        AGREED = "AGREED", "Agreed"
+        ACCEPTED = "ACCEPTED", "Accepted"
+        RESERVED = "RESERVED", "Reserved"
+        AWAITING_FINAL_PAYMENT = (
+            "AWAITING_FINAL_PAYMENT", "Awaiting final payment",
+        )
+        PAYMENT_PROOF_SUBMITTED = (
+            "PAYMENT_PROOF_SUBMITTED", "Payment proof submitted",
+        )
+        COMPLETED = "COMPLETED", "Completed"
+        DISPUTED = "DISPUTED", "Disputed"
         CANCELLED = "CANCELLED", "Cancelled"
-        CLOSED = "CLOSED", "Closed"
 
     listing = models.ForeignKey(
         Listing,
@@ -42,7 +50,7 @@ class DealRoom(models.Model):
     )
 
     status = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=Status.choices,
         default=Status.OPEN,
         verbose_name="Hali",
@@ -80,7 +88,7 @@ class DealRoom(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["listing", "buyer"],
-                condition=models.Q(status__in=["OPEN", "NEGOTIATING", "AGREED"]),
+                condition=models.Q(status__in=["OPEN", "NEGOTIATING", "ACCEPTED"]),
                 name="unique_active_deal_room_listing_buyer",
             ),
         ]

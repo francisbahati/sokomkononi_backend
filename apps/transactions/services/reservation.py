@@ -125,7 +125,7 @@ def _activate_reservation(*, reservation, transaction, payment_reference):
     )
 
     if listing.status not in [
-        Listing.Status.AVAILABLE,
+        Listing.Status.LIVE,
         Listing.Status.RESERVED,
     ]:
         raise ValidationError(
@@ -193,7 +193,7 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
         pk=transaction.listing_id,
     )
     if listing.status not in [
-        Listing.Status.AVAILABLE,
+        Listing.Status.LIVE,
         Listing.Status.RESERVED,
     ]:
         raise ValidationError(
@@ -525,7 +525,7 @@ def expire_reservation(*, reservation):
             pk=transaction.listing_id,
         )
         if listing.status == Listing.Status.RESERVED:
-            listing.status = Listing.Status.AVAILABLE
+            listing.status = Listing.Status.LIVE
             listing.save(update_fields=["status", "updated_at"])
             listing_reopened = True
 

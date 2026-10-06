@@ -182,7 +182,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         user = self.request.user
 
         public_statuses = [
-            Listing.Status.AVAILABLE,
+            Listing.Status.LIVE,
             Listing.Status.RESERVED,
             Listing.Status.SOLD,
         ]
@@ -290,7 +290,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         base = Listing.objects.filter(
             category=listing.category,
-            status=Listing.Status.AVAILABLE,
+            status=Listing.Status.LIVE,
         ).exclude(
             pk=listing.pk,
         ).select_related(
@@ -492,7 +492,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         listing = self.get_object()
 
         if listing.status not in (
-            Listing.Status.AVAILABLE,
+            Listing.Status.LIVE,
             Listing.Status.RESERVED,
             Listing.Status.PENDING_APPROVAL,
         ):
@@ -527,6 +527,82 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         except Exception:
             pass
 
+        return Response(
+            ListingDetailSerializer(listing, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+    # ═══════════════════════════════════════════════════════════════════
+    # PAUSE / UNPAUSE / MARK-SOLD
+    # ═══════════════════════════════════════════════════════════════════
+    @action(
+        detail=True, methods=["post"], url_path="pause",
+        permission_classes=[IsOwnerOrAdmin],
+    )
+    def pause(self, request, pk=None):
+        """LIVE -> PAUSED. Seller hides the listing temporarily."""
+        listing = self.get_object()
+        self.check_object_permissions(request, listing)
+
+        if listing.status != Listing.Status.LIVE:
+            return Response(
+                {"detail": f"Hali ya sasa ni {listing.status}, si LIVE."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        listing.status = Listing.Status.PAUSED
+        listing.save(update_fields=["status", "updated_at"])
+        return Response(
+            ListingDetailSerializer(listing, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True, methods=["post"], url_path="unpause",
+        permission_classes=[IsOwnerOrAdmin],
+    )
+    def unpause(self, request, pk=None):
+        """PAUSED -> LIVE."""
+        listing = self.get_object()
+        self.check_object_permissions(request, listing)
+
+        if listing.status != Listing.Status.PAUSED:
+            return Response(
+                {"detail": f"Hali ya sasa ni {listing.status}, si PAUSED."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        listing.status = Listing.Status.LIVE
+        listing.save(update_fields=["status", "updated_at"])
+        return Response(
+            ListingDetailSerializer(listing, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True, methods=["post"], url_path="mark-sold",
+        permission_classes=[IsOwnerOrAdmin],
+    )
+    def mark_sold(self, request, pk=None):
+        """LIVE -> SOLD. Seller manually marks the listing as sold."""
+        listing = self.get_object()
+        self.check_object_permissions(request, listing)
+
+        if listing.status not in (
+            Listing.Status.LIVE,
+            Listing.Status.RESERVED,
+        ):
+            return Response(
+                {"detail": (
+                    f"Hali ya sasa ni {listing.status}. "
+                    "Inaweza kuwa SOLD tu kutoka LIVE au RESERVED."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        listing.status = Listing.Status.SOLD
+        listing.save(update_fields=["status", "updated_at"])
         return Response(
             ListingDetailSerializer(listing, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -872,7 +948,7 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
 
         if not request.user.is_authenticated:
             if listing.status not in [
-                Listing.Status.AVAILABLE,
+                Listing.Status.LIVE,
                 Listing.Status.RESERVED,
                 Listing.Status.SOLD,
             ]:
@@ -884,7 +960,7 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
             request.user.is_staff
             or listing.seller_id == request.user.id
             or listing.status in [
-                Listing.Status.AVAILABLE,
+                Listing.Status.LIVE,
                 Listing.Status.RESERVED,
                 Listing.Status.SOLD,
             ]
@@ -1082,7 +1158,7 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             )
 
         if listing.status in [
-            Listing.Status.AVAILABLE,
+            Listing.Status.LIVE,
             Listing.Status.RESERVED,
             Listing.Status.SOLD,
         ]:
@@ -1704,3 +1780,107 @@ def publish_listing(request, pk):
         },
         status=status.HTTP_200_OK,
     )
+
+# ============================================================================
+# ADMIN — ABANDONED DRAFTS
+# ============================================================================
+
+class AdminDraftListingsView(GenericAPIView):
+    """
+    GET /api/listings/admin/drafts/?older_than_hours=24
+
+    Returns listings stuck in DRAFT or PENDING_PAYMENT for longer than
+    the given threshold. Useful for outreach and spotting bugs.
+    """
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdminPendingListingSerializer
+
+    def get(self, request):
+        try:
+            hours = int(request.query_params.get("older_than_hours", 24))
+        except (TypeError, ValueError):
+            hours = 24
+        cutoff = timezone.now() - __import__("datetime").timedelta(hours=hours)
+
+        listings = (
+            Listing.objects
+            .filter(
+                status__in=[
+                    Listing.Status.DRAFT,
+                    Listing.Status.PENDING_PAYMENT,
+                ],
+                updated_at__lt=cutoff,
+            )
+            .select_related("seller", "category")
+            .prefetch_related("images")
+            .order_by("updated_at")
+        )
+
+        page = self.paginate_queryset(listings)
+        serializer = AdminPendingListingSerializer(
+            page if page is not None else listings,
+            many=True,
+            context={"request": request},
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response({"count": listings.count(), "results": serializer.data})
+
+
+# ============================================================================
+# ADMIN — BULK MODERATION
+# ============================================================================
+
+class AdminBulkApproveView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request):
+        ids = request.data.get("ids") or []
+        succeeded, failed = [], []
+        for pk in ids:
+            try:
+                approve_listing(listing_id=pk, admin_user=request.user)
+                succeeded.append(pk)
+            except Exception as exc:
+                failed.append({"id": pk, "error": str(exc)})
+        return Response({"succeeded": succeeded, "failed": failed})
+
+
+class AdminBulkRejectView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request):
+        ids = request.data.get("ids") or []
+        reason = (request.data.get("reason") or "").strip() or "Bulk rejection"
+        succeeded, failed = [], []
+        for pk in ids:
+            try:
+                reject_listing(
+                    listing_id=pk,
+                    admin_user=request.user,
+                    rejection_reason=reason,
+                )
+                succeeded.append(pk)
+            except Exception as exc:
+                failed.append({"id": pk, "error": str(exc)})
+        return Response({"succeeded": succeeded, "failed": failed})
+
+
+class AdminBulkDeleteView(APIView):
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request):
+        ids = request.data.get("ids") or []
+        reason = (request.data.get("reason") or "").strip() or "Bulk delete"
+        succeeded, failed = [], []
+        for pk in ids:
+            listing = Listing.objects.filter(pk=pk).first()
+            if not listing:
+                failed.append({"id": pk, "error": "Not found"})
+                continue
+            try:
+                listing.delete(by=request.user, reason=reason)
+                succeeded.append(pk)
+            except Exception as exc:
+                failed.append({"id": pk, "error": str(exc)})
+        return Response({"succeeded": succeeded, "failed": failed})

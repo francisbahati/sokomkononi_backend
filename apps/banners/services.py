@@ -29,7 +29,7 @@ def create_banner_ad(*, listing_id, seller, payment_reference=""):
 
     if listing.seller_id != seller.id:
         raise ValidationError({"listing": "Huruhusiwi kutangaza tangazo ambalo si lako."})
-    if listing.status != Listing.Status.AVAILABLE:
+    if listing.status != Listing.Status.LIVE:
         raise ValidationError({"listing": "Tangazo lazima liwe AVAILABLE."})
 
     existing = BannerAd.objects.filter(

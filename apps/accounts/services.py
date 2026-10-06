@@ -154,6 +154,34 @@ def _mark_otp_used(otp_record):
 # EMAIL
 # ============================================================
 
+# ============================================================
+# RESILIENT EMAIL DISPATCH
+# ============================================================
+import logging as _logging
+_email_logger = _logging.getLogger(__name__ + ".dispatch")
+
+
+def _dispatch_email(task_name, sync_fn, email, otp):
+    """
+    Try to send via Celery. If the broker is unreachable (Redis down,
+    broker URL missing, task timeout, etc.), fall back to sending
+    synchronously so the user still gets their OTP.
+    """
+    try:
+        from . import tasks as _tasks
+        task = getattr(_tasks, task_name)
+        task.delay(email, otp)
+        return
+    except Exception as exc:
+        _email_logger.warning(
+            "Celery dispatch failed for %s (%s) — sending synchronously",
+            task_name, exc,
+        )
+
+    # Synchronous fallback
+    sync_fn(email, otp)
+
+
 def send_email_otp(email, otp):
     subject = "SokoMkononi - Nambari ya Uthibitisho"
 
@@ -267,8 +295,9 @@ def send_registration_otp(pending):
     otp_record, otp, email = _create_otp_record(pending.email, REGISTRATION)
 
     try:
-        from .tasks import send_email_otp_task
-        send_email_otp_task.delay(email, otp)
+        _dispatch_email(
+            "send_email_otp_task", send_email_otp, email, otp,
+        )
     except Exception:
         otp_record.delete()
         raise
@@ -329,8 +358,10 @@ def send_password_reset_otp(user):
     otp_record, otp, email = _create_otp_record(user.email, PASSWORD_RESET)
 
     try:
-        from .tasks import send_password_reset_email_task
-        send_password_reset_email_task.delay(email, otp)
+        _dispatch_email(
+            "send_password_reset_email_task",
+            send_password_reset_email, email, otp,
+        )
     except Exception:
         otp_record.delete()
         raise

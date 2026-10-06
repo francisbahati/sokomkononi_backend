@@ -559,7 +559,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             updated_at=timezone.now(),
         )
 
-        deal_room.status = DealRoom.Status.AGREED
+        deal_room.status = DealRoom.Status.ACCEPTED
         deal_room.agreed_price = offer.amount
         deal_room.agreed_at = timezone.now()
         deal_room.save(update_fields=[
@@ -567,7 +567,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         ])
 
         listing = deal_room.listing
-        if listing.status == Listing.Status.AVAILABLE:
+        if listing.status == Listing.Status.LIVE:
             listing.status = Listing.Status.RESERVED
             listing.save(update_fields=["status", "updated_at"])
 
@@ -616,6 +616,78 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 lambda rejected=rejected: notify_offer_rejected(
                     deal_room=deal_room, offer=rejected
                 )
+            )
+
+        return Response(
+            DealRoomDetailSerializer(
+                deal_room,
+                context={"request": request, "deal_room": deal_room},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+    # ========================================================
+    # RESOLVE — pre-reservation dispute resolution (admin only)
+    # ========================================================
+    @action(
+        detail=True, methods=["post"],
+        url_path="resolve", url_name="resolve",
+        permission_classes=[permissions.IsAdminUser],
+    )
+    @transaction.atomic
+    def resolve(self, request, pk=None):
+        """
+        POST /api/deals/{id}/resolve/
+        Body: { resolution: "continue" | "cancel", note: "..." }
+
+        Admin-only. Used when a deal is CANCELLED/DISPUTED before any
+        Transaction exists.
+        """
+        deal_room = get_object_or_404(
+            DealRoom.objects
+            .select_for_update(of=("self",))
+            .select_related("listing", "buyer", "seller"),
+            pk=pk,
+        )
+
+        resolution = (request.data.get("resolution") or "").strip().lower()
+        note = (request.data.get("note") or "").strip()
+
+        if resolution not in ("continue", "cancel"):
+            return Response(
+                {"detail": "resolution lazima iwe 'continue' au 'cancel'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if resolution == "continue":
+            if deal_room.status not in (
+                DealRoom.Status.DISPUTED,
+                DealRoom.Status.CANCELLED,
+            ):
+                return Response(
+                    {"detail": "Deal Room hii haiwezi kurudishwa."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            deal_room.status = DealRoom.Status.ACCEPTED
+            deal_room.save(update_fields=["status", "updated_at"])
+        else:
+            deal_room.status = DealRoom.Status.CANCELLED
+            deal_room.save(update_fields=["status", "updated_at"])
+
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="deal.dispute_resolved",
+                target="DealRoom",
+                target_id=deal_room.id,
+                details=f"resolution={resolution} note={note[:200]}",
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "audit log failed for deal.resolve"
             )
 
         return Response(

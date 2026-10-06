@@ -118,7 +118,7 @@ def approve_listing(listing_id, admin_user):
     # ─────────────────────────────────────────────────────────
     # Endelea na approve
     # ─────────────────────────────────────────────────────────
-    listing.status = Listing.Status.AVAILABLE
+    listing.status = Listing.Status.LIVE
     listing.approved_by = admin_user
     listing.approved_at = timezone.now()
     listing.rejected_by = None

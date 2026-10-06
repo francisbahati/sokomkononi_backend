@@ -59,7 +59,7 @@ def validate_boost_request(*, listing, user, package):
     if listing.seller_id != user.id:
         raise ValidationError("Huruhusiwi ku-boost tangazo ambalo si lako.")
 
-    if listing.status != Listing.Status.AVAILABLE:
+    if listing.status != Listing.Status.LIVE:
         raise ValidationError(
             "Tangazo lazima liwe AVAILABLE kabla ya ku-boost."
         )
@@ -234,7 +234,7 @@ def activate_boost(*, boost):
             "Seller wa boost haendani na seller wa listing."
         )
 
-    if listing.status != Listing.Status.AVAILABLE:
+    if listing.status != Listing.Status.LIVE:
         raise ValidationError(
             "Tangazo lazima liwe AVAILABLE wakati boost ina-activate."
         )

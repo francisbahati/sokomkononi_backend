@@ -108,7 +108,7 @@ class TransactionCreateSerializer(serializers.Serializer):
                 "Huruhusiwi kuunda Transaction ya Deal Room hii."
             )
 
-        if deal_room.status != DealRoom.Status.AGREED:
+        if deal_room.status != DealRoom.Status.ACCEPTED:
             raise serializers.ValidationError(
                 "Transaction inaweza kuundwa tu baada ya Deal Room "
                 "kukubaliana bei."

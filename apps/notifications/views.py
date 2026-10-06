@@ -64,6 +64,16 @@ class NotificationViewSet(
     def list(self, request, *args, **kwargs):
         notifications = self.get_queryset()
 
+        # ?audience=admin|user  -> filter by audience
+        audience = request.query_params.get("audience")
+        if audience:
+            notifications = notifications.filter(audience=audience.lower())
+
+        # ?unread=true -> only unread
+        unread = request.query_params.get("unread")
+        if unread and unread.lower() in ("1", "true", "yes"):
+            notifications = notifications.filter(is_read=False)
+
         page = self.paginate_queryset(notifications)
 
         if page is not None:

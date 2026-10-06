@@ -30,7 +30,7 @@ class IsAdminUser(permissions.BasePermission):
 # Statuses ambazo zinahesabiwa kama "listing halisi" (hai/active)
 # DRAFT hazijachapishwa — hazipaswi kuhesabiwa kwenye reports.
 VISIBLE_LISTING_STATUSES = [
-    Listing.Status.AVAILABLE,
+    Listing.Status.LIVE,
     Listing.Status.RESERVED,
     Listing.Status.SOLD,
 ]
@@ -101,7 +101,7 @@ class ReportsView(APIView):
 
         total_listings = visible_qs.count()
         live_listings = visible_qs.filter(
-            status=Listing.Status.AVAILABLE,
+            status=Listing.Status.LIVE,
         ).count()
         sold_listings = visible_qs.filter(
             status=Listing.Status.SOLD,
@@ -120,7 +120,7 @@ class ReportsView(APIView):
         # ---------- Deals ----------
         total_deals = DealRoom.objects.count()
         completed_deals = DealRoom.objects.filter(
-            status=DealRoom.Status.CLOSED,
+            status=DealRoom.Status.COMPLETED,
         ).count()
         disputed_deals = DealRoom.objects.filter(
             status=DealRoom.Status.CANCELLED,
@@ -132,15 +132,15 @@ class ReportsView(APIView):
             .values_list("status", "c")
         )
         # Ensure all keys present
-        for k in ["OPEN", "NEGOTIATING", "AGREED", "CANCELLED", "CLOSED"]:
+        for k in ["OPEN", "NEGOTIATING", "ACCEPTED", "CANCELLED", "COMPLETED"]:
             deals_by_status.setdefault(k, 0)
 
         # Map to frontend keys
         deals_by_status_frontend = {
             "negotiating": deals_by_status.get("NEGOTIATING", 0),
-            "accepted": deals_by_status.get("AGREED", 0),
+            "accepted": deals_by_status.get("ACCEPTED", 0),
             "reserved": 0,  # computed from transactions
-            "completed": deals_by_status.get("CLOSED", 0),
+            "completed": deals_by_status.get("COMPLETED", 0),
             "disputed": 0,
             "cancelled": deals_by_status.get("CANCELLED", 0),
         }

@@ -3,6 +3,10 @@ from rest_framework.routers import SimpleRouter
 
 from .views import (
     AdminApproveListingView,
+    AdminBulkApproveView,
+    AdminBulkDeleteView,
+    AdminBulkRejectView,
+    AdminDraftListingsView,
     AdminPendingListingsView,
     AdminRejectListingView,
     BusinessDetailsViewSet,
@@ -37,6 +41,9 @@ listing_detail = ListingViewSet.as_view({
 })
 listing_similar = ListingViewSet.as_view({"get": "similar"})
 listing_publish = ListingViewSet.as_view({"post": "publish"})
+listing_pause = ListingViewSet.as_view({"post": "pause"})
+listing_unpause = ListingViewSet.as_view({"post": "unpause"})
+listing_mark_sold = ListingViewSet.as_view({"post": "mark_sold"})
 
 property_detail_list = PropertyDetailsViewSet.as_view({"post": "create"})
 property_detail = PropertyDetailsViewSet.as_view({
@@ -78,6 +85,10 @@ listing_image_detail = ListingImageViewSet.as_view({
 listing_fee_view = ListingFeeView.as_view()
 listing_fee_payment_view = ListingFeePaymentView.as_view()
 admin_pending_listings = AdminPendingListingsView.as_view()
+admin_drafts = AdminDraftListingsView.as_view()
+admin_bulk_approve = AdminBulkApproveView.as_view()
+admin_bulk_reject = AdminBulkRejectView.as_view()
+admin_bulk_delete = AdminBulkDeleteView.as_view()
 admin_approve_listing = AdminApproveListingView.as_view()
 admin_reject_listing = AdminRejectListingView.as_view()
 
@@ -102,10 +113,33 @@ urlpatterns = [
         admin_pending_listings,
         name="admin-pending-listings",
     ),
+    path(
+        "admin/drafts/",
+        admin_drafts,
+        name="admin-draft-listings",
+    ),
+    path(
+        "admin/bulk-approve/",
+        admin_bulk_approve,
+        name="admin-bulk-approve",
+    ),
+    path(
+        "admin/bulk-reject/",
+        admin_bulk_reject,
+        name="admin-bulk-reject",
+    ),
+    path(
+        "admin/bulk-delete/",
+        admin_bulk_delete,
+        name="admin-bulk-delete",
+    ),
 
     path("", listing_list, name="listing-list"),
     path("<int:pk>/similar/", listing_similar, name="listing-similar"),
     path("<int:pk>/publish/", listing_publish, name="listing-publish"),
+    path("<int:pk>/pause/", listing_pause, name="listing-pause"),
+    path("<int:pk>/unpause/", listing_unpause, name="listing-unpause"),
+    path("<int:pk>/mark-sold/", listing_mark_sold, name="listing-mark-sold"),
     path("<int:pk>/", listing_detail, name="listing-detail"),
 
     path(

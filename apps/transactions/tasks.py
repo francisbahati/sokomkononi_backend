@@ -220,7 +220,7 @@ def expire_unpaid_reservations():
 
             listing = Listing.objects.filter(pk=transaction.listing_id).first()
             if listing and listing.status == Listing.Status.RESERVED:
-                listing.status = Listing.Status.AVAILABLE
+                listing.status = Listing.Status.LIVE
                 listing.save(update_fields=["status", "updated_at"])
                 try:
                     from apps.waiting_list.services.notifications import (

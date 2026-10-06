@@ -25,7 +25,7 @@ def create_transaction_from_deal_room(*, deal_room, user):
         raise ValidationError(
             "Akaunti yako lazima iwe active na imethibitishwa."
         )
-    if deal_room.status != DealRoom.Status.AGREED:
+    if deal_room.status != DealRoom.Status.ACCEPTED:
         raise ValidationError(
             "Transaction inaweza kuundwa tu baada ya Deal Room "
             "kukubaliana bei."
@@ -49,7 +49,7 @@ def create_transaction_from_deal_room(*, deal_room, user):
     )
 
     if listing.status not in [
-        Listing.Status.AVAILABLE,
+        Listing.Status.LIVE,
         Listing.Status.RESERVED,   # accept_offer already reserved it
     ]:
         raise ValidationError(
@@ -131,7 +131,7 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
         if listing.status in [
             Listing.Status.RESERVED, Listing.Status.SOLD,
         ]:
-            listing.status = Listing.Status.AVAILABLE
+            listing.status = Listing.Status.LIVE
             listing.save(update_fields=["status", "updated_at"])
 
     transaction.save()
@@ -228,7 +228,7 @@ def seller_confirm_final_payment(*, transaction, seller):
     deal_room = DealRoom.objects.select_for_update().get(
         pk=transaction.deal_room_id,
     )
-    deal_room.status = DealRoom.Status.CLOSED
+    deal_room.status = DealRoom.Status.COMPLETED
     deal_room.save(update_fields=["status", "updated_at"])
 
     reservation = getattr(transaction, "reservation", None)
@@ -302,14 +302,14 @@ def cancel_transaction(*, transaction, user, reason):
     )
     listing_was_reopened = False
     if listing.status in [Listing.Status.RESERVED, Listing.Status.SOLD]:
-        listing.status = Listing.Status.AVAILABLE
+        listing.status = Listing.Status.LIVE
         listing.save(update_fields=["status", "updated_at"])
         listing_was_reopened = True
 
     deal_room = DealRoom.objects.select_for_update().get(
         pk=transaction.deal_room_id,
     )
-    if deal_room.status != DealRoom.Status.CLOSED:
+    if deal_room.status != DealRoom.Status.COMPLETED:
         deal_room.status = DealRoom.Status.CANCELLED
         deal_room.save(update_fields=["status", "updated_at"])
 

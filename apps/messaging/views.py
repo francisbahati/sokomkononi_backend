@@ -87,7 +87,7 @@ class ConversationViewSet(viewsets.GenericViewSet):
         )
 
         if listing.status not in (
-            Listing.Status.AVAILABLE,
+            Listing.Status.LIVE,
             Listing.Status.RESERVED,
             Listing.Status.SOLD,
         ):

@@ -18,10 +18,12 @@ class Listing(SoftDeleteModel):
         DRAFT = "DRAFT", "Draft"
         PENDING_PAYMENT = "PENDING_PAYMENT", "Pending payment"
         PENDING_APPROVAL = "PENDING_APPROVAL", "Pending approval"
-        AVAILABLE = "AVAILABLE", "Available"
+        LIVE = "LIVE", "Live"
         RESERVED = "RESERVED", "Reserved"
         SOLD = "SOLD", "Sold"
+        PAUSED = "PAUSED", "Paused"
         REJECTED = "REJECTED", "Rejected"
+        EXPIRED = "EXPIRED", "Expired"
         ARCHIVED = "ARCHIVED", "Archived"
 
     seller = models.ForeignKey(

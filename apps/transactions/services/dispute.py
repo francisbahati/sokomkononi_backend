@@ -120,7 +120,7 @@ def _resolve_as_completed(*, transaction, note, now, admin_user=None):
     deal_room = DealRoom.objects.select_for_update().get(
         pk=transaction.deal_room_id
     )
-    deal_room.status = DealRoom.Status.CLOSED
+    deal_room.status = DealRoom.Status.COMPLETED
     deal_room.save(update_fields=["status", "updated_at"])
 
     reservation = getattr(transaction, "reservation", None)
@@ -177,13 +177,13 @@ def _resolve_as_cancelled(*, transaction, note, now, admin_user=None):
         Listing.Status.RESERVED,
         Listing.Status.SOLD,
     ]:
-        listing.status = Listing.Status.AVAILABLE
+        listing.status = Listing.Status.LIVE
         listing.save(update_fields=["status", "updated_at"])
 
     deal_room = DealRoom.objects.select_for_update().get(
         pk=transaction.deal_room_id
     )
-    if deal_room.status != DealRoom.Status.CLOSED:
+    if deal_room.status != DealRoom.Status.COMPLETED:
         deal_room.status = DealRoom.Status.CANCELLED
         deal_room.save(update_fields=["status", "updated_at"])
 

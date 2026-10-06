@@ -153,10 +153,19 @@ class LoginView(APIView):
         responses={200: OpenApiResponse(description="Login imefanikiwa.")},
     )
     def post(self, request):
+        # LOGIN DIAGNOSTIC — safe to remove after the issue is resolved.
+        logger.info(
+            "[login] attempt identifier=%r has_cookie=%s has_auth_header=%s",
+            (request.data or {}).get("identifier", ""),
+            "access_token" in request.COOKIES,
+            "HTTP_AUTHORIZATION" in request.META,
+        )
+
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         user = serializer.validated_data["user"]
+        logger.info("[login] success user_id=%s", user.pk)
         refresh = RefreshToken.for_user(user)
 
         return Response(

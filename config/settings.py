@@ -462,3 +462,12 @@ if SENTRY_DSN:
     except Exception:
         import logging
         logging.getLogger(__name__).exception("Sentry init failed")
+
+
+# ---------------- CSRF COOKIE ----------------
+# The SPA must be able to read the CSRF cookie (js-cookie, axios xsrfCookieName).
+# If you keep the access token in a cookie, the SPA also needs to send
+# X-CSRFToken back on unsafe methods.
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = not DEBUG

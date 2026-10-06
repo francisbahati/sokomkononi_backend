@@ -54,12 +54,12 @@ class Transaction(models.Model):
         verbose_name="Bei iliyokubaliwa",
     )
     status = models.CharField(
-        max_length=30, choices=Status.choices,
+        max_length=40, choices=Status.choices,
         default=Status.RESERVATION_PENDING,
         verbose_name="Hali ya muamala",
     )
     buyer_decision = models.CharField(
-        max_length=30, choices=BuyerDecision.choices,
+        max_length=40, choices=BuyerDecision.choices,
         default=BuyerDecision.PENDING,
         verbose_name="Uamuzi wa mnunuzi",
     )

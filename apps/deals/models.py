@@ -168,7 +168,7 @@ class NegotiationOffer(models.Model):
     )
 
     status = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=Status.choices,
         default=Status.PENDING,
         verbose_name="Hali ya offer",

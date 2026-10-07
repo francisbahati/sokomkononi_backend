@@ -44,6 +44,54 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
 
+    def validate(self, attrs):
+        from decimal import Decimal
+
+        fee_mode = (attrs.get("fee_mode") or "").upper()
+        flat_fee = attrs.get("flat_fee")
+        percentage = attrs.get("percentage")
+        instance = getattr(self, "instance", None)
+
+        # When updating, fall back to the instance's current values for
+        # fields not included in the payload.
+        if instance is not None:
+            if flat_fee is None:
+                flat_fee = instance.flat_fee
+            if percentage is None:
+                percentage = instance.percentage
+            if not fee_mode:
+                fee_mode = (instance.fee_mode or "").upper()
+
+        # Enforce a positive fee for the active mode.
+        if fee_mode == "FLAT":
+            try:
+                if Decimal(str(flat_fee or 0)) <= Decimal("0"):
+                    raise serializers.ValidationError({
+                        "flat_fee": (
+                            "Ada lazima iwe kubwa kuliko sifuri. "
+                            "Kila listing inatozwa ada."
+                        )
+                    })
+            except Exception:
+                raise serializers.ValidationError({
+                    "flat_fee": "Ada si sahihi."
+                })
+        elif fee_mode == "PERCENTAGE":
+            try:
+                if Decimal(str(percentage or 0)) <= Decimal("0"):
+                    raise serializers.ValidationError({
+                        "percentage": (
+                            "Asilimia lazima iwe kubwa kuliko sifuri. "
+                            "Kila listing inatozwa ada."
+                        )
+                    })
+            except Exception:
+                raise serializers.ValidationError({
+                    "percentage": "Asilimia si sahihi."
+                })
+
+        return attrs
+
     def _ensure_category_slug(self, validated_data, instance=None):
         category = validated_data.get("category")
         # If `category` (FK id) is supplied, always mirror it to category_slug.

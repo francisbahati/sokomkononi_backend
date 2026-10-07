@@ -636,19 +636,10 @@ class ListingFeeSerializer(serializers.ModelSerializer):
 
     def get_is_disabled(self, obj):
         """
-        True when the platform admin globally disabled listing fees
-        (SystemFeatureToggle key="listing_fee", is_enabled=False).
-        The frontend uses this to skip the payment step entirely.
+        Always False. Listing fees are mandatory and always charged
+        according to the category rule. The admin can no longer skip
+        payment globally — every listing has a positive fee.
         """
-        try:
-            from apps.finance.models import SystemFeatureToggle
-            toggle = SystemFeatureToggle.objects.filter(
-                key="listing_fee",
-            ).only("is_enabled").first()
-            if toggle and not toggle.is_enabled:
-                return True
-        except Exception:
-            pass
         return False
 # ============================================================================
 # LISTING FEE PAYMENT SERIALIZER

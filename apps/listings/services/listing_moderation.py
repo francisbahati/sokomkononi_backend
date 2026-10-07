@@ -20,64 +20,15 @@ from ..models import Listing, ListingFee, ListingFeeRule
 
 def _is_listing_fee_required_for(listing):
     """
-    Determine whether this listing requires a paid fee before approval.
+    Every listing requires a paid fee before admin approval.
 
-    Priority:
-      0. If the platform admin globally disabled listing fees, → False
-      1. If the category has a rule with flat_fee=0 / percentage=0 → False
-      2. If the category has a rule with a non-zero fee → True
-      3. If the category has NO rule at all → True (requires configuration)
-
-    This function does NOT auto-create rules. Missing rules are a
-    configuration issue that must be fixed by the admin.
+    The frontend always routes the seller through the payment step and
+    blocks submission when the fee is 0 or missing. To keep that flow
+    consistent, this function always returns True — even when the
+    admin has configured 0, the fee resolver will fall back to the
+    default (3000 TZS) so a real amount is always charged.
     """
-    # 0. Global kill switch
-    try:
-        from apps.finance.models import SystemFeatureToggle
-        toggle = SystemFeatureToggle.objects.filter(
-            key="listing_fee",
-        ).first()
-        if toggle and not toggle.is_enabled:
-            return False
-    except Exception:
-        pass
-
-    if not listing.category_id:
-        return True
-
-    category = listing.category
-    category_slug = getattr(category, "slug", None)
-
-    rule = (
-        ListingFeeRule.objects
-        .filter(category=category, is_active=True, is_deleted=False)
-        .order_by("priority")
-        .first()
-    )
-    if not rule and category_slug:
-        rule = (
-            ListingFeeRule.objects
-            .filter(
-                category_slug=category_slug,
-                is_active=True,
-                is_deleted=False,
-            )
-            .order_by("priority")
-            .first()
-        )
-
-    if not rule:
-        # No rule → require configuration. The caller (perform_create
-        # or approve_listing) will raise ListingFeeNotConfigured.
-        return True
-
-    flat = Decimal(str(rule.flat_fee or 0))
-    pct = Decimal(str(rule.percentage or 0))
-
-    if rule.fee_mode == "FLAT":
-        return flat > Decimal("0")
-    return pct > Decimal("0")
-
+    return True
 
 # ============================================================
 # APPROVE

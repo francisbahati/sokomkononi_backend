@@ -261,37 +261,19 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             status=Listing.Status.DRAFT,
         )
 
-        # Immediately compute and store the listing fee, then transition
-        # to PENDING_PAYMENT (or straight to PENDING_APPROVAL if free).
-        # This means the fee is never "not configured" from the frontend's
-        # perspective — the amount is real from the moment the listing exists.
+        # Auto-compute the fee right now so the seller sees the real
+        # amount on the "Listing imeundwa" page. Every listing gets a
+        # positive fee — create_listing_fee() auto-creates a rule if
+        # none exists yet.
         try:
             from .services.listing_fee import create_listing_fee
-            from .services.listing_moderation import (
-                _is_listing_fee_required_for,
-            )
 
-            fee_required = _is_listing_fee_required_for(listing)
-
-            if fee_required:
-                fee = create_listing_fee(listing)
-                if fee.amount and fee.amount > 0:
-                    listing.status = Listing.Status.PENDING_PAYMENT
-                    listing.save(update_fields=["status", "updated_at"])
-                else:
-                    # Rule exists but fee is 0 → treat as free
-                    listing.status = Listing.Status.PENDING_APPROVAL
-                    listing.save(update_fields=["status", "updated_at"])
-            else:
-                # No fee required for this category → straight to approval
-                listing.status = Listing.Status.PENDING_APPROVAL
-                listing.save(update_fields=["status", "updated_at"])
+            create_listing_fee(listing)
+            listing.status = Listing.Status.PENDING_PAYMENT
+            listing.save(update_fields=["status", "updated_at"])
 
         except Exception as exc:
-            # Never block listing creation on a fee-config issue.
-            # The seller can still open the fee endpoint later.
-            import logging
-            logging.getLogger(__name__).exception(
+            logger.exception(
                 "Auto-fee computation failed for listing %s: %s",
                 listing.pk, exc,
             )
@@ -1776,7 +1758,6 @@ class ListingFeePaymentView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
-
 
 
 class AdminPendingListingsView(GenericAPIView):

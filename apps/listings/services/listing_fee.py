@@ -172,6 +172,12 @@ def calculate_listing_fee(price, category_slug=None, category=None):
             price * Decimal(str(rule.percentage or 0)) / Decimal("100")
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+    # Enforce a minimum positive fee — the frontend requires every
+    # listing to show a real amount. If the admin configured 0 or a
+    # percentage that computes to 0, fall back to DEFAULT_FLAT_FEE.
+    if fee_amount <= Decimal("0.00"):
+        fee_amount = DEFAULT_FLAT_FEE
+
     return {
         "rule": rule,
         "price": price,

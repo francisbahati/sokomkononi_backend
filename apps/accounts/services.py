@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import timedelta
 
@@ -10,6 +11,9 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from .models import OTPVerification, PendingRegistration, User
+
+
+logger = logging.getLogger(__name__)
 
 
 class OTPThrottled(ValidationError):
@@ -292,14 +296,25 @@ def create_pending_registration(data):
 
 
 def send_registration_otp(pending):
+    """
+    Create an OTP and send it synchronously.
+
+    OTP emails are on the user's critical path — they're waiting to
+    finish registration — so we do NOT route them through Celery. If
+    SMTP fails we raise, and the caller deletes the OTP row so the
+    user can retry.
+    """
     otp_record, otp, email = _create_otp_record(pending.email, REGISTRATION)
 
     try:
-        _dispatch_email(
-            "send_email_otp_task", send_email_otp, email, otp,
-        )
+        # Sync send — no Celery. Any SMTP exception propagates.
+        send_email_otp(email, otp)
+        logger.info("Registration OTP sent synchronously to %s", email)
     except Exception:
+        # Roll back the OTP row so the user isn't stuck with an unused
+        # code that was never delivered.
         otp_record.delete()
+        logger.exception("Failed to send registration OTP to %s", email)
         raise
 
     return email
@@ -352,18 +367,24 @@ def verify_registration_otp(identifier, otp_code):
 # ============================================================
 
 def send_password_reset_otp(user):
+    """
+    Create a password-reset OTP and send it synchronously.
+
+    Synchronous on purpose: the user is staring at a "check your
+    email" screen and needs the code within seconds. Celery worker
+    failures would silently swallow the email.
+    """
     if not user.email:
         raise ValidationError("Mtumiaji hana barua pepe.")
 
     otp_record, otp, email = _create_otp_record(user.email, PASSWORD_RESET)
 
     try:
-        _dispatch_email(
-            "send_password_reset_email_task",
-            send_password_reset_email, email, otp,
-        )
+        send_password_reset_email(email, otp)
+        logger.info("Password-reset OTP sent synchronously to %s", email)
     except Exception:
         otp_record.delete()
+        logger.exception("Failed to send password-reset OTP to %s", email)
         raise
 
     return email

@@ -555,6 +555,8 @@ class ListingFeeSerializer(serializers.ModelSerializer):
 
     currency = serializers.SerializerMethodField()
     is_disabled = serializers.SerializerMethodField()
+    amount_display = serializers.SerializerMethodField()
+    pay_endpoint = serializers.SerializerMethodField()
     fee_amount = serializers.DecimalField(
         source="amount",
         max_digits=15,
@@ -586,8 +588,10 @@ class ListingFeeSerializer(serializers.ModelSerializer):
             "fee_percentage",
             "amount",
             "fee_amount",
+            "amount_display",
             "currency",
             "is_disabled",
+            "pay_endpoint",
             "payment_status",
             "payment_reference",
             "paid_at",
@@ -603,8 +607,10 @@ class ListingFeeSerializer(serializers.ModelSerializer):
             "fee_percentage",
             "amount",
             "fee_amount",
+            "amount_display",
             "currency",
             "is_disabled",
+            "pay_endpoint",
             "payment_status",
             "payment_reference",
             "paid_at",
@@ -618,6 +624,15 @@ class ListingFeeSerializer(serializers.ModelSerializer):
 
     def get_currency(self, obj):
         return "TZS"
+
+    def get_amount_display(self, obj):
+        try:
+            return f"TZS {obj.amount:,.0f}"
+        except Exception:
+            return f"TZS {obj.amount}"
+
+    def get_pay_endpoint(self, obj):
+        return f"/api/listings/{obj.listing_id}/fee/pay/"
 
     def get_is_disabled(self, obj):
         """

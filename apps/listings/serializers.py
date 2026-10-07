@@ -620,11 +620,21 @@ class ListingFeeSerializer(serializers.ModelSerializer):
         return "TZS"
 
     def get_is_disabled(self, obj):
-        # True if the platform admin has globally disabled the listing
-        # fee. The frontend uses this to skip the payment step.
+        """
+        True when the platform admin globally disabled listing fees
+        (SystemFeatureToggle key="listing_fee", is_enabled=False).
+        The frontend uses this to skip the payment step entirely.
+        """
+        try:
+            from apps.finance.models import SystemFeatureToggle
+            toggle = SystemFeatureToggle.objects.filter(
+                key="listing_fee",
+            ).only("is_enabled").first()
+            if toggle and not toggle.is_enabled:
+                return True
+        except Exception:
+            pass
         return False
-
-
 # ============================================================================
 # LISTING FEE PAYMENT SERIALIZER
 # ============================================================================

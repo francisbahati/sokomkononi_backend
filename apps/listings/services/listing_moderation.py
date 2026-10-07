@@ -22,19 +22,27 @@ def _is_listing_fee_required_for(listing):
     """
     Determine whether this listing requires a paid fee before approval.
 
-    Returns True when:
-      - The category has NO rule (fee must be configured before approval)
-      - The category has a rule with a non-zero flat_fee or percentage
-
-    Returns False when:
-      - The category has a rule with flat_fee=0 (or percentage=0) —
-        the admin has explicitly configured this category as free.
+    Priority:
+      0. If the platform admin globally disabled listing fees, → False
+      1. If the category has a rule with flat_fee=0 / percentage=0 → False
+      2. If the category has a rule with a non-zero fee → True
+      3. If the category has NO rule at all → True (requires configuration)
 
     This function does NOT auto-create rules. Missing rules are a
     configuration issue that must be fixed by the admin.
     """
+    # 0. Global kill switch
+    try:
+        from apps.finance.models import SystemFeatureToggle
+        toggle = SystemFeatureToggle.objects.filter(
+            key="listing_fee",
+        ).first()
+        if toggle and not toggle.is_enabled:
+            return False
+    except Exception:
+        pass
+
     if not listing.category_id:
-        # No category → cannot confirm free → treat as fee-required
         return True
 
     category = listing.category

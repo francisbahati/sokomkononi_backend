@@ -51,8 +51,24 @@ def _is_listing_fee_required_for(listing):
         )
 
     if not rule:
-        # Hakuna rule — fee haihitajiki
-        return False
+        # No explicit rule exists. Auto-create a rule with the default
+        # flat fee (see apps/listings/services/listing_fee.py) so the
+        # seller sees a real amount instead of "TZS 0".
+        #
+        # This matches the behaviour of get_listing_fee_rule() so the two
+        # code paths never disagree about whether a fee applies.
+        try:
+            from .listing_fee import get_listing_fee_rule
+
+            rule = get_listing_fee_rule(
+                category_slug=category_slug,
+                category=category,
+            )
+        except Exception:
+            rule = None
+
+        if not rule:
+            return False
 
     # Rule ipo — angalia kama bei ni 0
     flat = float(rule.flat_fee or 0)

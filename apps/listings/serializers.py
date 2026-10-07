@@ -317,6 +317,10 @@ class ListingDetailSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    fee_required = serializers.SerializerMethodField()
+    fee_amount = serializers.SerializerMethodField()
+    fee_status = serializers.SerializerMethodField()
+
     class Meta:
         model = Listing
         fields = [
@@ -329,6 +333,9 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "price",
             "location",
             "attributes",
+            "fee_required",
+            "fee_amount",
+            "fee_status",
             "status",
             "is_featured",
             "is_boosted",
@@ -373,6 +380,33 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_fee_required(self, obj):
+        from .services.listing_moderation import _is_listing_fee_required_for
+        try:
+            return _is_listing_fee_required_for(obj)
+        except Exception:
+            return False
+
+    def get_fee_amount(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        if fee is None:
+            # No fee row yet — compute on the fly
+            try:
+                from .services.listing_fee import calculate_listing_fee
+                cat = obj.category if obj.category_id else None
+                slug = getattr(cat, "slug", None)
+                result = calculate_listing_fee(
+                    obj.price, category_slug=slug, category=cat,
+                )
+                return str(result["fee_amount"])
+            except Exception:
+                return None
+        return str(fee.amount)
+
+    def get_fee_status(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        return fee.payment_status if fee else "PENDING"
 
 
 # ============================================================================
@@ -468,6 +502,15 @@ class ListingFeeSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    currency = serializers.SerializerMethodField()
+    is_disabled = serializers.SerializerMethodField()
+    fee_amount = serializers.DecimalField(
+        source="amount",
+        max_digits=15,
+        decimal_places=2,
+        read_only=True,
+    )
+
     listing_title = serializers.CharField(
         source="listing.title",
         read_only=True,
@@ -491,6 +534,9 @@ class ListingFeeSerializer(serializers.ModelSerializer):
             "listing_price",
             "fee_percentage",
             "amount",
+            "fee_amount",
+            "currency",
+            "is_disabled",
             "payment_status",
             "payment_reference",
             "paid_at",
@@ -505,6 +551,9 @@ class ListingFeeSerializer(serializers.ModelSerializer):
             "listing_price",
             "fee_percentage",
             "amount",
+            "fee_amount",
+            "currency",
+            "is_disabled",
             "payment_status",
             "payment_reference",
             "paid_at",
@@ -515,6 +564,14 @@ class ListingFeeSerializer(serializers.ModelSerializer):
     def get_fee_percentage(self, obj):
         # Return the SNAPSHOT — not the current rule.
         return obj.percentage
+
+    def get_currency(self, obj):
+        return "TZS"
+
+    def get_is_disabled(self, obj):
+        # True if the platform admin has globally disabled the listing
+        # fee. The frontend uses this to skip the payment step.
+        return False
 
 
 # ============================================================================

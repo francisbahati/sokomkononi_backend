@@ -230,10 +230,45 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         return Response(output.data, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
-        serializer.save(
+        listing = serializer.save(
             seller=self.request.user,
             status=Listing.Status.DRAFT,
         )
+
+        # Immediately compute and store the listing fee, then transition
+        # to PENDING_PAYMENT (or straight to PENDING_APPROVAL if free).
+        # This means the fee is never "not configured" from the frontend's
+        # perspective — the amount is real from the moment the listing exists.
+        try:
+            from .services.listing_fee import create_listing_fee
+            from .services.listing_moderation import (
+                _is_listing_fee_required_for,
+            )
+
+            fee_required = _is_listing_fee_required_for(listing)
+
+            if fee_required:
+                fee = create_listing_fee(listing)
+                if fee.amount and fee.amount > 0:
+                    listing.status = Listing.Status.PENDING_PAYMENT
+                    listing.save(update_fields=["status", "updated_at"])
+                else:
+                    # Rule exists but fee is 0 → treat as free
+                    listing.status = Listing.Status.PENDING_APPROVAL
+                    listing.save(update_fields=["status", "updated_at"])
+            else:
+                # No fee required for this category → straight to approval
+                listing.status = Listing.Status.PENDING_APPROVAL
+                listing.save(update_fields=["status", "updated_at"])
+
+        except Exception as exc:
+            # Never block listing creation on a fee-config issue.
+            # The seller can still open the fee endpoint later.
+            import logging
+            logging.getLogger(__name__).exception(
+                "Auto-fee computation failed for listing %s: %s",
+                listing.pk, exc,
+            )
 
     def perform_update(self, serializer):
         instance = self.get_object()
@@ -440,37 +475,50 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Angalia kama fee inahitajika kwa category hii
-        fee_required = _is_listing_fee_required_for(listing)
+        # Fee already created at listing-create time. Check its status.
+        fee = getattr(listing, "listing_fee", None)
 
-        if fee_required:
-            # Unda ListingFee record (itakuwa PENDING — muuzaji atalipa)
+        if fee is None:
+            # Legacy listings — create on demand
             try:
-                create_listing_fee(listing)
+                fee = create_listing_fee(listing)
             except Exception as exc:
-                logger.warning(
-                    "[listings] create_listing_fee failed for %s: %s",
-                    listing.id, exc,
+                logger.exception(
+                    "Could not create listing fee for %s: %s",
+                    listing.pk, exc,
+                )
+                return Response(
+                    {"detail": (
+                        "Imeshindwa kuhesabu ada ya tangazo. "
+                        "Wasiliana na msimamizi."
+                    )},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
-            listing.status = Listing.Status.PENDING_PAYMENT
+        if fee.payment_status == ListingFee.PaymentStatus.PAID:
+            # Already paid — move to PENDING_APPROVAL
+            listing.status = Listing.Status.PENDING_APPROVAL
             listing.save(update_fields=["status", "updated_at"])
-
             return Response(
-                {
-                    "detail": "Malipo ya ada yanahitajika kabla ya kuwasilisha.",
-                    "payment_required": True,
-                    "listing_id": listing.id,
-                },
+                ListingDetailSerializer(
+                    listing, context={"request": request},
+                ).data,
                 status=status.HTTP_200_OK,
             )
 
-        # Fee haihitajiki — nenda moja kwa moja PENDING_APPROVAL
-        listing.status = Listing.Status.PENDING_APPROVAL
+        # Fee not paid — keep in PENDING_PAYMENT so the seller pays
+        listing.status = Listing.Status.PENDING_PAYMENT
         listing.save(update_fields=["status", "updated_at"])
 
         return Response(
-            ListingDetailSerializer(listing, context={"request": request}).data,
+            {
+                "detail": "Malipo ya ada yanahitajika kabla ya kuwasilisha.",
+                "payment_required": True,
+                "fee_amount": str(fee.amount),
+                "fee_currency": "TZS",
+                "listing_id": listing.id,
+                "status": listing.status,
+            },
             status=status.HTTP_200_OK,
         )
     # ═══════════════════════════════════════════════════════════════════
@@ -1409,10 +1457,26 @@ class ListingFeeView(APIView):
         try:
             listing_fee = ListingFee.objects.get(listing=listing)
         except ListingFee.DoesNotExist:
-            return Response(
-                {"detail": "Ada ya tangazo haijatengenezwa bado."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            # Auto-create the fee from the rule so the frontend always
+            # gets a real amount instead of "TZS 0 / not configured".
+            try:
+                from .services.listing_fee import create_listing_fee
+                listing_fee = create_listing_fee(listing)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Could not compute fee for listing %s: %s",
+                    listing.pk, exc,
+                )
+                return Response(
+                    {
+                        "detail": (
+                            "Imeshindwa kuhesabu ada ya tangazo. "
+                            "Wasiliana na msimamizi."
+                        )
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
 
         return Response(
             ListingFeeSerializer(

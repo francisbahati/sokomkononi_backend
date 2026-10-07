@@ -3,6 +3,7 @@ from rest_framework.routers import SimpleRouter
 
 from .views import (
     AdminApproveListingView,
+    MyUnpaidListingsView,
     AdminBulkApproveView,
     AdminBulkDeleteView,
     AdminBulkRejectView,
@@ -135,6 +136,11 @@ urlpatterns = [
     ),
 
     path("", listing_list, name="listing-list"),
+    path(
+        "mine/unpaid/",
+        MyUnpaidListingsView.as_view(),
+        name="listing-mine-unpaid",
+    ),
     path("<int:pk>/similar/", listing_similar, name="listing-similar"),
     path("<int:pk>/publish/", listing_publish, name="listing-publish"),
     path("<int:pk>/pause/", listing_pause, name="listing-pause"),

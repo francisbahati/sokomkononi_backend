@@ -89,6 +89,11 @@ class ListingListSerializer(serializers.ModelSerializer):
     )
 
     primary_image = serializers.SerializerMethodField()
+    status_label = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
+    payment_label = serializers.SerializerMethodField()
+    fee_amount = serializers.SerializerMethodField()
+    is_paid = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
@@ -99,6 +104,11 @@ class ListingListSerializer(serializers.ModelSerializer):
             "location",
             "attributes",
             "status",
+            "status_label",
+            "payment_status",
+            "payment_label",
+            "fee_amount",
+            "is_paid",
             "is_featured",
             "is_boosted",
             "views_count",
@@ -107,6 +117,47 @@ class ListingListSerializer(serializers.ModelSerializer):
             "primary_image",
             "created_at",
         ]
+
+    def get_status_label(self, obj):
+        labels = {
+            "DRAFT": "Rasimu",
+            "PENDING_PAYMENT": "Haijalipwa",
+            "PENDING_APPROVAL": "Inasubiri idhini",
+            "LIVE": "Hai",
+            "RESERVED": "Imehifadhiwa",
+            "SOLD": "Imeuzwa",
+            "PAUSED": "Imesimamishwa",
+            "REJECTED": "Imekataliwa",
+            "EXPIRED": "Imeisha muda",
+            "ARCHIVED": "Kumbukumbu",
+        }
+        return labels.get(obj.status, obj.status)
+
+    def get_payment_status(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        return fee.payment_status if fee else "PENDING"
+
+    def get_payment_label(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        if fee is None:
+            return "Haijalipwa"
+        labels = {
+            "PENDING": "Haijalipwa",
+            "PAID": "Imelipwa",
+            "FAILED": "Imeshindikana",
+            "REFUNDED": "Imerejeshwa",
+        }
+        return labels.get(fee.payment_status, fee.payment_status)
+
+    def get_fee_amount(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        return str(fee.amount) if fee else None
+
+    def get_is_paid(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        if fee is None:
+            return False
+        return fee.payment_status == "PAID"
 
     def get_primary_image(self, obj):
         image = (
@@ -671,6 +722,47 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
         ]
 
         read_only_fields = fields
+
+    def get_status_label(self, obj):
+        labels = {
+            "DRAFT": "Rasimu",
+            "PENDING_PAYMENT": "Haijalipwa",
+            "PENDING_APPROVAL": "Inasubiri idhini",
+            "LIVE": "Hai",
+            "RESERVED": "Imehifadhiwa",
+            "SOLD": "Imeuzwa",
+            "PAUSED": "Imesimamishwa",
+            "REJECTED": "Imekataliwa",
+            "EXPIRED": "Imeisha muda",
+            "ARCHIVED": "Kumbukumbu",
+        }
+        return labels.get(obj.status, obj.status)
+
+    def get_payment_status(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        return fee.payment_status if fee else "PENDING"
+
+    def get_payment_label(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        if fee is None:
+            return "Haijalipwa"
+        labels = {
+            "PENDING": "Haijalipwa",
+            "PAID": "Imelipwa",
+            "FAILED": "Imeshindikana",
+            "REFUNDED": "Imerejeshwa",
+        }
+        return labels.get(fee.payment_status, fee.payment_status)
+
+    def get_fee_amount(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        return str(fee.amount) if fee else None
+
+    def get_is_paid(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        if fee is None:
+            return False
+        return fee.payment_status == "PAID"
 
     def get_primary_image(self, obj):
         image = (

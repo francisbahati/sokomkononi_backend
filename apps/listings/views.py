@@ -1641,13 +1641,24 @@ class ListingFeePaymentView(APIView):
         )
 
 class AdminPendingListingsView(GenericAPIView):
+    """
+    GET /api/listings/admin/pending/
+
+    Returns ONLY listings that are PENDING_APPROVAL *and* have their
+    listing fee PAID. Listings in DRAFT or PENDING_PAYMENT are
+    intentionally hidden from admins — they belong to the seller
+    until payment is confirmed.
+    """
     permission_classes = [permissions.IsAdminUser]
     serializer_class = AdminPendingListingSerializer
 
     def get(self, request):
         listings = (
             Listing.objects
-            .filter(status=Listing.Status.PENDING_APPROVAL)
+            .filter(
+                status=Listing.Status.PENDING_APPROVAL,
+                listing_fee__payment_status="PAID",
+            )
             .select_related("seller", "category", "listing_fee")
             .prefetch_related("images")
             .order_by("-created_at")
@@ -2003,3 +2014,47 @@ class AdminBulkDeleteView(APIView):
             except Exception as exc:
                 failed.append({"id": pk, "error": str(exc)})
         return Response({"succeeded": succeeded, "failed": failed})
+
+
+# ============================================================================
+# SELLER — UNPAID LISTINGS (dashboard widget)
+# ============================================================================
+
+class MyUnpaidListingsView(GenericAPIView):
+    """
+    GET /api/listings/mine/unpaid/
+
+    Returns the seller's own listings that are waiting for payment,
+    so the frontend can show a "you have 3 unpaid listings" banner.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ListingListSerializer
+
+    def get(self, request):
+        listings = (
+            Listing.objects
+            .filter(
+                seller=request.user,
+                status__in=[
+                    Listing.Status.DRAFT,
+                    Listing.Status.PENDING_PAYMENT,
+                ],
+            )
+            .select_related("seller", "category", "listing_fee")
+            .prefetch_related("images")
+            .order_by("-created_at")
+        )
+
+        page = self.paginate_queryset(listings)
+        serializer = ListingListSerializer(
+            page if page is not None else listings,
+            many=True,
+            context={"request": request},
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+
+        return Response({
+            "count": listings.count(),
+            "results": serializer.data,
+        })

@@ -58,11 +58,12 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
     )
     if listing.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia ada ya tangazo hili.")
-    if listing.status not in (
+    allowed_states = (
         Listing.Status.DRAFT,
         Listing.Status.PENDING_PAYMENT,
         Listing.Status.REJECTED,
-    ):
+    )
+    if listing.status not in allowed_states:
         raise ValidationError(
             f"Ada haiwezi kulipwa kwa tangazo lenye hali ya {listing.status}."
         )

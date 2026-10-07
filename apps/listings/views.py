@@ -1559,13 +1559,35 @@ class ListingFeeView(APIView):
     },
 )
 class ListingFeePaymentView(APIView):
-    """Initiate a FimiPay collection for a listing fee."""
+    """
+    POST /api/listings/{id}/fee/pay/
+
+    Three paths, decided by the request body:
+
+    1. Free category (fee == 0):
+       Body: { "payment_reference": "free" }
+       → Fee marked PAID, listing → PENDING_APPROVAL
+
+    2. Bundle credits:
+       Body: { "payment_reference": "credits" }
+       → Credit consumed, fee PAID, listing → PENDING_APPROVAL
+
+    3. FimiPay (mobile money / card / bank):
+       Body: { "payment_method": "mpesa", "phone": "255..." }
+       → Returns { fimipay: { order_id, payment_status: "PENDING" } }
+       → Webhook flips status when the payment lands.
+
+    Permission: seller-only.
+    Allowed listing states: DRAFT, PENDING_PAYMENT, REJECTED (retry).
+    """
     permission_classes = [permissions.IsAuthenticated]
 
+    # ------------------------------------------------------------------
     def post(self, request, listing_id):
         listing_id, err = require_int_listing_id(listing_id)
         if err:
             return err
+
         listing = get_object_or_404(Listing, id=listing_id)
 
         if not request.user.is_staff and listing.seller_id != request.user.id:
@@ -1574,61 +1596,175 @@ class ListingFeePaymentView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Credits path
-        payment_reference = (request.data.get("payment_reference") or "").strip()
+        # Paid already?
+        existing_fee = getattr(listing, "listing_fee", None)
+        if (
+            existing_fee is not None
+            and existing_fee.payment_status == ListingFee.PaymentStatus.PAID
+        ):
+            return Response(
+                {
+                    "detail": "Ada ya tangazo hili tayari imelipwa.",
+                    "listing": {
+                        "id": listing.id,
+                        "status": listing.status,
+                    },
+                    "fee": {
+                        "amount": str(existing_fee.amount),
+                        "payment_status": existing_fee.payment_status,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # Ensure a fee row exists (auto-compute if legacy)
+        if existing_fee is None:
+            try:
+                from .services.listing_fee import create_listing_fee
+                existing_fee = create_listing_fee(listing)
+            except Exception as exc:
+                logger.exception(
+                    "Could not create fee for listing %s: %s",
+                    listing.id, exc,
+                )
+                return Response(
+                    {"detail": (
+                        "Ada ya tangazo haijatengenezwa. "
+                        "Wasiliana na msimamizi."
+                    )},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        payment_reference = (
+            request.data.get("payment_reference") or ""
+        ).strip().lower()
+
+        # ============================================================
+        # PATH 1 — FREE
+        # ============================================================
+        if payment_reference == "free":
+            if existing_fee.amount > 0:
+                # Seller is trying to skip a real fee — reject.
+                return Response(
+                    {"detail": (
+                        "Ada ya tangazo hili si sifuri. "
+                        "Tafadhali lipia kiasi halisi."
+                    )},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            from django.db import transaction as db_tx
+            with db_tx.atomic():
+                existing_fee.payment_status = ListingFee.PaymentStatus.PAID
+                existing_fee.payment_reference = f"free-{listing.id}"
+                existing_fee.paid_at = timezone.now()
+                existing_fee.save(update_fields=[
+                    "payment_status", "payment_reference", "paid_at",
+                    "updated_at",
+                ])
+
+                listing.status = Listing.Status.PENDING_APPROVAL
+                listing.save(update_fields=["status", "updated_at"])
+
+            # Notify admin
+            try:
+                from apps.notifications.models import Notification
+                from apps.notifications.services.notification import (
+                    create_notification_for_admins,
+                )
+                create_notification_for_admins(
+                    notification_type=Notification.NotificationType.LISTING_CREATED,
+                    title="Listing tayari kwa idhini (bure)",
+                    message=f'"{listing.title}" imewasilishwa bila ada.',
+                    related_object_type="listings.Listing",
+                    related_object_id=listing.id,
+                    action_url=f"/smk-control-9x7k/moderation",
+                )
+            except Exception:
+                logger.exception("admin notification for free listing failed")
+
+            return Response(
+                {
+                    "message": "Tangazo limewasilishwa kwa admin.",
+                    "listing": {"id": listing.id, "status": listing.status},
+                    "via": "free",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # ============================================================
+        # PATH 2 — CREDITS
+        # ============================================================
         if payment_reference == "credits":
-            import uuid
-            from django.db import transaction
-            with transaction.atomic():
+            import uuid as _uuid
+            from django.db import transaction as db_tx
+            from apps.credits.services import consume_credit
+
+            with db_tx.atomic():
                 if not consume_credit(request.user, "listing"):
                     return Response(
                         {"detail": "Hakuna listing credits za kutosha."},
                         status=status.HTTP_402_PAYMENT_REQUIRED,
                     )
 
-                fee = create_listing_fee(listing)
-                fee.payment_status = ListingFee.PaymentStatus.PAID
-                fee.payment_reference = (
-                    f"credits-{fee.pk}-{uuid.uuid4().hex[:12]}"
-                )
-                fee.paid_at = timezone.now()
-                fee.save(update_fields=[
-                    "payment_status", "payment_reference",
-                    "paid_at", "updated_at",
+                ref = f"credits-{existing_fee.pk}-{_uuid.uuid4().hex[:12]}"
+                existing_fee.payment_status = ListingFee.PaymentStatus.PAID
+                existing_fee.payment_reference = ref
+                existing_fee.paid_at = timezone.now()
+                existing_fee.save(update_fields=[
+                    "payment_status", "payment_reference", "paid_at",
+                    "updated_at",
                 ])
 
                 listing.status = Listing.Status.PENDING_APPROVAL
                 listing.save(update_fields=["status", "updated_at"])
 
+            # Notify admin
+            try:
+                from apps.notifications.models import Notification
+                from apps.notifications.services.notification import (
+                    create_notification_for_admins,
+                )
+                create_notification_for_admins(
+                    notification_type=Notification.NotificationType.LISTING_CREATED,
+                    title="Listing tayari kwa idhini (credits)",
+                    message=f'"{listing.title}" imewasilishwa kwa credits.',
+                    related_object_type="listings.Listing",
+                    related_object_id=listing.id,
+                    action_url=f"/smk-control-9x7k/moderation",
+                )
+            except Exception:
+                logger.exception("admin notification for credits listing failed")
+
             return Response(
                 {
-                    "payment_status": "SUCCESS",
+                    "message": "Malipo yamekamilika kwa credits.",
+                    "listing": {"id": listing.id, "status": listing.status},
                     "via": "credits",
-                    "listing_id": listing.id,
-                    "status": listing.status,
                 },
                 status=status.HTTP_200_OK,
             )
 
-        # Default: FimiPay
+        # ============================================================
+        # PATH 3 — FIMIPAY (default)
+        # ============================================================
         try:
-            create_listing_fee(listing)
+            from .services.listing_payment import initiate_listing_fee_payment
+            data = initiate_listing_fee_payment(
+                listing=listing,
+                user=request.user,
+                payment_method=request.data.get("payment_method", "mobile"),
+                phone=request.data.get("phone", ""),
+            )
         except DjangoValidationError as exc:
             return Response(
                 {"detail": getattr(exc, "messages", [str(exc)])},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        from .services.listing_payment import initiate_listing_fee_payment
-        try:
-            data = initiate_listing_fee_payment(
-                listing=listing, user=request.user,
-                payment_method=request.data.get("payment_method", "mobile"),
-                phone=request.data.get("phone", ""),
-            )
         except ValidationError as exc:
             return Response(
-                exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail},
+                exc.detail if isinstance(exc.detail, dict)
+                else {"detail": exc.detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1639,6 +1775,8 @@ class ListingFeePaymentView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
 
 class AdminPendingListingsView(GenericAPIView):
     """

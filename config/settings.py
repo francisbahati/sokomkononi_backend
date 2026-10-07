@@ -228,10 +228,16 @@ CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(
 REST_FRAMEWORK = {
     # FIX: stop DRF from hijacking ?format=pdf|csv|doc (it returned 404).
     "URL_FORMAT_OVERRIDE": None,
+    # JWT-only API. SessionAuthentication was removed because it
+    # enforces CSRF on unsafe methods (POST/PUT/PATCH/DELETE) when a
+    # session cookie happens to be present — which broke API calls
+    # whenever a stale Django admin session existed on the same origin.
+    #
+    # The Django admin (/django-admin/) still uses SessionMiddleware and
+    # its own CSRF checks — those are unaffected by this change.
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.accounts.authentication.FlexibleJWTAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",

@@ -226,8 +226,34 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         instance = serializer.instance
-        output = ListingDetailSerializer(instance, context={"request": request})
-        return Response(output.data, status=status.HTTP_201_CREATED)
+        instance.refresh_from_db()
+        data = ListingDetailSerializer(
+            instance, context={"request": request},
+        ).data
+
+        fee = getattr(instance, "listing_fee", None)
+        if fee is not None:
+            data["payment"] = {
+                "required": True,
+                "amount": str(fee.amount),
+                "amount_display": f"TZS {fee.amount:,.0f}",
+                "currency": "TZS",
+                "status": fee.payment_status,
+                "listing_id": instance.id,
+                "pay_endpoint": f"/api/listings/{instance.id}/fee/pay/",
+            }
+        else:
+            data["payment"] = {
+                "required": False,
+                "amount": None,
+                "amount_display": None,
+                "currency": "TZS",
+                "status": "NOT_CONFIGURED",
+                "listing_id": instance.id,
+                "pay_endpoint": f"/api/listings/{instance.id}/fee/pay/",
+            }
+
+        return Response(data, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
         listing = serializer.save(
@@ -303,8 +329,37 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             )
             instance.refresh_from_db(fields=["views_count"])
 
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)
+        data = self.get_serializer(instance).data
+
+        # Inject the same payment block so any listing detail page can
+        # render the fee without a second call.
+        fee = getattr(instance, "listing_fee", None)
+        if fee is not None:
+            data["payment"] = {
+                "required": True,
+                "amount": str(fee.amount),
+                "amount_display": f"TZS {fee.amount:,.0f}",
+                "currency": "TZS",
+                "status": fee.payment_status,
+                "listing_id": instance.id,
+                "pay_endpoint": f"/api/listings/{instance.id}/fee/pay/",
+            }
+        elif getattr(instance, "status", "") in (
+            "DRAFT", "PENDING_PAYMENT", "REJECTED",
+        ):
+            data["payment"] = {
+                "required": False,
+                "amount": None,
+                "amount_display": None,
+                "currency": "TZS",
+                "status": "NOT_CONFIGURED",
+                "listing_id": instance.id,
+                "pay_endpoint": f"/api/listings/{instance.id}/fee/pay/",
+            }
+        else:
+            data["payment"] = None
+
+        return Response(data)
 
     @action(
         detail=True,

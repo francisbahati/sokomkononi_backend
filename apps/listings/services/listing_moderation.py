@@ -1,3 +1,9 @@
+# apps/listings/services/listing_moderation.py
+"""
+Listing moderation: approve / reject + fee-required detection.
+"""
+from decimal import Decimal
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -8,36 +14,38 @@ from apps.notifications.services.notification import create_notification
 from ..models import Listing, ListingFee, ListingFeeRule
 
 
-# ═════════════════════════════════════════════════════════════════
-# HELPER: Angalia kama fee inahitajika kwa listing hii
-# ═════════════════════════════════════════════════════════════════
+# ============================================================
+# FEE-REQUIRED DETECTION
+# ============================================================
+
 def _is_listing_fee_required_for(listing):
     """
-    Rudisha True kama fee inahitajika kwa category ya listing hii.
+    Determine whether this listing requires a paid fee before approval.
 
-    Kanuni:
-      1. Kama category ina ListingFeeRule active → fee inahitajika
-      2. Kama hakuna rule yoyote active → fee HAIHITAJIKI (bure)
-      3. Kama rule.flat_fee == 0 na rule.percentage == 0 → fee HAIHITAJIKI
+    Returns True when:
+      - The category has NO rule (fee must be configured before approval)
+      - The category has a rule with a non-zero flat_fee or percentage
+
+    Returns False when:
+      - The category has a rule with flat_fee=0 (or percentage=0) —
+        the admin has explicitly configured this category as free.
+
+    This function does NOT auto-create rules. Missing rules are a
+    configuration issue that must be fixed by the admin.
     """
     if not listing.category_id:
-        # Listing haina category — kwa kawaida fee inahitajika
+        # No category → cannot confirm free → treat as fee-required
         return True
 
     category = listing.category
     category_slug = getattr(category, "slug", None)
 
-    # Tafuta rule active ya category hii
-    rule = None
-
-    if category is not None:
-        rule = (
-            ListingFeeRule.objects
-            .filter(category=category, is_active=True, is_deleted=False)
-            .order_by("priority")
-            .first()
-        )
-
+    rule = (
+        ListingFeeRule.objects
+        .filter(category=category, is_active=True, is_deleted=False)
+        .order_by("priority")
+        .first()
+    )
     if not rule and category_slug:
         rule = (
             ListingFeeRule.objects
@@ -51,41 +59,22 @@ def _is_listing_fee_required_for(listing):
         )
 
     if not rule:
-        # No explicit rule exists. Auto-create a rule with the default
-        # flat fee (see apps/listings/services/listing_fee.py) so the
-        # seller sees a real amount instead of "TZS 0".
-        #
-        # This matches the behaviour of get_listing_fee_rule() so the two
-        # code paths never disagree about whether a fee applies.
-        try:
-            from .listing_fee import get_listing_fee_rule
+        # No rule → require configuration. The caller (perform_create
+        # or approve_listing) will raise ListingFeeNotConfigured.
+        return True
 
-            rule = get_listing_fee_rule(
-                category_slug=category_slug,
-                category=category,
-            )
-        except Exception:
-            rule = None
+    flat = Decimal(str(rule.flat_fee or 0))
+    pct = Decimal(str(rule.percentage or 0))
 
-        if not rule:
-            return False
-
-    # Rule ipo — angalia kama bei ni 0
-    flat = float(rule.flat_fee or 0)
-    pct = float(rule.percentage or 0)
-
-    if rule.fee_mode == "FLAT" and flat == 0:
-        return False
-
-    if rule.fee_mode == "PERCENTAGE" and pct == 0:
-        return False
-
-    return True
+    if rule.fee_mode == "FLAT":
+        return flat > Decimal("0")
+    return pct > Decimal("0")
 
 
-# ═════════════════════════════════════════════════════════════════
-# APPROVE LISTING
-# ═════════════════════════════════════════════════════════════════
+# ============================================================
+# APPROVE
+# ============================================================
+
 @transaction.atomic
 def approve_listing(listing_id, admin_user):
     if not admin_user or not admin_user.is_authenticated:
@@ -107,9 +96,7 @@ def approve_listing(listing_id, admin_user):
             "Tangazo hili halipo kwenye hali ya kusubiri idhini."
         )
 
-    # ─────────────────────────────────────────────────────────
-    # Angalia kama fee inahitajika kwa category hii
-    # ─────────────────────────────────────────────────────────
+    # Verify the fee has been paid when one was required.
     fee_required = _is_listing_fee_required_for(listing)
 
     if fee_required:
@@ -121,7 +108,7 @@ def approve_listing(listing_id, admin_user):
             )
         except ListingFee.DoesNotExist:
             raise ValidationError(
-                "Tangazo hili halina ada ya tangazo. "
+                "Tangazo hili halina rekodi ya ada. "
                 "Tafadhali hakikisha muuzaji amelipa ada kwanza."
             )
 
@@ -131,9 +118,7 @@ def approve_listing(listing_id, admin_user):
                 "tangazo haijalipwa."
             )
 
-    # ─────────────────────────────────────────────────────────
-    # Endelea na approve
-    # ─────────────────────────────────────────────────────────
+    # Approve
     listing.status = Listing.Status.LIVE
     listing.approved_by = admin_user
     listing.approved_at = timezone.now()
@@ -171,9 +156,10 @@ def approve_listing(listing_id, admin_user):
     return listing
 
 
-# ═════════════════════════════════════════════════════════════════
-# REJECT LISTING
-# ═════════════════════════════════════════════════════════════════
+# ============================================================
+# REJECT
+# ============================================================
+
 @transaction.atomic
 def reject_listing(listing_id, admin_user, rejection_reason):
     if not admin_user or not admin_user.is_authenticated:

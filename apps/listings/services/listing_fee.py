@@ -1,23 +1,60 @@
 # apps/listings/services/listing_fee.py
+"""
+Listing fee computation + persistence.
+
+Key rules:
+  - Never auto-charge when a category has no configured rule
+    (unless settings.LISTING_FEE_ALLOW_FALLBACK is explicitly True).
+  - Freeze the quoted amount once a real rule is attached; allow
+    re-pricing when the previous computation used a fallback, or
+    when the caller asks for a forced refresh (24h staleness).
+"""
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 
 from ..models import ListingFee, ListingFeeRule
 
 
-DEFAULT_FLAT_FEE = 3000
+DEFAULT_FLAT_FEE = Decimal("3000.00")
 
+
+class ListingFeeNotConfigured(ValidationError):
+    """Raised when a category has no fee rule and fallback is disabled."""
+
+    def __init__(self, category_slug=None):
+        slug = category_slug or "—"
+        super().__init__({
+            "detail": (
+                "Ada ya kuchapisha haijasanidiwa kwa kundi hili bado. "
+                "Tafadhali wasiliana na msimamizi kabla ya kuendelea."
+            ),
+            "code": "listing_fee_not_configured",
+            "category_slug": slug,
+        })
+
+
+def _fallback_allowed():
+    return getattr(settings, "LISTING_FEE_ALLOW_FALLBACK", False)
+
+
+# ============================================================
+# RULE LOOKUP
+# ============================================================
 
 def get_listing_fee_rule(category_slug=None, price=None, category=None):
     """
-    Return the active fee rule for a listing.
+    Find the active fee rule for a listing.
 
-    Priority:
+    Lookup priority:
       1. FK match on `category`
       2. Slug match on `category_slug`
-      3. Legacy name match
-      4. Auto-create a per-category default (never returns None)
+      3. Legacy match on `name`
+      4. Fallback (only if LISTING_FEE_ALLOW_FALLBACK is True)
+
+    Raises ListingFeeNotConfigured when no rule is found and fallback
+    is disabled.
     """
     # 1. FK match (authoritative)
     if category is not None:
@@ -48,7 +85,7 @@ def get_listing_fee_rule(category_slug=None, price=None, category=None):
                 rule.save(update_fields=["category"])
             return rule
 
-    # 3. Match by rule.name == category_slug (legacy)
+    # 3. Legacy name match
     if category_slug:
         rule = (
             ListingFeeRule.objects
@@ -63,7 +100,14 @@ def get_listing_fee_rule(category_slug=None, price=None, category=None):
         if rule:
             return rule
 
-    # 4. Auto-create for this exact category
+    # 4. No rule found
+    if not _fallback_allowed():
+        raise ListingFeeNotConfigured(
+            category_slug=category_slug
+            or (category.slug if category is not None else None)
+        )
+
+    # Fallback: auto-create a per-category default
     if category is not None:
         rule, _ = ListingFeeRule.objects.get_or_create(
             category=category,
@@ -80,7 +124,6 @@ def get_listing_fee_rule(category_slug=None, price=None, category=None):
         )
         return rule
 
-    # 5. Slug-only fallback (no Category object)
     if category_slug:
         rule, _ = ListingFeeRule.objects.get_or_create(
             category_slug=category_slug,
@@ -95,17 +138,21 @@ def get_listing_fee_rule(category_slug=None, price=None, category=None):
         )
         return rule
 
-    return None
+    raise ListingFeeNotConfigured()
 
+
+# ============================================================
+# FEE COMPUTATION
+# ============================================================
 
 def calculate_listing_fee(price, category_slug=None, category=None):
     """
-    Compute the listing fee.
+    Compute the listing fee for a given price and category.
 
-    FLAT mode        → rule.flat_fee
-    PERCENTAGE mode  → price × percentage / 100
+    Returns a dict: { rule, price, percentage, fee_amount }
+    Raises ListingFeeNotConfigured if no rule is available.
     """
-    price = Decimal(price or 0)
+    price = Decimal(str(price or 0))
 
     if price <= 0:
         raise ValidationError(
@@ -117,17 +164,12 @@ def calculate_listing_fee(price, category_slug=None, category=None):
         price=price,
         category=category,
     )
-    if not rule:
-        raise ValidationError(
-            "Hakuna kanuni ya ada inayolingana na category hii. "
-            "Wasiliana na admin ili kuweka fee rule."
-        )
 
     if rule.fee_mode == "FLAT":
-        fee_amount = Decimal(rule.flat_fee or 0)
+        fee_amount = Decimal(str(rule.flat_fee or 0))
     else:
         fee_amount = (
-            price * Decimal(rule.percentage or 0) / Decimal("100")
+            price * Decimal(str(rule.percentage or 0)) / Decimal("100")
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     return {
@@ -138,9 +180,19 @@ def calculate_listing_fee(price, category_slug=None, category=None):
     }
 
 
-def create_listing_fee(listing):
+# ============================================================
+# PERSISTENCE
+# ============================================================
+
+def create_listing_fee(listing, *, force_recompute=False):
     """
-    Create or update the pending listing fee for a listing.
+    Create or refresh the pending listing fee for a listing.
+
+    Freeze semantics:
+      - PENDING fee WITH a real `rule` → freeze (seller saw this price).
+      - PENDING fee WITHOUT a rule (fallback) → allow recompute.
+      - PAID fee → never touched.
+      - force_recompute=True → always recompute (stale-fee refresh).
     """
     category_obj = listing.category if listing.category_id else None
     category_slug = getattr(category_obj, "slug", None)
@@ -151,20 +203,32 @@ def create_listing_fee(listing):
         category=category_obj,
     )
 
-    listing_fee, created = ListingFee.objects.get_or_create(
-        listing=listing,
-        defaults={
-            "seller": listing.seller,
-            "amount": result["fee_amount"],
-            "rule": result["rule"],
-            "percentage": result["percentage"],
-            "payment_status": ListingFee.PaymentStatus.PENDING,
-        },
-    )
+    existing = ListingFee.objects.filter(listing=listing).first()
 
-    if not created:
-        # Freeze the quoted amount — do NOT recompute on subsequent
-        # calls. The user saw this number in the pay dialog.
-        return listing_fee
+    if existing is None:
+        return ListingFee.objects.create(
+            listing=listing,
+            seller=listing.seller,
+            amount=result["fee_amount"],
+            rule=result["rule"],
+            percentage=result["percentage"],
+            payment_status=ListingFee.PaymentStatus.PENDING,
+        )
 
-    return listing_fee
+    # Already paid — never touch
+    if existing.payment_status == ListingFee.PaymentStatus.PAID:
+        return existing
+
+    # Frozen snapshot with a real rule and no forced refresh → keep it
+    if existing.rule_id is not None and not force_recompute:
+        return existing
+
+    # Recompute (fallback rule, or force_recompute)
+    existing.seller = listing.seller
+    existing.amount = result["fee_amount"]
+    existing.rule = result["rule"]
+    existing.percentage = result["percentage"]
+    existing.save(update_fields=[
+        "seller", "amount", "rule", "percentage", "updated_at",
+    ])
+    return existing

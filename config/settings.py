@@ -471,3 +471,22 @@ if SENTRY_DSN:
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = not DEBUG
+
+
+# ============================================================
+# LISTING FEE BEHAVIOUR
+# ============================================================
+# When True, a category with no configured fee rule is charged the
+# default flat fee (TZS 3,000). Recommended: False — during launch
+# you want no surprise charges. If a rule is missing, the API
+# returns a clear "not configured" error and the admin fixes it.
+LISTING_FEE_ALLOW_FALLBACK = env_bool(
+    "LISTING_FEE_ALLOW_FALLBACK", False,
+)
+
+# How long a PENDING listing fee stays frozen before we re-price it
+# from the current rule. Sellers who abandon the payment page get the
+# new price if the admin raises the fee.
+LISTING_FEE_REPRICE_AFTER_HOURS = env_int(
+    "LISTING_FEE_REPRICE_AFTER_HOURS", 24,
+)

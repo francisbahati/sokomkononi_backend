@@ -1,3 +1,10 @@
+# apps/listings/services/listing_payment.py
+"""
+FimiPay initiation + webhook handling for listing fees.
+"""
+import uuid
+
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -11,6 +18,36 @@ from apps.payments.fimipay import (
 from ..models import Listing, ListingFee
 
 
+def _reprice_window_hours():
+    return getattr(settings, "LISTING_FEE_REPRICE_AFTER_HOURS", 24)
+
+
+def maybe_reprice_stale_fee(listing_fee, *, listing=None):
+    """
+    If the fee is PENDING and older than LISTING_FEE_REPRICE_AFTER_HOURS,
+    recompute it from the current rule so admin changes take effect on
+    abandoned drafts.
+    """
+    if listing_fee.payment_status != ListingFee.PaymentStatus.PENDING:
+        return listing_fee
+
+    age_hours = (
+        timezone.now() - listing_fee.created_at
+    ).total_seconds() / 3600
+
+    if age_hours < _reprice_window_hours():
+        return listing_fee
+
+    listing = listing or listing_fee.listing
+
+    try:
+        from .listing_fee import create_listing_fee
+        return create_listing_fee(listing, force_recompute=True)
+    except Exception:
+        # If re-pricing fails, keep the old amount. Logged by caller.
+        return listing_fee
+
+
 @transaction.atomic
 def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phone=''):
     listing = (
@@ -21,8 +58,14 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
     )
     if listing.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia ada ya tangazo hili.")
-    if listing.status != Listing.Status.DRAFT:
-        raise ValidationError("Ada inaweza kulipwa tu kwa tangazo lenye hali ya DRAFT.")
+    if listing.status not in (
+        Listing.Status.DRAFT,
+        Listing.Status.PENDING_PAYMENT,
+        Listing.Status.REJECTED,
+    ):
+        raise ValidationError(
+            f"Ada haiwezi kulipwa kwa tangazo lenye hali ya {listing.status}."
+        )
 
     try:
         listing_fee = ListingFee.objects.select_for_update().get(listing=listing)
@@ -31,6 +74,9 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
 
     if listing_fee.payment_status == ListingFee.PaymentStatus.PAID:
         raise ValidationError("Ada ya tangazo hili tayari imelipwa.")
+
+    # Re-price if stale (abandoned draft)
+    listing_fee = maybe_reprice_stale_fee(listing_fee, listing=listing)
 
     # ---- Reuse an existing FimiPay order if we already created one ----
     from apps.payments.fimipay import get_order_status
@@ -41,14 +87,10 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
             status_data = get_order_status(existing_ref)
             ps = (status_data.get("payment_status") or "").upper()
             if ps in ("PENDING", "INPROGRESS"):
-                # Order still alive at FimiPay — return the same reference so
-                # the frontend continues polling instead of re-creating.
                 return status_data
             if ps == "SUCCESS":
-                # Already paid — nothing to do here (webhook will have fired).
                 return status_data
         except Exception:
-            # If we can't fetch the old order, fall through and create a new one.
             pass
 
     order_id = make_order_id("LSF", listing.id)
@@ -85,8 +127,7 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
     if ref and ListingFee.objects.filter(
         payment_reference=ref,
     ).exclude(pk=listing_fee.pk).exists():
-        # Duplicate transid — keep ours; add a suffix so uniqueness holds.
-        import uuid
+        # Duplicate transid — suffix so the unique column holds
         ref = f"{ref}-{uuid.uuid4().hex[:8]}"
 
     listing_fee.payment_status = ListingFee.PaymentStatus.PAID
@@ -95,6 +136,8 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
     listing_fee.save(update_fields=[
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
+
+    # Advance the listing to PENDING_APPROVAL for admin review
     Listing.objects.filter(pk=ref_id).update(
         status=Listing.Status.PENDING_APPROVAL,
         updated_at=timezone.now(),

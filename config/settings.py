@@ -490,3 +490,12 @@ LISTING_FEE_ALLOW_FALLBACK = env_bool(
 LISTING_FEE_REPRICE_AFTER_HOURS = env_int(
     "LISTING_FEE_REPRICE_AFTER_HOURS", 24,
 )
+
+
+# ============================================================
+# ADMIN PATH (used in notification action_url)
+# ============================================================
+# The frontend admin dashboard lives under this path prefix. Notification
+# action_urls that point to admin screens must use it so the SPA can
+# deep-link without knowing where the admin app is mounted.
+ADMIN_PATH = os.environ.get("ADMIN_PATH", "/smk-control-9x7k")

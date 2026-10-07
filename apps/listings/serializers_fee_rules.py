@@ -46,9 +46,12 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
 
     def _ensure_category_slug(self, validated_data, instance=None):
         category = validated_data.get("category")
-        if category is not None and not validated_data.get("category_slug"):
+        # If `category` (FK id) is supplied, always mirror it to category_slug.
+        if category is not None:
             validated_data["category_slug"] = category.slug
-        elif not validated_data.get("category_slug"):
+            return validated_data
+
+        if not validated_data.get("category_slug"):
             name = validated_data.get("name") or (
                 instance.name if instance else ""
             )

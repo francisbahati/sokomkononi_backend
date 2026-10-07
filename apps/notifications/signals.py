@@ -66,7 +66,7 @@ def notify_admin_new_user(sender, instance, created, **kwargs):
         priority=Notification.Priority.NORMAL,
         related_object_type="accounts.User",
         related_object_id=instance.id,
-        action_url="/smk-control-9x7k/users",
+        action_url=f"{_admin_path()}/users",
     )
 
 
@@ -101,7 +101,7 @@ def notify_admin_user_deleted(sender, instance, **kwargs):
             priority=Notification.Priority.HIGH,
             related_object_type="accounts.User",
             related_object_id=instance.id,
-            action_url="/smk-control-9x7k/trash",
+            action_url=f"{_admin_path()}/trash",
             exclude_user_id=instance.id,
         )
 
@@ -134,7 +134,7 @@ def notify_admin_new_listing(sender, instance, created, **kwargs):
         priority=Notification.Priority.NORMAL,
         related_object_type="listings.Listing",
         related_object_id=instance.id,
-        action_url="/smk-control-9x7k/moderation",
+        action_url=f"{_admin_path()}/moderation",
     )
 
 
@@ -168,7 +168,7 @@ def notify_admin_listing_deleted(sender, instance, **kwargs):
             priority=Notification.Priority.NORMAL,
             related_object_type="listings.Listing",
             related_object_id=instance.id,
-            action_url="/smk-control-9x7k/trash",
+            action_url=f"{_admin_path()}/trash",
         )
 
 
@@ -283,7 +283,7 @@ def notify_admin_new_verification(sender, instance, created, **kwargs):
         priority=Notification.Priority.HIGH,
         related_object_type="verifications.VerificationRequest",
         related_object_id=instance.id,
-        action_url="/smk-control-9x7k/verification",
+        action_url=f"{_admin_path()}/verification",
         exclude_user_id=instance.user_id,
     )
 

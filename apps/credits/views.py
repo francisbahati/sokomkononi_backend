@@ -4,16 +4,22 @@ from rest_framework.response import Response
 
 from .models import UserCredit, UserService
 from .serializers import (
+    ConsumeCreditSerializer,
     UserCreditSerializer,
     UserServiceSerializer,
 )
-from .services import has_service
+from .services import consume_credit, has_service
 
 
 class UserCreditViewSet(viewsets.GenericViewSet):
     """
-    Public credit view — read-only. Internal services consume credits
-    directly; there is NO public consume endpoint.
+    User-scoped credit endpoints.
+
+        GET  /api/credits/                 list my balances
+        GET  /api/credits/services/        list my active services
+        GET  /api/credits/has/<service>/   is service active for me?
+        POST /api/credits/consume/         self-consume my credits
+        POST /api/credits/me/consume/      (alias — canonical)
     """
     serializer_class = UserCreditSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -34,18 +40,10 @@ class UserCreditViewSet(viewsets.GenericViewSet):
             "has": has_service(request.user, service),
         })
 
-
-    def consume(self, request):
-        """
-        POST /api/credits/consume/
-        Body: { "service_key": "boost", "amount": 1 }
-
-        Idempotency: pass `Idempotency-Key` header. Replays with the
-        same key return the same response without double-decrement.
-        """
-        from .services import consume_credit
-        from .models import UserCredit
-
+    # --------------------------------------------------------
+    # SELF-CONSUME — the frontend calls this
+    # --------------------------------------------------------
+    def _consume(self, request):
         service_key = (request.data.get("service_key") or "").strip()
         try:
             amount = int(request.data.get("amount", 1))
@@ -63,15 +61,13 @@ class UserCreditViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Idempotency cache (in-process, per-worker).
-        idem_key = request.META.get("HTTP_IDEMPOTENCY_KEY")
-        cache = getattr(self, "_idem_cache", None)
-        if cache is None:
-            from django.core.cache import cache as _djcache
-            cache = _djcache
-            self._idem_cache = cache
-
-        cache_key = f"credits_consume:{request.user.id}:{idem_key}" if idem_key else None
+        # Idempotency: honour Idempotency-Key header
+        from django.core.cache import cache
+        idem = request.META.get("HTTP_IDEMPOTENCY_KEY")
+        cache_key = (
+            f"credits_consume:{request.user.id}:{service_key}:{idem}"
+            if idem else None
+        )
         if cache_key:
             cached = cache.get(cache_key)
             if cached:
@@ -80,7 +76,11 @@ class UserCreditViewSet(viewsets.GenericViewSet):
         ok = consume_credit(request.user, service_key, amount)
         if not ok:
             return Response(
-                {"detail": f"Hakuna {service_key} credits za kutosha."},
+                {
+                    "detail": f"Hakuna {service_key} credits za kutosha.",
+                    "code": "insufficient_credits",
+                    "service_key": service_key,
+                },
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
 
@@ -92,14 +92,32 @@ class UserCreditViewSet(viewsets.GenericViewSet):
                 "service_key": service_key,
                 "remaining": credit.remaining,
                 "total": credit.total,
+                "consumed": amount,
             }
         except UserCredit.DoesNotExist:
             payload = {
                 "service_key": service_key,
                 "remaining": 0,
                 "total": 0,
+                "consumed": amount,
             }
 
         if cache_key:
             cache.set(cache_key, payload, timeout=300)
         return Response(payload, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False, methods=["post"],
+        url_path="consume",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def consume(self, request):
+        return self._consume(request)
+
+    @action(
+        detail=False, methods=["post"],
+        url_path="me/consume",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def me_consume(self, request):
+        return self._consume(request)

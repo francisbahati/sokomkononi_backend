@@ -695,11 +695,12 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         if listing.status not in (
             Listing.Status.LIVE,
             Listing.Status.RESERVED,
+            Listing.Status.PAUSED,
         ):
             return Response(
                 {"detail": (
                     f"Hali ya sasa ni {listing.status}. "
-                    "Inaweza kuwa SOLD tu kutoka LIVE au RESERVED."
+                    "Inaweza kuwa SOLD tu kutoka LIVE, RESERVED, au PAUSED."
                 )},
                 status=status.HTTP_400_BAD_REQUEST,
             )

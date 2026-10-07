@@ -17,7 +17,6 @@ from .services.notification import (
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================
 # HELPERS
 # ============================================================
@@ -31,7 +30,6 @@ def _safe_create(**kwargs):
 
     transaction.on_commit(_do_create)
 
-
 def _safe_create_for_admins(**kwargs):
     """Unda notification kwa admins wote ndani ya on_commit."""
     def _do_create():
@@ -43,7 +41,6 @@ def _safe_create_for_admins(**kwargs):
             )
 
     transaction.on_commit(_do_create)
-
 
 # ============================================================
 # 1. USER — mtumiaji mpya amejisajili
@@ -68,7 +65,6 @@ def notify_admin_new_user(sender, instance, created, **kwargs):
         related_object_id=instance.id,
         action_url=f"{_admin_path()}/users",
     )
-
 
 # ============================================================
 # 2. USER — amefutwa
@@ -105,7 +101,6 @@ def notify_admin_user_deleted(sender, instance, **kwargs):
             exclude_user_id=instance.id,
         )
 
-
 # ============================================================
 # 3. LISTING — mpya imewekwa
 # ============================================================
@@ -136,7 +131,6 @@ def notify_admin_new_listing(sender, instance, created, **kwargs):
         related_object_id=instance.id,
         action_url=f"{_admin_path()}/moderation",
     )
-
 
 # ============================================================
 # 4. LISTING — imefutwa (soft delete)
@@ -170,7 +164,6 @@ def notify_admin_listing_deleted(sender, instance, **kwargs):
             related_object_id=instance.id,
             action_url=f"{_admin_path()}/trash",
         )
-
 
 # ============================================================
 # 5. LEAD MPYA (buyer amewasiliana)
@@ -209,7 +202,6 @@ def notify_new_lead(sender, instance, created, **kwargs):
     except Exception as exc:
         logger.exception("[notifications] lead signal failed: %s", exc)
 
-
 # ============================================================
 # 6. RESERVATION CREATED
 # ============================================================
@@ -239,7 +231,6 @@ def notify_reservation_created(sender, instance, created, **kwargs):
         )
     except Exception as exc:
         logger.exception("[notifications] reservation signal failed: %s", exc)
-
 
 # ============================================================
 # 8. VERIFICATION REQUEST — mpya imewasilishwa (admin)
@@ -286,7 +277,6 @@ def notify_admin_new_verification(sender, instance, created, **kwargs):
         action_url=f"{_admin_path()}/verification",
         exclude_user_id=instance.user_id,
     )
-
 
 # ============================================================
 # 9. VERIFICATION REQUEST — imeidhinishwa / imekataliwa (user)
@@ -342,3 +332,8 @@ def notify_verification_status_changed(sender, instance, **kwargs):
             related_object_id=instance.id,
             action_url="/dashboard/verification",
         )
+
+def _admin_path():
+    """Local alias for the shared admin-path helper."""
+    from apps.core.admin_path import get_admin_path
+    return get_admin_path()

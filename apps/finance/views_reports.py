@@ -14,6 +14,8 @@ from apps.deals.models import DealRoom
 from apps.listings.models import Listing
 from apps.transactions.models import Transaction
 
+from .services.user_stats import calculate_user_stats
+
 
 class IsAdminUser(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -65,24 +67,35 @@ class ReportsView(APIView):
         six_months_ago = now - timedelta(days=180)
 
         # ---------- Users ----------
-        total_users = User.all_objects.filter(is_deleted=False).count()
-        total_sellers = User.all_objects.filter(
-            is_deleted=False, listings__isnull=False,
-        ).distinct().count()
-        total_buyers = max(0, total_users - total_sellers)
+        # ⬇️ MUHIMU: Tumia calculate_user_stats() — inaheshimu:
+        #   - Admin HAhesabiwi kama seller/buyer
+        #   - Seller = ana listing angalau moja
+        #   - Buyer  = ana DealRoom angalau moja (kama buyer)
+        #   - bothRoles / neitherRole / totalAdmins
+        user_stats = calculate_user_stats()
+
+        total_users = user_stats["totalUsers"]
+        total_sellers = user_stats["totalSellers"]
+        total_buyers = user_stats["totalBuyers"]
 
         # Growth: cumulative users per day for last 30 days
+        # (bila admin, ili iendane na totalUsers)
         start_day = (now - timedelta(days=29)).date()
         growth_rows = dict(
-            User.all_objects
-            .filter(is_deleted=False, date_joined__date__gte=start_day)
+            User.objects
+            .filter(
+                is_deleted=False,
+                is_staff=False,
+                date_joined__date__gte=start_day,
+            )
             .annotate(d=TruncDate("date_joined"))
             .values_list("d")
             .annotate(c=Count("id"))
             .values_list("d", "c")
         )
-        baseline = User.all_objects.filter(
+        baseline = User.objects.filter(
             is_deleted=False,
+            is_staff=False,
             date_joined__date__lt=start_day,
         ).count()
         users_growth = []
@@ -96,7 +109,6 @@ class ReportsView(APIView):
             })
 
         # ---------- Listings ----------
-        # ⬇️ MUHIMU: Tumia `_visible_listings_qs()` — sio Listing.objects.count()
         visible_qs = _visible_listings_qs()
 
         total_listings = visible_qs.count()
@@ -107,7 +119,6 @@ class ReportsView(APIView):
             status=Listing.Status.SOLD,
         ).count()
 
-        # Growth: listings zinahesabiwa tu kama visible (sio DRAFT)
         listings_growth = []
         for i in range(29, -1, -1):
             day = (now - timedelta(days=i)).date()
@@ -131,15 +142,13 @@ class ReportsView(APIView):
             .annotate(c=Count("id"))
             .values_list("status", "c")
         )
-        # Ensure all keys present
         for k in ["OPEN", "NEGOTIATING", "ACCEPTED", "CANCELLED", "COMPLETED"]:
             deals_by_status.setdefault(k, 0)
 
-        # Map to frontend keys
         deals_by_status_frontend = {
             "negotiating": deals_by_status.get("NEGOTIATING", 0),
             "accepted": deals_by_status.get("ACCEPTED", 0),
-            "reserved": 0,  # computed from transactions
+            "reserved": 0,
             "completed": deals_by_status.get("COMPLETED", 0),
             "disputed": 0,
             "cancelled": deals_by_status.get("CANCELLED", 0),
@@ -175,9 +184,10 @@ class ReportsView(APIView):
         )
 
         # ---------- Top sellers (by views) ----------
-        # ⬇️ Tumia visible_qs — sio Listing.objects
+        # ⬇️ Chuja pia seller__is_staff=False (admin haonekani)
         top_sellers_qs = (
             visible_qs
+            .filter(seller__is_staff=False, seller__is_deleted=False)
             .values("seller__id", "seller__name")
             .annotate(
                 views=Coalesce(Sum("views_count"), 0),
@@ -195,7 +205,6 @@ class ReportsView(APIView):
         ]
 
         # ---------- Most viewed listings ----------
-        # ⬇️ Tumia visible_qs
         most_viewed_qs = visible_qs.order_by("-views_count")[:5]
         most_viewed = [
             {
@@ -208,7 +217,6 @@ class ReportsView(APIView):
         ]
 
         # ---------- Top categories ----------
-        # ⬇️ Tumia visible_qs
         cat_qs = (
             visible_qs
             .values("category__slug", "category__name")
@@ -226,7 +234,6 @@ class ReportsView(APIView):
         ]
 
         # ---------- Top locations ----------
-        # ⬇️ Tumia visible_qs
         loc_qs = (
             visible_qs
             .values("location")
@@ -243,25 +250,33 @@ class ReportsView(APIView):
         ]
 
         return Response({
+            # ── User stats (kutoka calculate_user_stats) ──
             "totalUsers": total_users,
             "totalSellers": total_sellers,
             "totalBuyers": total_buyers,
+            "bothRoles": user_stats["bothRoles"],
+            "neitherRole": user_stats["neitherRole"],
+            "totalAdmins": user_stats["totalAdmins"],
             "usersGrowth": users_growth,
 
-            "totalListings": total_listings,     # ⬅️ Sasa 6 (sio 58)
-            "liveListings": live_listings,       # ⬅️ 6
-            "soldListings": sold_listings,       # ⬅️ 0
+            # ── Listings ──
+            "totalListings": total_listings,
+            "liveListings": live_listings,
+            "soldListings": sold_listings,
             "listingsGrowth": listings_growth,
 
+            # ── Deals ──
             "totalDeals": total_deals,
             "completedDeals": completed_deals,
             "disputedDeals": disputed_deals,
             "dealsByStatus": deals_by_status_frontend,
 
+            # ── Revenue ──
             "totalRevenue": float(total_revenue),
             "revenueByMonth": revenue_by_month,
             "conversionRate": round(conversion_rate, 2),
 
+            # ── Top lists ──
             "topSellers": top_sellers,
             "mostViewedListings": most_viewed,
             "topCategories": top_categories,

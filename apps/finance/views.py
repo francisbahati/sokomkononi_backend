@@ -21,6 +21,7 @@ from .services.revenue import (
     calculate_financial_dashboard,
     get_revenue_records,
 )
+from .services.user_stats import calculate_user_stats
 
 
 class IsAdminUser(permissions.BasePermission):
@@ -509,7 +510,6 @@ class RevenueOverviewView(APIView):
                 ListingFeeRule.objects.filter(is_deleted=False),
                 many=True,
             ).data,
-            # ✅ Reservation settings (singleton) + tiers list
             "reservation_settings": ReservationSettingsSerializer(
                 ReservationSettings.objects.first(),
             ).data if ReservationSettings.objects.exists() else None,
@@ -535,3 +535,25 @@ class RevenueOverviewView(APIView):
                 many=True,
             ).data,
         })
+
+
+# ============================================================
+# USER STATS — GET (admin)
+# ============================================================
+class UserStatsView(APIView):
+    """
+    GET /api/finance/user-stats/
+
+    Inarudisha stats za watumiaji:
+      - totalUsers (bila admin)
+      - totalSellers (users walio na listing angalau moja)
+      - totalBuyers (users walio na deal angalau moja)
+      - bothRoles (wote wawili)
+      - neitherRole (hawana listing wala deal)
+      - totalAdmins
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        stats = calculate_user_stats()
+        return Response(stats)

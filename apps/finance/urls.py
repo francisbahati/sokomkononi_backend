@@ -9,6 +9,7 @@ from .views import (
     SuccessFeeConfigView,
     SystemFeatureToggleViewSet,
     RevenueOverviewView,
+    UserStatsView,
 )
 from .views_reports import ReportsView
 from .views_success_fee import (
@@ -24,7 +25,12 @@ router.register("toggles", SystemFeatureToggleViewSet, basename="feature-toggle"
 
 urlpatterns = [
     # ═══════════════════════════════════════════════════════════
-    # Zilizopo
+    # User stats
+    # ═══════════════════════════════════════════════════════════
+    path("user-stats/", UserStatsView.as_view(), name="user-stats"),
+
+    # ═══════════════════════════════════════════════════════════
+    # Reports
     # ═══════════════════════════════════════════════════════════
     path("reports/", ReportsView.as_view(), name="reports"),
     path(

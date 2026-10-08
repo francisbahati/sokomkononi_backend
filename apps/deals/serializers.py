@@ -1,3 +1,5 @@
+# apps/deals/serializers.py
+import re
 from decimal import Decimal
 
 from rest_framework import serializers
@@ -6,6 +8,40 @@ from apps.accounts.models import User
 from apps.listings.models import Listing
 
 from .models import DealRoom, NegotiationOffer
+
+
+# ============================================================
+# PHONE / EMAIL DETECTION
+# Block messages containing contact info kama reservation haijalipwa.
+# ============================================================
+_PHONE_PATTERNS = [
+    re.compile(r"\b0[4-9]\d{7,8}\b"),          # Tanzania local: 04x–07x
+    re.compile(r"\+255\d{7,9}\b"),              # +255...
+    re.compile(r"\b255\d{7,9}\b"),              # 255...
+    re.compile(r"\+254\d{7,9}\b"),              # Kenya
+    re.compile(r"\b254\d{7,9}\b"),
+    re.compile(r"\+256\d{7,9}\b"),              # Uganda
+    re.compile(r"\b256\d{7,9}\b"),
+    re.compile(r"\+\d{8,15}\b"),                # Generic international
+    re.compile(r"\b\d{9,15}\b"),                # Long digit sequences
+]
+
+_EMAIL_PATTERN = re.compile(
+    r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
+    re.IGNORECASE,
+)
+
+
+def contains_contact_info(text):
+    """Rudisha True kama text ina namba ya simu au email."""
+    if not text:
+        return False
+    t = str(text).strip()
+    if not t:
+        return False
+    if _EMAIL_PATTERN.search(t):
+        return True
+    return any(p.search(t) for p in _PHONE_PATTERNS)
 
 
 # ============================================================
@@ -24,49 +60,55 @@ class DealListingSerializer(serializers.ModelSerializer):
 
 
 # ============================================================
-# USER — na `phone` yenye masharti
-# Namba ya simu inaonekana TU:
+# USER — phone + email zenye masharti
+# Taarifa za mawasiliano zinaonekana TU:
 #   - kwa mshiriki wa deal (buyer au seller)
 #   - baada ya Reservation kulipwa (au zaidi)
 # ============================================================
 class DealUserSerializer(serializers.ModelSerializer):
     phone = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "name", "phone"]
+        fields = ["id", "name", "phone", "email"]
         read_only_fields = fields
 
-    def get_phone(self, obj):
+    def _contact_visible(self):
+        """Rudisha True kama mwombaji anaruhusiwa kuona contact."""
         request = self.context.get("request")
         deal_room = self.context.get("deal_room")
 
-        # Lazima kuwe na request + deal_room
         if not request or not request.user.is_authenticated:
-            return None
+            return False
         if not deal_room:
-            return None
+            return False
 
-        # Mwombaji LAZIMA awe mshiriki wa deal hii
         if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
-            return None
+            return False
 
-        # Namba ya simu inaonekana baada ya Reservation kulipwa
         try:
-            from apps.transactions.models import Transaction
             txn = deal_room.transaction
         except Exception:
-            return None
+            return False
 
-        if txn.status not in [
+        from apps.transactions.models import Transaction
+        return txn.status in [
             Transaction.Status.RESERVED,
             Transaction.Status.INSPECTION,
             Transaction.Status.READY_FOR_FINAL_PAYMENT,
             Transaction.Status.COMPLETED,
-        ]:
-            return None
+        ]
 
+    def get_phone(self, obj):
+        if not self._contact_visible():
+            return None
         return getattr(obj, "phone", None)
+
+    def get_email(self, obj):
+        if not self._contact_visible():
+            return None
+        return getattr(obj, "email", None)
 
 
 # ============================================================
@@ -123,6 +165,46 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
             )
         return value
 
+    def validate_message(self, value):
+        """Block contact info kama reservation haijalipwa."""
+        value = (value or "").strip()
+        if not value:
+            return value
+
+        deal_room = self.context.get("deal_room")
+        request = self.context.get("request")
+
+        if not deal_room or not request or not request.user.is_authenticated:
+            return value
+
+        # Seller huruhusiwa kuandika chochote
+        if request.user.id == deal_room.seller_id:
+            return value
+
+        # Buyer: block kama reservation haijalipwa
+        try:
+            txn = deal_room.transaction
+        except Exception:
+            txn = None
+
+        from apps.transactions.models import Transaction
+        reservation_paid = bool(
+            txn and txn.status in [
+                Transaction.Status.RESERVED,
+                Transaction.Status.INSPECTION,
+                Transaction.Status.READY_FOR_FINAL_PAYMENT,
+                Transaction.Status.COMPLETED,
+            ]
+        )
+
+        if not reservation_paid and contains_contact_info(value):
+            raise serializers.ValidationError(
+                "Hairuhusiwi kutuma namba ya simu, email, au taarifa za "
+                "mawasiliano kwenye offer kabla ya kulipa Reservation Fee."
+            )
+
+        return value
+
     def validate(self, attrs):
         deal_room = self.context.get("deal_room")
         request = self.context.get("request")
@@ -177,6 +259,71 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({
                     "responded_to": "Offer hii haiwezi kujibiwa tena."
                 })
+
+        return attrs
+
+
+# ============================================================
+# DEAL MESSAGE CREATE
+# Inatumika na messages_create view.
+# Inazuia phone/email kama reservation haijalipwa.
+# ============================================================
+class DealMessageCreateSerializer(serializers.Serializer):
+    text = serializers.CharField(
+        required=True, allow_blank=False, trim_whitespace=True,
+        max_length=2000,
+    )
+
+    def validate_text(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Ujumbe hauwezi kuwa tupu.")
+        return value
+
+    def validate(self, attrs):
+        deal_room = self.context.get("deal_room")
+        request = self.context.get("request")
+
+        if not deal_room:
+            raise serializers.ValidationError("Deal Room haijapatikana.")
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError(
+                "Ni lazima uwe umeingia kwenye akaunti."
+            )
+        if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
+            raise serializers.ValidationError(
+                "Huruhusiwi kutuma ujumbe kwenye Deal Room hii."
+            )
+
+        # Seller huruhusiwa kuandika chochote
+        if request.user.id == deal_room.seller_id:
+            return attrs
+
+        # Buyer: block phone/email kama reservation haijalipwa
+        try:
+            txn = deal_room.transaction
+        except Exception:
+            txn = None
+
+        from apps.transactions.models import Transaction
+        reservation_paid = bool(
+            txn and txn.status in [
+                Transaction.Status.RESERVED,
+                Transaction.Status.INSPECTION,
+                Transaction.Status.READY_FOR_FINAL_PAYMENT,
+                Transaction.Status.COMPLETED,
+            ]
+        )
+
+        if not reservation_paid and contains_contact_info(attrs["text"]):
+            raise serializers.ValidationError({
+                "text": (
+                    "Hairuhusiwi kutuma namba ya simu, email, au taarifa "
+                    "za mawasiliano kwenye chat kabla ya kulipa "
+                    "Reservation Fee. Lipia kwanza ili kuona taarifa za "
+                    "muuzaji."
+                )
+            })
 
         return attrs
 

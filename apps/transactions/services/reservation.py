@@ -24,11 +24,10 @@ logger = logging.getLogger(__name__)
 RESERVATION_PAYMENT_WINDOW_HOURS = 24  # buyer must pay within 24h
 DEFAULT_RESERVATION_HOURS = 48
 DEFAULT_INSPECTION_HOURS = 24
-ALLOWED_RESERVATION_HOURS = (24, 48, 72)
 MAX_INSPECTION_HOURS = 168
 
-# Deprecated: reservations are now charged the flat fee configured by the
-# admin in ReservationRate. Kept only so existing imports do not break.
+# Deprecated: reservations are now charged a per-tier fee configured by
+# the admin (see ReservationTier). Kept only so existing imports do not break.
 RESERVATION_DEPOSIT_PERCENTAGE = Decimal("10.00")
 
 
@@ -36,35 +35,61 @@ RESERVATION_DEPOSIT_PERCENTAGE = Decimal("10.00")
 # FEE
 # ============================================================================
 
-def get_reservation_fee_config():
-    """ReservationRate singleton (pk=1), created on first use."""
-    from apps.reservation_rates.models import ReservationRate
+def get_reservation_settings():
+    """ReservationSettings singleton (pk=1), created on first use."""
+    from apps.reservation_rates.models import ReservationSettings
 
-    obj, _ = ReservationRate.objects.get_or_create(
-        pk=1,
-        defaults={
-            "flat_fee": Decimal("50000"),
-            "days": 3,
-            "is_enabled": True,
-        },
-    )
+    obj, _ = ReservationSettings.objects.get_or_create(pk=1)
     return obj
 
 
 def is_reservation_fee_enabled():
-    return get_reservation_fee_config().is_enabled
+    return get_reservation_settings().is_enabled
 
 
-def calculate_reservation_fee():
+def get_active_reservation_tiers():
+    """Tiers zote zilizo hai, zimepangwa."""
+    from apps.reservation_rates.models import ReservationTier
+
+    return ReservationTier.objects.filter(is_active=True).order_by(
+        "order", "hours",
+    )
+
+
+def get_allowed_reservation_hours():
+    """List ya hours zote za tiers zilizo hai."""
+    return list(
+        get_active_reservation_tiers().values_list("hours", flat=True)
+    )
+
+
+def calculate_reservation_fee(duration_hours):
     """
-    Flat fee decided by the server. 0.00 when the admin disabled the
-    reservation fee (reservations are then free).
+    Fee ya tier fulani. 0.00 kama admin amezima reservation fee
+    (kwa hiyo reservations ni bure).
+
+    Inarusha ValidationError kama tier ya hours hiyo haipo / haipo hai.
     """
-    config = get_reservation_fee_config()
-    if not config.is_enabled:
+    from apps.reservation_rates.models import ReservationTier
+
+    settings = get_reservation_settings()
+    if not settings.is_enabled:
         return Decimal("0.00")
 
-    fee = Decimal(str(config.flat_fee)).quantize(Decimal("0.01"))
+    try:
+        hours = int(duration_hours)
+    except (TypeError, ValueError):
+        raise ValidationError("Muda wa reservation si sahihi.")
+
+    try:
+        tier = ReservationTier.objects.get(hours=hours, is_active=True)
+    except ReservationTier.DoesNotExist:
+        raise ValidationError(
+            f"Hakuna tier ya reservation kwa saa {hours}. "
+            f"Chagua muda uliopo kwenye orodha."
+        )
+
+    fee = Decimal(str(tier.fee)).quantize(Decimal("0.01"))
     if fee <= Decimal("0.00"):
         raise ValidationError("Ada ya reservation haijasanidiwa.")
     return fee
@@ -205,13 +230,22 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
     except (TypeError, ValueError):
         raise ValidationError("Muda wa reservation si sahihi.")
 
-    if duration_hours not in ALLOWED_RESERVATION_HOURS:
+    # Validate against active tiers (dynamic, admin-controlled).
+    allowed = get_allowed_reservation_hours()
+    if not allowed:
         raise ValidationError(
-            "Reservation inaweza kuwa saa 24, 48 au 72."
+            "Hakuna tiers za reservation zilizo hai. "
+            "Wasiliana na admin."
+        )
+    if duration_hours not in allowed:
+        hours_str = ", ".join(str(h) for h in sorted(allowed))
+        raise ValidationError(
+            f"Reservation inaweza kuwa saa: {hours_str}."
         )
 
     # The amount is decided here, never by the client.
-    fee = calculate_reservation_fee()
+    # Fee depends on the tier (duration_hours).
+    fee = calculate_reservation_fee(duration_hours)
     now = timezone.now()
     window_end = now + timedelta(hours=RESERVATION_PAYMENT_WINDOW_HOURS)
 
@@ -347,8 +381,9 @@ def initiate_reservation_payment(*, reservation, user, payment_method="mobile", 
         )
 
     # Re-price: the admin may have changed (or disabled) the fee since
-    # the reservation was created.
-    fee = calculate_reservation_fee()
+    # the reservation was created. Fee is per-tier, based on the
+    # reservation's duration_hours.
+    fee = calculate_reservation_fee(reservation.duration_hours)
     if fee <= Decimal("0.00"):
         raise ValidationError(
             "Ada ya reservation imezimwa. Hakuna malipo yanayohitajika."

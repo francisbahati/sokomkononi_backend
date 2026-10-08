@@ -1,3 +1,4 @@
+# apps/deals/views.py
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -21,6 +22,7 @@ from .models import DealRoom, NegotiationOffer
 from .permissions import IsDealParticipant, IsVerifiedDealUser
 from .serializers_admin import AdminDealRoomSerializer
 from .serializers import (
+    DealMessageCreateSerializer,
     DealRoomAcceptOfferSerializer,
     DealRoomCancelSerializer,
     DealRoomCreateSerializer,
@@ -87,6 +89,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return DealRoomAcceptOfferSerializer
         if self.action == "cancel":
             return DealRoomCancelSerializer
+        if self.action == "messages_create":
+            return DealMessageCreateSerializer
         if self.action == "retrieve":
             if self.request.user.is_staff:
                 return AdminDealRoomSerializer
@@ -98,13 +102,10 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [permissions.IsAuthenticated(), IsVerifiedDealUser()]
-        if self.action in ["retrieve", "offer", "accept_offer", "cancel", "messages_create"]:
-            return [
-                permissions.IsAuthenticated(),
-                IsVerifiedDealUser(),
-                IsDealParticipant(),
-            ]
-        if self.action == "messages_list":
+        if self.action in [
+            "retrieve", "offer", "accept_offer", "cancel",
+            "messages_create", "messages_list",
+        ]:
             return [
                 permissions.IsAuthenticated(),
                 IsVerifiedDealUser(),
@@ -185,6 +186,9 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
+    # ========================================================
+    # OFFERS — GET (list)
+    # ========================================================
     @extend_schema(
         responses={200: NegotiationOfferSerializer(many=True)},
     )
@@ -210,9 +214,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     # ========================================================
     # MESSAGES — GET (list)
     # ========================================================
-    @extend_schema(
-        responses={200: None},
-    )
+    @extend_schema(responses={200: None})
     @action(
         detail=True, methods=["get"],
         url_path="messages", url_name="messages-list",
@@ -280,8 +282,13 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
     # ========================================================
     # MESSAGES — POST (create)
+    # Inatumia DealMessageCreateSerializer ili kuzuia phone/email
+    # kama reservation haijalipwa (backend defense).
     # ========================================================
-    @extend_schema(request=None, responses={201: None})
+    @extend_schema(
+        request=DealMessageCreateSerializer,
+        responses={201: None},
+    )
     @action(
         detail=True, methods=["post"],
         url_path="messages", url_name="messages-create",
@@ -296,12 +303,13 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         """
         deal_room = self.get_object()
 
-        text = (request.data.get("text") or "").strip()
-        if not text:
-            return Response(
-                {"detail": "Ujumbe hauwezi kuwa tupu."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # Validate (block phone/email if reservation not paid)
+        serializer = DealMessageCreateSerializer(
+            data=request.data,
+            context={"request": request, "deal_room": deal_room},
+        )
+        serializer.is_valid(raise_exception=True)
+        text = serializer.validated_data["text"]
 
         try:
             from apps.messaging.models import Conversation, Message
@@ -626,7 +634,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-
     # ========================================================
     # RESOLVE — pre-reservation dispute resolution (admin only)
     # ========================================================
@@ -700,7 +707,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
     # ========================================================
     # CANCEL — POST (na LOG)
-    # Admin anaye-cancel dispute ana-logiwa.
     # ========================================================
     @extend_schema(
         request=DealRoomCancelSerializer,
@@ -749,7 +755,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             updated_at=timezone.now(),
         )
 
-        # ⬇️ LOG: admin actions pekee (staff)
+        # Admin actions pekee (staff)
         if request.user.is_staff:
             _log(
                 request,

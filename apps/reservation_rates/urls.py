@@ -1,23 +1,34 @@
-from django.urls import path
+# apps/reservation_rates/urls.py
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 
-from .views import ReservationRateViewSet
+from .views import ReservationSettingsViewSet, ReservationTierViewSet
+
+
+router = DefaultRouter()
+router.register(
+    r"reservation-tiers",
+    ReservationTierViewSet,
+    basename="reservation-tier",
+)
 
 
 urlpatterns = [
-    # Root — GET (list), PATCH (partial_update), POST (create)
+    # Singleton settings
     path(
-        "",
-        ReservationRateViewSet.as_view({
+        "reservation-settings/",
+        ReservationSettingsViewSet.as_view({
             "get": "list",
             "patch": "partial_update",
             "post": "partial_update",
         }),
-        name="reservation-rates",
+        name="reservation-settings",
     ),
-    # Toggle — POST
     path(
-        "toggle/",
-        ReservationRateViewSet.as_view({"post": "toggle"}),
-        name="reservation-rate-toggle",
+        "reservation-settings/toggle/",
+        ReservationSettingsViewSet.as_view({"post": "toggle"}),
+        name="reservation-settings-toggle",
     ),
+    # Tiers CRUD
+    path("", include(router.urls)),
 ]

@@ -71,7 +71,7 @@ urlpatterns = [
     path("api/promotions/", include("apps.banners.urls_promotions")),
     path("api/leading-fees/", include("apps.leading_fees.urls")),
     path("api/advertisement-fees/", include("apps.advertisement_fees.urls")),
-    path("api/reservation-rates/", include("apps.reservation_rates.urls")),
+    path("api/", include("apps.reservation_rates.urls")),
     path("api/trash/", include("apps.core.urls")),
     path("api/payments/", include("apps.payments.urls")),
 ]

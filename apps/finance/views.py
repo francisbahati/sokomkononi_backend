@@ -442,8 +442,6 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
                 ),
             )
 
-        from .models import SystemFeatureToggle
-        from .serializers import SystemFeatureToggleSerializer
         return Response({
             "key": toggle.key,
             "is_enabled": toggle.is_enabled,
@@ -493,8 +491,12 @@ class RevenueOverviewView(APIView):
         from apps.listings.serializers_fee_rules import ListingFeeRuleSerializer
         from apps.boosting.models import BoostPackage
         from apps.boosting.serializers import BoostPackageSerializer
-        from apps.reservation_rates.models import ReservationRate
-        from apps.reservation_rates.serializers import ReservationRateSerializer
+        from apps.reservation_rates.models import (
+            ReservationSettings, ReservationTier,
+        )
+        from apps.reservation_rates.serializers import (
+            ReservationSettingsSerializer, ReservationTierSerializer,
+        )
         from apps.advertisement_fees.models import AdvertisementFeeConfig
         from apps.advertisement_fees.serializers import (
             AdvertisementFeeConfigSerializer,
@@ -507,9 +509,14 @@ class RevenueOverviewView(APIView):
                 ListingFeeRule.objects.filter(is_deleted=False),
                 many=True,
             ).data,
-            "reservation_rate": ReservationRateSerializer(
-                ReservationRate.objects.first(),
-            ).data if ReservationRate.objects.exists() else None,
+            # ✅ Reservation settings (singleton) + tiers list
+            "reservation_settings": ReservationSettingsSerializer(
+                ReservationSettings.objects.first(),
+            ).data if ReservationSettings.objects.exists() else None,
+            "reservation_tiers": ReservationTierSerializer(
+                ReservationTier.objects.all().order_by("order", "hours"),
+                many=True,
+            ).data,
             "boost_packages": BoostPackageSerializer(
                 BoostPackage.objects.filter(is_deleted=False).order_by("ordering"),
                 many=True,

@@ -5,7 +5,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import User
-from .serializers import ProfileSerializer
+from .serializers import AdminUserSerializer, ProfileSerializer
+from .services import get_user_role
 
 
 class IsAdminUser(permissions.BasePermission):
@@ -47,7 +48,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         DELETE  /api/admin/users/{id}/permanent/  hard delete (HAIRUDISHWI)
     """
 
-    serializer_class = ProfileSerializer
+    serializer_class = AdminUserSerializer
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
@@ -62,14 +63,21 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 | Q(email__icontains=q)
                 | Q(phone__icontains=q)
             )
-        if role == "Buyer":
-            qs = qs.filter(is_staff=False)
-        elif role == "Seller":
-            qs = qs.filter(is_staff=False)
+
+        # Role filter — inatumia helper ya pamoja
+        if role and role.lower() != "all":
+            target = role.lower()
+            user_ids = []
+            for u in qs.only("id", "is_staff", "is_superuser"):
+                if get_user_role(u).lower() == target:
+                    user_ids.append(u.id)
+            qs = qs.filter(id__in=user_ids)
+
         if status_filter == "active":
             qs = qs.filter(is_active=True)
         elif status_filter == "suspended":
             qs = qs.filter(is_active=False)
+
         return qs
 
     def _get_user(self, pk):
@@ -78,7 +86,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
     def list(self, request):
         qs = self.get_queryset()
         page = self.paginate_queryset(qs)
-        serializer = ProfileSerializer(
+        serializer = AdminUserSerializer(
             page if page is not None else qs, many=True,
         )
         if page is not None:
@@ -92,7 +100,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 {"detail": "Haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response(ProfileSerializer(user).data)
+        return Response(AdminUserSerializer(user).data)
 
     def partial_update(self, request, pk=None):
         user = self._get_user(pk)
@@ -132,7 +140,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 ),
             )
 
-        return Response(ProfileSerializer(user).data)
+        return Response(AdminUserSerializer(user).data)
 
     def destroy(self, request, pk=None):
         """Soft delete — inaweka kwenye kikapu (is_deleted=True)."""
@@ -236,12 +244,6 @@ class AdminUserViewSet(viewsets.GenericViewSet):
     def permanent_delete(self, request, pk=None):
         """
         Hard delete user — HAIRUDISHWI.
-
-        - Admin pekee
-        - Hauwezi kumfuta admin / superuser mwingine
-        - Hauwezi kujifuta mwenyewe
-
-        Endpoint: DELETE /api/admin/users/{id}/permanent/
         """
         user = self._get_user(pk)
         if not user:
@@ -263,7 +265,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
         if user.id == request.user.id:
             return Response(
-                {"detail": "Hauwezi kujifuta mwenyewe."},
+                {"detail": "Huwezi kujifuta mwenyewe."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 

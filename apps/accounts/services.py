@@ -509,3 +509,55 @@ def restore_user_account(*, user, actor):
     )
 
     return user
+
+
+# ============================================================
+# USER ROLE
+# ============================================================
+
+def get_user_role(user):
+    """
+    Compute role ya mtumiaji kutoka data halisi:
+      - Admin    → is_staff / is_superuser
+      - Both     → ana Listing NA DealRoom
+      - Seller   → ana Listing pekee
+      - Buyer    → ana DealRoom pekee
+      - Neither  → hana Listing wala DealRoom
+
+    Chanzo kimoja cha ukweli — kinatumika na:
+      - AdminUserViewSet (users list)
+      - ProfileSerializer (role field)
+      - Serializer zingine zinazohitaji role
+    """
+    if not user:
+        return "Neither"
+
+    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        return "Admin"
+
+    has_listings = False
+    has_deals = False
+
+    try:
+        from apps.listings.models import Listing
+        has_listings = Listing.objects.filter(
+            seller=user, is_deleted=False,
+        ).exists()
+    except Exception:
+        pass
+
+    try:
+        from apps.deals.models import DealRoom
+        has_deals = DealRoom.objects.filter(
+            buyer=user,
+        ).exists()
+    except Exception:
+        pass
+
+    if has_listings and has_deals:
+        return "Both"
+    if has_listings:
+        return "Seller"
+    if has_deals:
+        return "Buyer"
+    return "Neither"

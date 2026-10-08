@@ -1,3 +1,4 @@
+# apps/accounts/serializers.py
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
@@ -8,6 +9,7 @@ from .models import (
     UserPreferences,
 )
 from .services import normalize_tanzania_phone
+from .services import get_user_role
 
 
 def _validate_otp_digits(value):
@@ -34,7 +36,6 @@ class RegisterSerializer(serializers.Serializer):
 
     email = serializers.EmailField()
 
-    # Contact info only: optional and unique. Never used for OTP or login.
     phone = serializers.CharField(
         max_length=20,
         required=False,
@@ -64,7 +65,7 @@ class RegisterSerializer(serializers.Serializer):
     def validate_phone(self, value):
         value = (value or "").strip()
         if not value:
-            return None  # store NULL, never ""
+            return None
         value = normalize_tanzania_phone(value)
         if User.objects.filter(phone=value).exists():
             raise serializers.ValidationError(
@@ -129,6 +130,7 @@ class LoginSerializer(serializers.Serializer):
 class ProfileSerializer(serializers.ModelSerializer):
     seller_status = serializers.SerializerMethodField()
     buyer_status = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -136,11 +138,12 @@ class ProfileSerializer(serializers.ModelSerializer):
             "id", "name", "email", "phone", "account_type",
             "avatar", "date_joined", "is_verified", "is_staff",
             "is_superuser", "seller_status", "buyer_status",
+            "role",
         ]
         read_only_fields = [
             "id", "email", "date_joined", "is_verified",
             "is_staff", "is_superuser", "seller_status", "buyer_status",
-            "avatar",
+            "avatar", "role",
         ]
 
     def validate_phone(self, value):
@@ -162,6 +165,51 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def get_buyer_status(self, obj):
         return obj.can_buy
+
+    def get_role(self, obj):
+        return get_user_role(obj)
+
+
+# ============================================================
+# ADMIN USER (list) — role inahesabiwa
+# ============================================================
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    """
+    Serializer kwa admin users list (/api/admin/users/).
+    Inahesabu role kutoka listings + deals.
+    """
+    role = serializers.SerializerMethodField()
+    is_seller = serializers.SerializerMethodField()
+    is_buyer = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "name", "email", "phone", "account_type",
+            "is_active", "is_verified", "is_staff", "is_superuser",
+            "date_joined", "role", "is_seller", "is_buyer",
+        ]
+        read_only_fields = fields
+
+    def get_role(self, obj):
+        return get_user_role(obj)
+
+    def get_is_seller(self, obj):
+        try:
+            from apps.listings.models import Listing
+            return Listing.objects.filter(
+                seller=obj, is_deleted=False,
+            ).exists()
+        except Exception:
+            return False
+
+    def get_is_buyer(self, obj):
+        try:
+            from apps.deals.models import DealRoom
+            return DealRoom.objects.filter(buyer=obj).exists()
+        except Exception:
+            return False
 
 
 # ============================================================
@@ -290,7 +338,7 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
 
 class UserActivitySerializer(serializers.Serializer):
     id = serializers.CharField(read_only=True)
-    type = serializers.CharField(read_only=True)  # "buyer" | "seller"
+    type = serializers.CharField(read_only=True)
     title = serializers.CharField(read_only=True)
     description = serializers.CharField(read_only=True, allow_blank=True)
     created_at = serializers.DateTimeField(read_only=True)

@@ -82,7 +82,7 @@ def _seller_contact_visible(request, seller, field_name):
     """
     Rudisha True kama mwombaji anaruhusiwa kuona contact ya seller.
 
-    Field_name ni "phone" au "email".
+    field_name: "phone" au "email".
 
     Sheria:
       - Mmiliki (seller mwenyewe) — ona kila kitu
@@ -97,7 +97,6 @@ def _seller_contact_visible(request, seller, field_name):
         if request.user.id == seller.id or request.user.is_staff:
             return True
 
-    # Angalia prefs
     try:
         prefs = seller.preferences
         if field_name == "phone" and not prefs.show_phone:
@@ -105,7 +104,6 @@ def _seller_contact_visible(request, seller, field_name):
         if field_name == "email" and not prefs.show_email:
             return False
     except Exception:
-        # Hakuna prefs — default ni kuonyesha
         pass
 
     return True
@@ -515,7 +513,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
     def get_fee_amount(self, obj):
         fee = getattr(obj, "listing_fee", None)
         if fee is None:
-            # No fee row yet — compute on the fly
             try:
                 from .services.listing_fee import calculate_listing_fee
                 cat = obj.category if obj.category_id else None
@@ -535,7 +532,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
 
 # ============================================================================
 # LISTING WRITE
-# Kubali `category` AU `category_id` kutoka frontend.
 # ============================================================================
 
 class ListingWriteSerializer(serializers.ModelSerializer):
@@ -556,25 +552,15 @@ class ListingWriteSerializer(serializers.ModelSerializer):
             "attributes",
         ]
 
-    # ---------------------------------------------------------------
-    # NORMALIZE INPUT
-    # Kubali `category_id` kama alias ya `category` (frontend
-    # inatuma `category_id`, DRF inatarajia `category`).
-    # ---------------------------------------------------------------
     def to_internal_value(self, data):
-        # Copy data ili tusi-mutate original request
         try:
             normalized = data.copy()
         except AttributeError:
-            # QueryDict au dict
             normalized = dict(data)
 
-        # Kama `category_id` imetumwa lakini `category` haipo,
-        # badilisha.
         if "category_id" in normalized and "category" not in normalized:
             normalized["category"] = normalized["category_id"]
 
-        # Ondoa `category_id` ili DRF isilalamike (haipo kwenye fields)
         normalized.pop("category_id", None)
 
         return super().to_internal_value(normalized)
@@ -692,7 +678,6 @@ class ListingFeeSerializer(serializers.ModelSerializer):
         ]
 
     def get_fee_percentage(self, obj):
-        # Return the SNAPSHOT — not the current rule.
         return obj.percentage
 
     def get_currency(self, obj):
@@ -708,11 +693,6 @@ class ListingFeeSerializer(serializers.ModelSerializer):
         return f"/api/listings/{obj.listing_id}/fee/pay/"
 
     def get_is_disabled(self, obj):
-        """
-        Always False. Listing fees are mandatory and always charged
-        according to the category rule. The admin can no longer skip
-        payment globally — every listing has a positive fee.
-        """
         return False
 
 

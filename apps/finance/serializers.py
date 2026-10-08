@@ -20,6 +20,10 @@ class FinancialDashboardSerializer(serializers.Serializer):
         max_digits=20, decimal_places=2, required=False,
     )
     leading_revenue = serializers.DecimalField(max_digits=20, decimal_places=2)
+    success_fee_revenue = serializers.DecimalField(
+        max_digits=15, decimal_places=2, read_only=True,
+    )
+    paid_success_fees = serializers.IntegerField(read_only=True)
 
     refunds = serializers.DecimalField(max_digits=20, decimal_places=2)
     net_revenue = serializers.DecimalField(max_digits=20, decimal_places=2)

@@ -2,11 +2,12 @@
 Revenue aggregation for the admin dashboard and detailed reports.
 
 Sources:
-    - ListingFee     (listing_fee)
-    - ListingBoost   (boosting)
-    - Reservation    (reservation)
-    - BannerAd       (advertisement)
-    - BundlePurchase (bundle)
+    - ListingFee         (listing_fee)
+    - ListingBoost       (boosting)
+    - Reservation        (reservation)
+    - BannerAd           (advertisement)
+    - BundlePurchase     (bundle)
+    - SuccessFeePayment  (success_fee)
 """
 
 from datetime import datetime, time, timedelta
@@ -21,6 +22,8 @@ from apps.boosting.models import ListingBoost
 from apps.bundles.models import BundlePurchase
 from apps.listings.models import ListingFee
 from apps.transactions.models import Reservation
+
+from ..models import SuccessFeePayment
 
 
 ZERO = Decimal("0.00")
@@ -138,6 +141,22 @@ def calculate_financial_dashboard(period="all"):
     )["total"] or ZERO
     paid_bundles = bundle_purchases.count()
 
+    # ---------------- Success Fee ----------------
+    # Success fee ni ada inayotozwa kwa kupakua ripoti ya miamala.
+    success_fees = SuccessFeePayment.objects.filter(
+        payment_status="PAID",
+    ).annotate(
+        effective_paid=Coalesce("paid_at", "created_at"),
+    )
+    if start and end:
+        success_fees = success_fees.filter(
+            effective_paid__gte=start, effective_paid__lt=end,
+        )
+    success_fee_revenue = success_fees.aggregate(
+        total=Sum("amount"),
+    )["total"] or ZERO
+    paid_success_fees = success_fees.count()
+
     # ---------------- Refunds ----------------
     refunds = Reservation.objects.filter(payment_status="REFUNDED").annotate(
         effective_refund=Coalesce("refunded_at", "created_at"),
@@ -161,6 +180,7 @@ def calculate_financial_dashboard(period="all"):
         + advertisement_revenue
         + bundle_revenue
         + leading_revenue
+        + success_fee_revenue
     )
     net_revenue = total_revenue - refund_amount
 
@@ -175,6 +195,7 @@ def calculate_financial_dashboard(period="all"):
         "advertisement_revenue": advertisement_revenue,
         "bundle_revenue": bundle_revenue,
         "leading_revenue": leading_revenue,
+        "success_fee_revenue": success_fee_revenue,
         "refunds": refund_amount,
         "net_revenue": net_revenue,
         "paid_listing_fees": paid_listing_fees,
@@ -182,6 +203,7 @@ def calculate_financial_dashboard(period="all"):
         "paid_boosts": paid_boosts,
         "paid_banners": paid_banners,
         "paid_bundles": paid_bundles,
+        "paid_success_fees": paid_success_fees,
         "refund_count": refund_count,
     }
 
@@ -337,6 +359,36 @@ def get_revenue_records(period="all", source="all"):
                 "source_label": f"Bundle: {item.bundle.code}",
                 "amount": item.amount,
                 "payment_status": "PAID",
+                "payment_reference": item.payment_reference or "",
+                "paid_at": item.paid_at,
+                "refunded_at": None,
+                "seller_id": item.user_id,
+                "seller_name": getattr(item.user, "name", ""),
+                "seller_email": getattr(item.user, "email", "") or "",
+                "listing_id": None,
+                "listing_title": "",
+                "status": "PAID",
+                "created_at": item.created_at,
+            })
+
+    # ---------------- Success Fee ----------------
+    if source in {"all", "success_fee"}:
+        qs = SuccessFeePayment.objects.filter(
+            payment_status="PAID",
+        ).select_related("user").annotate(
+            effective_paid=Coalesce("paid_at", "created_at"),
+        )
+        if start and end:
+            qs = qs.filter(
+                effective_paid__gte=start, effective_paid__lt=end,
+            )
+        for item in qs:
+            records.append({
+                "id": item.id,
+                "source": "success_fee",
+                "source_label": "Success Fee",
+                "amount": item.amount,
+                "payment_status": item.payment_status,
                 "payment_reference": item.payment_reference or "",
                 "paid_at": item.paid_at,
                 "refunded_at": None,

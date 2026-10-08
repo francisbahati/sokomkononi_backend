@@ -7,13 +7,15 @@ Sheria:
 - Seller = user mwenye Listing angalau moja
 - Buyer  = user mwenye DealRoom angalau moja (kama buyer)
 - bothRoles = watumiaji ambao ni seller NA buyer
+- sellersOnly = sellers ambao SIO buyers
+- buyersOnly  = buyers ambao SIO sellers
+- neitherRole = hawana listing wala deal
 - totalUsers = users wote (is_staff=False, is_deleted=False)
 
 Mtumiaji mmoja anaweza kuwa seller NA buyer kwa wakati mmoja.
 """
 
 from django.contrib.auth import get_user_model
-from django.db.models import Q
 
 
 def calculate_user_stats():
@@ -22,7 +24,10 @@ def calculate_user_stats():
         - totalUsers
         - totalSellers
         - totalBuyers
+        - sellersOnly
+        - buyersOnly
         - bothRoles
+        - neitherRole
         - totalAdmins
     """
     User = get_user_model()
@@ -41,7 +46,6 @@ def calculate_user_stats():
     ).count()
 
     # ── SELLERS ──────────────────────────────────────────────
-    # Users walio na listing angalau moja (hazijafutwa)
     try:
         from apps.listings.models import Listing
 
@@ -59,7 +63,6 @@ def calculate_user_stats():
         seller_ids = set()
 
     # ── BUYERS ───────────────────────────────────────────────
-    # Users walio na DealRoom angalau moja kama buyer
     try:
         from apps.deals.models import DealRoom
 
@@ -75,21 +78,22 @@ def calculate_user_stats():
     except Exception:
         buyer_ids = set()
 
-    # ── TOTALS ──────────────────────────────────────────────
-    total_sellers = len(seller_ids)
-    total_buyers = len(buyer_ids)
-
-    # Watumiaji ambao ni seller NA buyer
-    both_roles = len(seller_ids & buyer_ids)
-
-    # Watumiaji ambao HAWAJAkuwa seller wala buyer
-    neither = total_users - len(seller_ids | buyer_ids)
+    # ── BREAKDOWN ───────────────────────────────────────────
+    both_roles = seller_ids & buyer_ids
+    sellers_only = seller_ids - buyer_ids
+    buyers_only = buyer_ids - seller_ids
+    neither = (
+        set(base_users.values_list("id", flat=True))
+        - (seller_ids | buyer_ids)
+    )
 
     return {
         "totalUsers": total_users,
-        "totalSellers": total_sellers,
-        "totalBuyers": total_buyers,
-        "bothRoles": both_roles,
-        "neitherRole": max(0, neither),
+        "totalSellers": len(seller_ids),
+        "totalBuyers": len(buyer_ids),
+        "sellersOnly": len(sellers_only),
+        "buyersOnly": len(buyers_only),
+        "bothRoles": len(both_roles),
+        "neitherRole": max(0, len(neither)),
         "totalAdmins": total_admins,
     }

@@ -5,54 +5,111 @@ from ..models import Notification
 
 
 # ============================================================
-# PREFERENCE CHECKS
+# NOTIFICATION TYPE → (channel, category) MAPPING
 # ============================================================
-def _should_send_notification(recipient, notification_type):
+#
+# Kila notification_type inahusiana na channel + category.
+# `_should_send_via_channel()` inatumia hii kupata prefs field
+# inayofaa (mfano `email_deals`, `push_deals`).
+#
+# NOTE (Chaguo B): Mapping hii HAITUMIKI kuzuia in-app notifications.
+# Inatumika TU kwenye send_notification_via_channels() — kwa
+# email/SMS/push services.
+#
+_NOTIFICATION_TYPE_MAP = {
+    # ── Listings — deals ──────────────────────────────────
+    "LISTING_CREATED":    ("email", "deals"),
+    "LISTING_APPROVED":   ("email", "deals"),
+    "LISTING_REJECTED":   ("email", "deals"),
+    "LISTING_DELETED":    ("email", "deals"),
+    "LISTING_RESTORED":   ("email", "deals"),
+
+    # ── Deals / Offers — deals ────────────────────────────
+    "NEW_OFFER":           ("push",  "deals"),
+    "OFFER_COUNTERED":     ("push",  "deals"),
+    "OFFER_ACCEPTED":      ("push",  "deals"),
+
+    # ── Transactions — deals ──────────────────────────────
+    "TRANSACTION_CREATED":   ("email", "deals"),
+    "TRANSACTION_COMPLETED": ("email", "deals"),
+    "TRANSACTION_CANCELLED": ("email", "deals"),
+
+    # ── Reservations — deals ──────────────────────────────
+    "RESERVATION_CREATED":  ("email", "deals"),
+    "RESERVATION_PAID":     ("email", "deals"),
+    "RESERVATION_EXPIRING": ("push",  "deals"),
+    "RESERVATION_EXPIRED":  ("email", "deals"),
+
+    # ── Inspection / Buyer decision — deals ───────────────
+    "INSPECTION_STARTED":   ("email", "deals"),
+    "INSPECTION_COMPLETED": ("email", "deals"),
+    "BUYER_DECISION":       ("email", "deals"),
+
+    # ── Payment proof — deals ─────────────────────────────
+    "PAYMENT_PROOF_UPLOADED": ("push",  "deals"),
+    "PAYMENT_CONFIRMED":      ("email", "deals"),
+
+    # ── Waiting list — deals ──────────────────────────────
+    "WAITING_LIST_JOINED":    ("email", "deals"),
+    "WAITING_LIST_AVAILABLE": ("push",  "deals"),
+
+    # ── Boost — promotions ────────────────────────────────
+    "BOOST_ACTIVATED": ("email", "promotions"),
+
+    # ── System notifications — always send ────────────────
+    "ACCOUNT_DELETED":  (None, None),
+    "ACCOUNT_RESTORED": (None, None),
+    "GENERAL":          (None, None),
+}
+
+
+def _should_send_via_channel(recipient, notification_type, channel):
     """
-    Angalia kama mtumiaji amezima aina fulani ya notification.
+    Angalia kama mtumiaji amezima channel fulani (email/sms/push)
+    kwa notification_type fulani.
 
-    Notification type format inayotarajiwa: `{channel}_{category}`
-      Channels:  email, sms, push
-      Categories: deals, messages, promotions, newsletter
+    Chaguo B: Function hii HAITUMIKI kwenye create_notification().
+    Inatumika TU kwenye send_notification_via_channels() baadaye.
 
-    Mifano:
-      - "email_deals"    → angalia prefs.email_deals
-      - "sms_messages"   → angalia prefs.sms_messages
-      - "push_promotions" → angalia prefs.push_promotions
+    Args:
+        recipient: User
+        notification_type: str (mfano "NEW_OFFER")
+        channel: "email" | "sms" | "push"
 
-    Rudisha True kama:
-      - prefs hazipo (hakuna kizuizi)
-      - prefs zipo na field haipo (default = tuma)
-      - prefs zipo na field ipo na True
+    Returns:
+        True — tuma
+        False — mtumiaji amezima channel hii kwa category hii
     """
     try:
         prefs = recipient.notification_preferences
     except Exception:
         return True  # Hakuna prefs — tuma
 
-    nt = str(notification_type or "").lower().strip()
+    nt = str(notification_type or "").strip().upper()
     if not nt:
-        return True  # Hakuna type — tuma
+        return True
 
-    channels = ("email", "sms", "push")
-    categories = ("deals", "messages", "promotions", "newsletter")
+    if nt not in _NOTIFICATION_TYPE_MAP:
+        return True  # Haijulikani — tuma
 
-    for channel in channels:
-        for category in categories:
-            # Linganisha kwa viwango vitatu:
-            #   1. "email_deals"    — exact match
-            #   2. "email:deals"    — colon separator
-            #   3. "email.deals"    — dot separator
-            field = f"{channel}_{category}"
-            if (
-                nt == field
-                or nt == f"{channel}:{category}"
-                or nt == f"{channel}.{category}"
-            ):
-                return bool(getattr(prefs, field, True))
+    mapped_channel, category = _NOTIFICATION_TYPE_MAP[nt]
 
-    # Kama notification_type haijulikani, tuma kwa default
-    return True
+    # System notification — tuma kila wakati
+    if mapped_channel is None or category is None:
+        return True
+
+    # Kama channel iliyotolewa ni tofauti na mapping, tuma
+    # (mfano: unaweza kutaka kutuma via email hata kama mapping ni push)
+    if channel != mapped_channel:
+        # Angalia prefs field kwa channel iliyotolewa
+        field = f"{channel}_{category}"
+    else:
+        field = f"{channel}_{category}"
+
+    if not hasattr(prefs, field):
+        return True
+
+    return bool(getattr(prefs, field))
 
 
 def create_notification(
@@ -68,19 +125,18 @@ def create_notification(
     action_url="",
 ):
     """
-    Create a notification. Callers that run inside an atomic block
-    should invoke this via transaction.on_commit() to avoid coupling
-    the notification write to the business transaction.
+    Create a notification (in-app, DB record).
 
-    Kama mtumiaji amezima notification_type hii (kwa kutumia
-    notification preferences), notification hairundwi na function
-    inarudisha None.
+    Chaguo B: Hii inaunda DB record KILA WAKATI bila kuzingatia
+    prefs za mtumiaji. Mtumiaji anaona kwenye bell icon.
+
+    Prefs za mtumiaji zinaathiri TU email/SMS/push — ambazo
+    zinatumwa kupitia `send_notification_via_channels()`.
+
+    Callers that run inside an atomic block should invoke this via
+    transaction.on_commit() to avoid coupling the notification write
+    to the business transaction.
     """
-    # ⬇️ Angalia prefs — skip kama mtumiaji amezima
-    if audience == Notification.Audience.USER:
-        if not _should_send_notification(recipient, notification_type):
-            return None  # Skipped — prefs zimezima
-
     return Notification.objects.create(
         recipient=recipient,
         notification_type=notification_type,
@@ -92,6 +148,102 @@ def create_notification(
         related_object_id=related_object_id,
         action_url=action_url,
     )
+
+
+# ============================================================
+# OPTIONAL — SEND VIA CHANNELS (email/SMS/push)
+# ============================================================
+# Hii ni kwa siku zijazo ukiongeza email/SMS/push services.
+# Kwa sasa ina-log tu (hakuna kutuma).
+#
+# Matumizi:
+#   create_notification(...)                       # in-app, kila wakati
+#   send_notification_via_channels(recipient, ...) # email/SMS/push kwa prefs
+#
+def send_notification_via_channels(
+    *,
+    recipient,
+    notification_type,
+    title,
+    message,
+    channels=("email", "sms", "push"),
+    **kwargs,
+):
+    """
+    Tuma notification kupitia channels mbalimbali, ukizingatia
+    prefs za mtumiaji.
+
+    Kwa sasa hii ni **stub** — ina-log tu. Ukiongeza email/SMS/push
+    services, badilisha `_send_via_channel()` hapa chini.
+
+    Args:
+        channels: Tuple ya channels za kujaribu. Default: zote tatu.
+
+    Returns:
+        dict { channel: bool } — True kama ilitumwa, False kama ilirukwa.
+    """
+    results = {}
+
+    for channel in channels:
+        if not _should_send_via_channel(recipient, notification_type, channel):
+            results[channel] = False
+            continue
+
+        sent = _send_via_channel(
+            channel=channel,
+            recipient=recipient,
+            title=title,
+            message=message,
+            **kwargs,
+        )
+        results[channel] = sent
+
+    return results
+
+
+def _send_via_channel(*, channel, recipient, title, message, **kwargs):
+    """
+    Tuma notification via channel fulani.
+
+    Chaguo B: Hii ni stub kwa sasa — ina-log tu. Ukiongeza services,
+    badilisha code hapa.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if channel == "email":
+        # TODO: integrate email service
+        # from .email_service import send_email
+        # send_email(recipient.email, title, message)
+        logger.info(
+            "[notif:email] Would send to %s: %s — %s",
+            recipient.email, title, message,
+        )
+        return True
+
+    if channel == "sms":
+        # TODO: integrate SMS service (FimiPay/Beem)
+        # from .sms_service import send_sms
+        # send_sms(recipient.phone, message)
+        if not recipient.phone:
+            return False
+        logger.info(
+            "[notif:sms] Would send to %s: %s",
+            recipient.phone, title,
+        )
+        return True
+
+    if channel == "push":
+        # TODO: integrate push service (Firebase/OneSignal)
+        # from .push_service import send_push
+        # send_push(recipient.id, title, message)
+        logger.info(
+            "[notif:push] Would send to user %s: %s — %s",
+            recipient.id, title, message,
+        )
+        return True
+
+    return False
 
 
 def mark_notification_as_read(*, notification, user):
@@ -145,13 +297,6 @@ def create_notification_for_admins(
 
     Admin notifications HAZIATHIRIWI na prefs za mtumiaji —
     admin anaona kila kitu.
-
-    Args:
-        exclude_user_id: Kama ipo, mruke admin huyu (mfano kama
-            admin mwenyewe ndiye aliyeunda kitendo).
-
-    Returns:
-        list ya Notification zilizoundwa.
     """
     from django.contrib.auth import get_user_model
 

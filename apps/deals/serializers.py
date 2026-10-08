@@ -74,8 +74,11 @@ class DealUserSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "phone", "email"]
         read_only_fields = fields
 
-    def _contact_visible(self):
-        """Rudisha True kama mwombaji anaruhusiwa kuona contact."""
+    # ------------------------------------------------------------
+    # HELPERS
+    # ------------------------------------------------------------
+    def _reservation_paid(self):
+        """Je, reservation ya deal hii imelipwa?"""
         request = self.context.get("request")
         deal_room = self.context.get("deal_room")
 
@@ -83,7 +86,6 @@ class DealUserSerializer(serializers.ModelSerializer):
             return False
         if not deal_room:
             return False
-
         if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
             return False
 
@@ -100,16 +102,57 @@ class DealUserSerializer(serializers.ModelSerializer):
             Transaction.Status.COMPLETED,
         ]
 
-    def get_phone(self, obj):
-        if not self._contact_visible():
+    def _is_self_or_staff(self, obj):
+        """Je, mwombaji ni wewe mwenyewe au staff?"""
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return (
+            request.user.id == obj.id
+            or request.user.is_staff
+        )
+
+    def _prefs(self, obj):
+        """Rudisha UserPreferences au None."""
+        try:
+            return obj.preferences
+        except Exception:
             return None
+
+    # ------------------------------------------------------------
+    # PHONE / EMAIL
+    # ------------------------------------------------------------
+    def get_phone(self, obj):
+        # Mmiliki au staff — ona kila kitu
+        if self._is_self_or_staff(obj):
+            return getattr(obj, "phone", None)
+
+        # Reservation LAZIMA ilipwe kwanza
+        if not self._reservation_paid():
+            return None
+
+        # Angalia `show_phone` ya mtumiaji mwenyewe
+        prefs = self._prefs(obj)
+        if prefs is not None and not prefs.show_phone:
+            return None
+
         return getattr(obj, "phone", None)
 
     def get_email(self, obj):
-        if not self._contact_visible():
-            return None
-        return getattr(obj, "email", None)
+        # Mmiliki au staff — ona kila kitu
+        if self._is_self_or_staff(obj):
+            return getattr(obj, "email", None)
 
+        # Reservation LAZIMA ilipwe kwanza
+        if not self._reservation_paid():
+            return None
+
+        # Angalia `show_email`
+        prefs = self._prefs(obj)
+        if prefs is not None and not prefs.show_email:
+            return None
+
+        return getattr(obj, "email", None)
 
 # ============================================================
 # OFFERS

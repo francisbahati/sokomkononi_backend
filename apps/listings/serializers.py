@@ -75,6 +75,43 @@ class ListingCategorySerializer(serializers.ModelSerializer):
 
 
 # ============================================================================
+# HELPER — seller contact visibility
+# ============================================================================
+
+def _seller_contact_visible(request, seller, field_name):
+    """
+    Rudisha True kama mwombaji anaruhusiwa kuona contact ya seller.
+
+    Field_name ni "phone" au "email".
+
+    Sheria:
+      - Mmiliki (seller mwenyewe) — ona kila kitu
+      - Staff — ona kila kitu
+      - Wengine — ona TU kama seller.preferences.show_{field_name} == True
+        (au kama hakuna prefs, default ni kuonyesha)
+    """
+    if not seller:
+        return False
+
+    if request and request.user.is_authenticated:
+        if request.user.id == seller.id or request.user.is_staff:
+            return True
+
+    # Angalia prefs
+    try:
+        prefs = seller.preferences
+        if field_name == "phone" and not prefs.show_phone:
+            return False
+        if field_name == "email" and not prefs.show_email:
+            return False
+    except Exception:
+        # Hakuna prefs — default ni kuonyesha
+        pass
+
+    return True
+
+
+# ============================================================================
 # LISTING LIST
 # ============================================================================
 
@@ -83,6 +120,9 @@ class ListingListSerializer(serializers.ModelSerializer):
         source="seller.name",
         read_only=True,
     )
+
+    seller_phone = serializers.SerializerMethodField()
+    seller_email = serializers.SerializerMethodField()
 
     category = ListingCategorySerializer(
         read_only=True,
@@ -113,10 +153,24 @@ class ListingListSerializer(serializers.ModelSerializer):
             "is_boosted",
             "views_count",
             "seller_name",
+            "seller_phone",
+            "seller_email",
             "category",
             "primary_image",
             "created_at",
         ]
+
+    def get_seller_phone(self, obj):
+        request = self.context.get("request")
+        if not _seller_contact_visible(request, obj.seller, "phone"):
+            return None
+        return getattr(obj.seller, "phone", None)
+
+    def get_seller_email(self, obj):
+        request = self.context.get("request")
+        if not _seller_contact_visible(request, obj.seller, "email"):
+            return None
+        return getattr(obj.seller, "email", None)
 
     def get_status_label(self, obj):
         labels = {
@@ -339,6 +393,9 @@ class ListingDetailSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    seller_phone = serializers.SerializerMethodField()
+    seller_email = serializers.SerializerMethodField()
+
     category = ListingCategorySerializer(
         read_only=True,
     )
@@ -378,6 +435,8 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "id",
             "seller",
             "seller_name",
+            "seller_phone",
+            "seller_email",
             "category",
             "title",
             "description",
@@ -411,6 +470,8 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "id",
             "seller",
             "seller_name",
+            "seller_phone",
+            "seller_email",
             "category",
             "status",
             "is_featured",
@@ -431,6 +492,18 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_seller_phone(self, obj):
+        request = self.context.get("request")
+        if not _seller_contact_visible(request, obj.seller, "phone"):
+            return None
+        return getattr(obj.seller, "phone", None)
+
+    def get_seller_email(self, obj):
+        request = self.context.get("request")
+        if not _seller_contact_visible(request, obj.seller, "email"):
+            return None
+        return getattr(obj.seller, "email", None)
 
     def get_fee_required(self, obj):
         from .services.listing_moderation import _is_listing_fee_required_for
@@ -641,6 +714,8 @@ class ListingFeeSerializer(serializers.ModelSerializer):
         payment globally — every listing has a positive fee.
         """
         return False
+
+
 # ============================================================================
 # LISTING FEE PAYMENT SERIALIZER
 # ============================================================================

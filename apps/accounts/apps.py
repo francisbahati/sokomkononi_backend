@@ -5,6 +5,7 @@ class AccountsConfig(AppConfig):
 
     def ready(self):
         from . import schema  # noqa: F401
+        from . import signals  # noqa: F401
 
 
     default_auto_field = (

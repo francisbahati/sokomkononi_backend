@@ -9,7 +9,13 @@ class BannerAd(models.Model):
     Records each seller's paid banner ad. Created after they pay the
     Advertisement Fee. The `expires_at` field drives the rotation window.
     """
-
+    package = models.ForeignKey(
+        "advertisement_fees.AdvertisementPackage",
+        on_delete=models.PROTECT,
+        related_name="banner_ads",
+        null=True,
+        blank=True,
+    )
     listing = models.ForeignKey(
         "listings.Listing",
         on_delete=models.CASCADE,

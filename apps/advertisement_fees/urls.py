@@ -1,7 +1,15 @@
 # apps/advertisement_fees/urls.py
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
-from .views import AdvertisementFeeConfigViewSet
+from .views import (
+    AdvertisementFeeConfigViewSet,
+    AdvertisementPackageViewSet,
+)
+
+
+package_router = DefaultRouter()
+package_router.register(r"", AdvertisementPackageViewSet, basename="advertisement-package")
 
 
 urlpatterns = [
@@ -19,4 +27,5 @@ urlpatterns = [
         }),
         name="advertisement-fee-config",
     ),
+    path("packages/", include(package_router.urls)),
 ]

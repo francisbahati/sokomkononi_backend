@@ -1,5 +1,7 @@
+# apps/banners/services.py
 """
-Banner ad creation + activation. Reads the current Advertisement Fee config.
+Banner ad creation + activation.
+Inatumia `AdvertisementPackage` kwa bei na muda.
 """
 from datetime import timedelta
 
@@ -12,15 +14,13 @@ from apps.listings.models import Listing
 from .models import BannerAd
 
 
-def _get_ad_fee_config():
-    from apps.advertisement_fees.models import AdvertisementFeeConfig
-    obj, _ = AdvertisementFeeConfig.objects.get_or_create(pk=1)
-    return obj
-
-
 @transaction.atomic
-def create_banner_ad(*, listing_id, seller, payment_reference=""):
-    config = _get_ad_fee_config()
+def create_banner_ad(*, listing_id, seller, package, payment_reference=""):
+    """
+    Unda PENDING banner ad. Hai-activate listing bado — inasubiri malipo.
+    """
+    if not package or not package.is_active:
+        raise ValidationError({"package": "Advertisement package haipo active."})
 
     try:
         listing = Listing.objects.select_for_update().get(pk=listing_id)
@@ -28,12 +28,16 @@ def create_banner_ad(*, listing_id, seller, payment_reference=""):
         raise ValidationError({"listing": "Tangazo halipatikani."})
 
     if listing.seller_id != seller.id:
-        raise ValidationError({"listing": "Huruhusiwi kutangaza tangazo ambalo si lako."})
+        raise ValidationError(
+            {"listing": "Huruhusiwi kutangaza tangazo ambalo si lako."}
+        )
     if listing.status != Listing.Status.LIVE:
         raise ValidationError({"listing": "Tangazo lazima liwe AVAILABLE."})
 
     existing = BannerAd.objects.filter(
-        listing=listing, active=True, expires_at__gt=timezone.now(),
+        listing=listing,
+        active=True,
+        expires_at__gt=timezone.now(),
     ).exists()
     if existing:
         raise ValidationError(
@@ -44,16 +48,17 @@ def create_banner_ad(*, listing_id, seller, payment_reference=""):
     banner = BannerAd.objects.create(
         listing=listing,
         seller=seller,
+        package=package,
         listing_title=listing.title,
         category=getattr(listing.category, "slug", "") or "",
         location=listing.location or "",
         price=listing.price,
         seller_name=seller.name,
-        amount=config.price,
-        payment_reference=(payment_reference or "").strip(),
+        amount=package.price,
+        payment_reference=(payment_reference or "").strip() or None,
         active=False,
         payment_status="PENDING",
-        expires_at=now + timedelta(days=config.days),
+        expires_at=now + timedelta(hours=package.duration_hours),
     )
     return banner
 
@@ -70,7 +75,7 @@ def mark_banner_paid_and_activate(*, banner, payment_reference):
     banner = (
         BannerAd.objects
         .select_for_update(of=("self",))
-        .select_related("listing", "seller")
+        .select_related("listing", "seller", "package")
         .get(pk=banner.pk)
     )
 
@@ -83,12 +88,15 @@ def mark_banner_paid_and_activate(*, banner, payment_reference):
         raise ValidationError("Payment reference hii tayari imetumika.")
 
     now = timezone.now()
+    hours = banner.package.duration_hours if banner.package else 168
     banner.payment_status = "PAID"
     banner.payment_reference = ref
     banner.paid_at = now
     banner.active = True
+    banner.expires_at = now + timedelta(hours=hours)
     banner.save(update_fields=[
-        "payment_status", "payment_reference", "paid_at", "active",
+        "payment_status", "payment_reference", "paid_at",
+        "active", "expires_at",
     ])
     return banner
 
@@ -107,6 +115,7 @@ from apps.payments.fimipay import (
 def initiate_banner_payment(*, banner, user, payment_method='mobile', phone=''):
     if banner.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia banner hii.")
+
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
     existing_ref = (banner.payment_reference or "").strip()
@@ -144,11 +153,14 @@ def mark_banner_paid_from_webhook(*, ref_id, payment_reference):
     if BannerAd.objects.filter(payment_reference=ref).exclude(pk=banner.pk).exists():
         raise ValidationError("Payment reference hii tayari imetumika.")
 
+    hours = banner.package.duration_hours if banner.package else 168
     banner.payment_status = "PAID"
     banner.payment_reference = ref
     banner.paid_at = timezone.now()
     banner.active = True
+    banner.expires_at = timezone.now() + timedelta(hours=hours)
     banner.save(update_fields=[
-        "payment_status", "payment_reference", "paid_at", "active",
+        "payment_status", "payment_reference", "paid_at",
+        "active", "expires_at",
     ])
     return banner

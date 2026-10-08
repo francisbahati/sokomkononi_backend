@@ -1,3 +1,4 @@
+# apps/leading_fees/views.py
 from datetime import timedelta
 
 from django.shortcuts import get_object_or_404
@@ -10,21 +11,33 @@ from rest_framework.response import Response
 from apps.credits.services import consume_credit
 from apps.listings.models import Listing
 
-from .models import LeadingFeeConfig, ListingLeading
+from .models import LeadingFeeConfig, LeadingPackage, ListingLeading
 from .serializers import (
     LeadingApplySerializer,
     LeadingFeeConfigSerializer,
+    LeadingPackageSerializer,
     LeadingPaymentSerializer,
     ListingLeadingSerializer,
 )
 from .services import create_leading, initiate_leading_payment
 
 
-class LeadingFeeConfigViewSet(viewsets.ModelViewSet):
+class IsAdminOrReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_staff
+        )
+
+
+class LeadingFeeConfigViewSet(viewsets.GenericViewSet):
     """
     Singleton viewset — LeadingFeeConfig moja (pk=1).
 
-    GET     /api/leading-fees/             → config (object, si list)
+    GET     /api/leading-fees/             → config
     PATCH   /api/leading-fees/             → update config
     POST    /api/leading-fees/toggle/      → toggle is_enabled
     """
@@ -37,61 +50,65 @@ class LeadingFeeConfigViewSet(viewsets.ModelViewSet):
         return [permissions.IsAdminUser()]
 
     def get_object(self):
-        obj, _ = LeadingFeeConfig.objects.get_or_create(
-            pk=1,
-            defaults={
-                "price": 10000,
-                "days": 7,
-                "is_enabled": True,
-                "label_sw": "Ada ya Kipaumbele",
-                "label_en": "Leading Fee",
-                "desc_sw": "",
-                "desc_en": "",
-            },
-        )
-        return obj
+        return LeadingFeeConfig.get_solo()
 
     def list(self, request):
-        # Rudisha OBJECT moja, sio list — kwa sababu ni singleton
         obj = self.get_object()
-        return Response(
-            LeadingFeeConfigSerializer(obj).data,
-            status=status.HTTP_200_OK,
-        )
+        return Response(LeadingFeeConfigSerializer(obj).data)
 
     def create(self, request):
         obj = self.get_object()
-        serializer = LeadingFeeConfigSerializer(
-            obj, data=request.data, partial=True,
-        )
+        serializer = LeadingFeeConfigSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.data)
 
     def partial_update(self, request, pk=None):
         obj = self.get_object()
-        serializer = LeadingFeeConfigSerializer(
-            obj, data=request.data, partial=True,
-        )
+        serializer = LeadingFeeConfigSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.data)
 
     @action(detail=False, methods=["post"], url_path="toggle")
     def toggle(self, request):
         obj = self.get_object()
         obj.is_enabled = not obj.is_enabled
         obj.save(update_fields=["is_enabled", "updated_at"])
-        return Response(
-            {"is_enabled": obj.is_enabled},
-            status=status.HTTP_200_OK,
-        )
+        return Response({"is_enabled": obj.is_enabled})
+
+
+class LeadingPackageViewSet(viewsets.ModelViewSet):
+    """
+    CRUD kwa Leading Packages.
+
+    GET    /api/leading-fees/packages/           → list
+    POST   /api/leading-fees/packages/           → create
+    PATCH  /api/leading-fees/packages/{id}/      → update
+    DELETE /api/leading-fees/packages/{id}/      → delete
+    POST   /api/leading-fees/packages/{id}/toggle/ → toggle is_active
+    """
+    serializer_class = LeadingPackageSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    queryset = LeadingPackage.objects.all()
+
+    def get_queryset(self):
+        qs = LeadingPackage.objects.all()
+        user = self.request.user
+        if user.is_authenticated and user.is_staff:
+            return qs
+        return qs.filter(is_active=True)
+
+    @action(detail=True, methods=["post"], url_path="toggle")
+    def toggle(self, request, pk=None):
+        pkg = self.get_object()
+        pkg.is_active = not pkg.is_active
+        pkg.save(update_fields=["is_active", "updated_at"])
+        return Response({"is_active": pkg.is_active})
 
 
 class ListingLeadingViewSet(viewsets.ModelViewSet):
-    queryset = ListingLeading.objects.select_related(
-        "listing", "seller",
-    )
+    queryset = ListingLeading.objects.select_related("listing", "seller", "package")
     serializer_class = ListingLeadingSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -103,7 +120,7 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
         if not user.is_authenticated:
             return ListingLeading.objects.none()
 
-        qs = ListingLeading.objects.select_related("listing", "seller")
+        qs = ListingLeading.objects.select_related("listing", "seller", "package")
         if user.is_staff:
             return qs
         return qs.filter(seller=user)
@@ -119,17 +136,20 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             Listing.objects.select_related("seller"),
             pk=serializer.validated_data["listing"],
         )
+        package = get_object_or_404(
+            LeadingPackage,
+            pk=serializer.validated_data["package"],
+            is_active=True,
+        )
 
-        # SASISHO: `create_leading()` service inatarajia `listing_id`, sio `listing`.
         leading = create_leading(
             listing_id=listing.id,
             user=request.user,
+            package=package,
         )
 
         return Response(
-            ListingLeadingSerializer(
-                leading, context={"request": request}
-            ).data,
+            ListingLeadingSerializer(leading, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -137,12 +157,8 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
     def pay(self, request, pk=None):
         leading = get_object_or_404(self.get_queryset(), pk=pk)
         if leading.seller_id != request.user.id and not request.user.is_staff:
-            return Response(
-                {"detail": "Huna ruhusa."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
 
-        # ── Credits path ──────────────────────────────────────────
         payment_reference = (request.data.get("payment_reference") or "").strip()
         if payment_reference == "credits":
             import uuid
@@ -156,15 +172,12 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
                     )
                 now = timezone.now()
                 leading.payment_status = "PAID"
-                leading.payment_reference = (
-                    f"credits-{leading.pk}-{uuid.uuid4().hex[:12]}"
-                )
+                leading.payment_reference = f"credits-{leading.pk}-{uuid.uuid4().hex[:12]}"
                 leading.paid_at = now
                 leading.status = "ACTIVE"
                 leading.starts_at = now
-                leading.expires_at = now + timedelta(
-                    days=leading.days or 7
-                )
+                hours = leading.package.duration_hours if leading.package else (leading.days or 7) * 24
+                leading.expires_at = now + timedelta(hours=hours)
                 leading.save(update_fields=[
                     "payment_status", "payment_reference",
                     "paid_at", "status", "starts_at",
@@ -174,14 +187,11 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
                 {
                     "payment_status": "SUCCESS",
                     "via": "credits",
-                    "purchase": ListingLeadingSerializer(
-                        leading, context={"request": request}
-                    ).data,
+                    "purchase": ListingLeadingSerializer(leading, context={"request": request}).data,
                 },
                 status=status.HTTP_200_OK,
             )
 
-        # ── Default: FimiPay ──────────────────────────────────────
         data = initiate_leading_payment(
             leading=leading,
             user=request.user,

@@ -1,6 +1,8 @@
+# apps/banners/views.py
 from datetime import timedelta
 
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from rest_framework import permissions, status, viewsets
@@ -17,7 +19,7 @@ from .serializers import (
 
 
 class BannerAdViewSet(viewsets.ModelViewSet):
-    queryset = BannerAd.objects.select_related("listing", "seller")
+    queryset = BannerAd.objects.select_related("listing", "seller", "package")
     serializer_class = BannerAdSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
@@ -26,7 +28,7 @@ class BannerAdViewSet(viewsets.ModelViewSet):
             return BannerAd.objects.none()
 
         user = self.request.user
-        qs = BannerAd.objects.select_related("listing", "seller")
+        qs = BannerAd.objects.select_related("listing", "seller", "package")
 
         # Public: only active banners
         if not user or not user.is_authenticated:
@@ -52,11 +54,10 @@ class BannerAdViewSet(viewsets.ModelViewSet):
 
         from .services import create_banner_ad
 
-        # SASISHO: `create_banner_ad()` service inatarajia `listing_id` + `seller`,
-        # sio `listing` + `user`.
         banner = create_banner_ad(
             listing_id=serializer.validated_data["listing"],
             seller=request.user,
+            package=serializer.validated_data["package"],
         )
 
         return Response(
@@ -83,7 +84,6 @@ class BannerAdViewSet(viewsets.ModelViewSet):
         if payment_reference == "credits":
             import uuid
             from django.db import transaction
-            from .services import _get_ad_fee_config
 
             with transaction.atomic():
                 if not consume_credit(request.user, "ads"):
@@ -91,16 +91,14 @@ class BannerAdViewSet(viewsets.ModelViewSet):
                         {"detail": "Hakuna ads credits za kutosha."},
                         status=status.HTTP_402_PAYMENT_REQUIRED,
                     )
-                cfg = _get_ad_fee_config()
+                hours = banner.package.duration_hours if banner.package else 168
                 banner.payment_status = "PAID"
                 banner.payment_reference = (
                     f"credits-{banner.pk}-{uuid.uuid4().hex[:12]}"
                 )
                 banner.paid_at = timezone.now()
                 banner.active = True
-                banner.expires_at = (
-                    timezone.now() + timedelta(days=cfg.days)
-                )
+                banner.expires_at = timezone.now() + timedelta(hours=hours)
                 banner.save(update_fields=[
                     "payment_status", "payment_reference",
                     "paid_at", "active", "expires_at",

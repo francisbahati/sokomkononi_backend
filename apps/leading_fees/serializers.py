@@ -1,7 +1,7 @@
 # apps/leading_fees/serializers.py
 from rest_framework import serializers
 
-from .models import LeadingFeeConfig, ListingLeading
+from .models import LeadingFeeConfig, LeadingPackage, ListingLeading
 
 
 class LeadingFeeConfigSerializer(serializers.ModelSerializer):
@@ -10,15 +10,7 @@ class LeadingFeeConfigSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = LeadingFeeConfig
-        fields = [
-            "id",
-            "price",
-            "days",
-            "is_enabled",   # ⬅️ MPYA
-            "label",
-            "desc",
-            "updated_at",
-        ]
+        fields = ["id", "is_enabled", "label", "desc", "updated_at"]
         read_only_fields = ["id", "updated_at"]
 
     def get_label(self, obj):
@@ -27,59 +19,43 @@ class LeadingFeeConfigSerializer(serializers.ModelSerializer):
     def get_desc(self, obj):
         return {"sw": obj.desc_sw, "en": obj.desc_en}
 
-    def to_internal_value(self, data):
-        data = dict(data)
-        out = {}
-        if "price" in data:
-            out["price"] = data["price"]
-        if "days" in data:
-            out["days"] = data["days"]
-        if "is_enabled" in data:                    # ⬅️ MPYA
-            out["is_enabled"] = data["is_enabled"]  # ⬅️ MPYA
-        label = data.get("label") or {}
-        if isinstance(label, dict):
-            if "sw" in label:
-                out["label_sw"] = label["sw"]
-            if "en" in label:
-                out["label_en"] = label["en"]
-        if "label_sw" in data:
-            out["label_sw"] = data["label_sw"]
-        if "label_en" in data:
-            out["label_en"] = data["label_en"]
-        desc = data.get("desc") or {}
-        if isinstance(desc, dict):
-            if "sw" in desc:
-                out["desc_sw"] = desc["sw"]
-            if "en" in desc:
-                out["desc_en"] = desc["en"]
-        if "desc_sw" in data:
-            out["desc_sw"] = data["desc_sw"]
-        if "desc_en" in data:
-            out["desc_en"] = data["desc_en"]
-        return out
 
-    def create(self, validated_data):
-        obj, _ = LeadingFeeConfig.objects.get_or_create(pk=1)
-        for k, v in validated_data.items():
-            setattr(obj, k, v)
-        obj.save()
-        return obj
+class LeadingPackageSerializer(serializers.ModelSerializer):
+    duration_days = serializers.SerializerMethodField()
+    pricing = serializers.SerializerMethodField()
 
-    def update(self, instance, validated_data):
-        for k, v in validated_data.items():
-            setattr(instance, k, v)
-        instance.save()
-        return instance
+    class Meta:
+        model = LeadingPackage
+        fields = [
+            "id", "name", "duration_hours", "duration_days",
+            "price", "pricing", "description", "is_active", "ordering",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "duration_days", "pricing", "created_at", "updated_at"]
+
+    def get_duration_days(self, obj):
+        return obj.duration_hours / 24
+
+    def get_pricing(self, obj):
+        try:
+            from apps.promotions.services.campaign_pricing import (
+                calculate_promotion_price,
+            )
+            return calculate_promotion_price(obj.price, "LEADING")
+        except Exception:
+            return None
 
 
 class ListingLeadingSerializer(serializers.ModelSerializer):
     listing_title = serializers.CharField(source="listing.title", read_only=True)
     seller_name = serializers.CharField(source="seller.name", read_only=True)
+    package_name = serializers.CharField(source="package.name", read_only=True)
 
     class Meta:
         model = ListingLeading
         fields = [
             "id", "listing", "listing_title", "seller", "seller_name",
+            "package", "package_name",
             "days", "price", "payment_status", "payment_reference",
             "paid_at", "status", "starts_at", "expires_at",
             "created_at", "updated_at",
@@ -89,6 +65,7 @@ class ListingLeadingSerializer(serializers.ModelSerializer):
 
 class LeadingApplySerializer(serializers.Serializer):
     listing = serializers.IntegerField()
+    package = serializers.IntegerField(required=True)
     payment_reference = serializers.CharField(
         max_length=255, required=False, allow_blank=True,
     )

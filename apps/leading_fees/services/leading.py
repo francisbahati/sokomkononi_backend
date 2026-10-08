@@ -1,4 +1,5 @@
-"""Leading purchase flow. Mirrors boosting's state machine."""
+# apps/leading_fees/services/leading.py
+"""Leading purchase flow. Inatumia package badala ya config."""
 from datetime import timedelta
 
 from django.db import transaction
@@ -7,12 +8,11 @@ from rest_framework.exceptions import ValidationError
 
 from apps.listings.models import Listing
 
-from ..models import LeadingFeeConfig, ListingLeading
+from ..models import LeadingFeeConfig, LeadingPackage, ListingLeading
 
 
 def _get_config():
-    obj, _ = LeadingFeeConfig.objects.get_or_create(pk=1)
-    return obj
+    return LeadingFeeConfig.get_solo()
 
 
 def _validate_seller(listing, user):
@@ -29,7 +29,7 @@ def _validate_seller(listing, user):
 
 
 @transaction.atomic
-def create_leading(*, listing_id, user, payment_reference=""):
+def create_leading(*, listing_id, user, package, payment_reference=""):
     """Create a PENDING leading purchase. Does NOT touch the listing yet."""
     try:
         listing = Listing.objects.select_for_update(of=("self",)).get(pk=listing_id)
@@ -37,14 +37,17 @@ def create_leading(*, listing_id, user, payment_reference=""):
         raise ValidationError({"listing": "Tangazo halipatikani."})
 
     _validate_seller(listing, user)
-    config = _get_config()
+
+    if not package or not package.is_active:
+        raise ValidationError({"package": "Leading package haipo active."})
 
     now = timezone.now()
     leading = ListingLeading.objects.create(
         listing=listing,
         seller=user,
-        days=config.days,
-        price=config.price,
+        package=package,
+        days=round(package.duration_hours / 24) or 1,
+        price=package.price,
         payment_status=ListingLeading.PaymentStatus.PENDING,
         status=ListingLeading.Status.PENDING,
         payment_reference=(payment_reference or "").strip() or None,
@@ -64,7 +67,7 @@ def mark_leading_paid(*, leading, payment_reference):
     leading = (
         ListingLeading.objects
         .select_for_update(of=("self",))
-        .select_related("listing", "seller")
+        .select_related("listing", "seller", "package")
         .get(pk=leading.pk)
     )
 
@@ -92,7 +95,7 @@ def _activate(leading):
     leading = (
         ListingLeading.objects
         .select_for_update(of=("self",))
-        .select_related("listing")
+        .select_related("listing", "package")
         .get(pk=leading.pk)
     )
     if leading.status == ListingLeading.Status.ACTIVE:
@@ -104,7 +107,8 @@ def _activate(leading):
 
     now = timezone.now()
     base = listing.leading_until if (listing.leading_until and listing.leading_until > now) else now
-    expires_at = base + timedelta(days=leading.days)
+    hours = leading.package.duration_hours if leading.package else 168
+    expires_at = base + timedelta(hours=hours)
 
     leading.status = ListingLeading.Status.ACTIVE
     leading.starts_at = now
@@ -119,8 +123,6 @@ def _activate(leading):
 
 @transaction.atomic
 def expire_stale_leading():
-    """Move ACTIVE leadings past expiry -> EXPIRED and clear listing flag
-    only if no other active leading exists for the listing."""
     now = timezone.now()
     qs = ListingLeading.objects.select_for_update().filter(
         status=ListingLeading.Status.ACTIVE, expires_at__lt=now,
@@ -158,7 +160,7 @@ def initiate_leading_payment(*, leading, user, payment_method='mobile', phone=''
     leading = (
         ListingLeading.objects
         .select_for_update(of=("self",))
-        .select_related("listing", "seller")
+        .select_related("listing", "seller", "package")
         .get(pk=leading.pk)
     )
     if leading.seller_id != user.id:
@@ -194,7 +196,7 @@ def mark_leading_paid_from_webhook(*, ref_id, payment_reference):
     leading = (
         ListingLeading.objects
         .select_for_update(of=("self",))
-        .select_related("listing", "seller")
+        .select_related("listing", "seller", "package")
         .get(pk=ref_id)
     )
     if leading.payment_status == ListingLeading.PaymentStatus.PAID:

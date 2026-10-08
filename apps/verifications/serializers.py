@@ -21,6 +21,13 @@ class VerificationDocumentSerializer(serializers.ModelSerializer):
 
 class VerificationRequestSerializer(serializers.ModelSerializer):
     documents = VerificationDocumentSerializer(many=True, read_only=True)
+    reviewed_by_name = serializers.SerializerMethodField()
+
+    def get_reviewed_by_name(self, obj):
+        u = obj.reviewed_by
+        if not u:
+            return None
+        return getattr(u, "name", None) or u.email or None
 
     class Meta:
         model = VerificationRequest
@@ -39,6 +46,7 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
             "documents_requested_at",
             "documents_request_message",
             "reviewed_by",
+            "reviewed_by_name",
             "reviewed_at",
             "rejection_reason",
             "created_at",
@@ -55,6 +63,7 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
             "documents_requested_at",
             "documents_request_message",
             "reviewed_by",
+            "reviewed_by_name",
             "reviewed_at",
             "rejection_reason",
             "created_at",

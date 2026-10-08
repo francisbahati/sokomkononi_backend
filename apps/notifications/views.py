@@ -108,7 +108,9 @@ class NotificationViewSet(
         """
         notification = self.get_object()
 
-        # Hard delete — ondoa kabisa DB
+        # Hard delete — ondoa kabisa DB.
+        # `hard_delete()` ni instance method (SoftDeleteModel), inaita
+        # super().delete() — hivyo inafuta kabisa, sio soft.
         notification.hard_delete()
 
         return Response(
@@ -167,17 +169,27 @@ class NotificationViewSet(
 
         Query params:
             audience (optional): "admin" au "user" — filter kwa audience.
-            Kama haipo, futa zote.
+            Kama haipo, futa zote za user huyu.
+
+        NOTE:
+            - `Notification.Audience.USER == "user"` (lowercase), hivyo
+              tunatumia `.lower()` sio `.upper()`.
+            - `QuerySet` HAINA `.hard_delete()`. `hard_delete()` ni
+              instance method kwenye `SoftDeleteModel`. Hivyo tunaita
+              kila instance kwa loop.
         """
         qs = self.get_queryset()
 
         # Filter kwa audience kama imetolewa
         audience = request.query_params.get("audience")
         if audience:
-            qs = qs.filter(audience=audience.upper())
+            qs = qs.filter(audience=audience.lower())
 
         count = qs.count()
-        qs.hard_delete()
+
+        # Hard delete kila instance — QuerySet haina .hard_delete()
+        for notification in qs:
+            notification.hard_delete()
 
         return Response(
             {

@@ -56,6 +56,89 @@ def _is_protected(model):
     return (model._meta.app_label, model.__name__) in AUDIT_PROTECTED_MODEL_NAMES
 
 
+# ----------------------------------------------------------------
+# Trash list presentation helpers
+# ----------------------------------------------------------------
+def _build_subtitle(model, obj):
+    """
+    Rudisha subtitle mafupi kutoka fields za kawaida.
+    Inajaribu: title, name, subject, email, description, location,
+    price — kwa mpangilio huo.
+    """
+    for field in (
+        "title", "name", "subject", "email",
+        "description", "location", "address",
+    ):
+        try:
+            val = getattr(obj, field, None)
+        except Exception:
+            val = None
+        if val:
+            text = str(val).strip()
+            if text:
+                return text[:200]
+
+    # Fallback: price kama ipo
+    try:
+        price = getattr(obj, "price", None)
+        if price is not None:
+            return f"TZS {price}"
+    except Exception:
+        pass
+    return ""
+
+
+def _build_deleted_by_name(obj):
+    """Jina la mtumiaji aliyeifuta — kutoka `deleted_by` (FK au id)."""
+    user = None
+    try:
+        user = getattr(obj, "deleted_by", None)
+    except Exception:
+        user = None
+
+    if not user:
+        return None
+
+    # Kama `deleted_by` ni FK object (User)
+    name = getattr(user, "name", None)
+    if name:
+        return name
+
+    email = getattr(user, "email", None)
+    if email:
+        return email
+
+    # Kama ni integer ID pekee — tafuta User
+    try:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        u = User.objects.filter(pk=user).first()
+        if u:
+            return getattr(u, "name", None) or getattr(u, "email", None)
+    except Exception:
+        pass
+
+    return None
+
+
+def _build_thumbnail(obj):
+    """URL ya picha — kutoka fields za kawaida za ImageField."""
+    for field in (
+        "image", "avatar", "thumbnail", "photo",
+        "logo", "banner", "cover",
+    ):
+        try:
+            f = getattr(obj, field, None)
+        except Exception:
+            f = None
+        if f and hasattr(f, "url"):
+            try:
+                return f.url
+            except Exception:
+                pass
+    return None
+
+
 class TrashOverviewView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
@@ -81,23 +164,34 @@ class TrashListView(APIView):
     def get(self, request, type):
         model = _resolve_model(type)
         if not model or not issubclass(model, SoftDeleteModel):
-            return Response({"detail": "Aina ya kikapu haipatikani."},
-                            status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Aina ya kikapu haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         qs = model.all_objects.filter(is_deleted=True).order_by("-deleted_at")
-        out = []
+
+        results = []
         for obj in qs[:500]:
-            out.append({
+            results.append({
                 "id": obj.pk,
+                "type": type,
+                "name": str(obj),
+                "subtitle": _build_subtitle(model, obj),
                 "deleted_at": getattr(obj, "deleted_at", None),
                 "deleted_by": getattr(obj, "deleted_by_id", None),
-                "reason": getattr(obj, "deletion_reason", ""),
+                "deleted_by_name": _build_deleted_by_name(obj),
+                "reason": getattr(obj, "deletion_reason", "") or "",
+                "details": getattr(obj, "deletion_reason", "") or "",
+                "thumbnail": _build_thumbnail(obj),
                 "repr": str(obj),
             })
+
         return Response({
             "type": type,
             "count": qs.count(),
             "protected": _is_protected(model),
-            "results": out,
+            "results": results,
         })
 
 
@@ -107,15 +201,21 @@ class TrashRestoreView(APIView):
     def post(self, request, type, pk):
         model = _resolve_model(type)
         if not model or not issubclass(model, SoftDeleteModel):
-            return Response({"detail": "Aina ya kikapu haipatikani."},
-                            status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Aina ya kikapu haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         obj = model.all_objects.filter(pk=pk, is_deleted=True).first()
         if not obj:
-            return Response({"detail": "Haipatikani kwenye kikapu."},
-                            status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Haipatikani kwenye kikapu."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         obj.restore()
-        _audit(request, "trash.restored", model, obj.pk,
-               f"Restored {model.__name__}#{obj.pk}")
+        _audit(
+            request, "trash.restored", model, obj.pk,
+            f"Restored {model.__name__}#{obj.pk}",
+        )
         return Response({"detail": "Imerejeshwa."})
 
 
@@ -125,8 +225,10 @@ class TrashPermanentDeleteView(APIView):
     def delete(self, request, type, pk):
         model = _resolve_model(type)
         if not model or not issubclass(model, SoftDeleteModel):
-            return Response({"detail": "Aina ya kikapu haipatikani."},
-                            status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Aina ya kikapu haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         if _is_protected(model):
             return Response(
                 {"detail": "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa."},
@@ -134,16 +236,22 @@ class TrashPermanentDeleteView(APIView):
             )
         obj = model.all_objects.filter(pk=pk, is_deleted=True).first()
         if not obj:
-            return Response({"detail": "Haipatikani kwenye kikapu."},
-                            status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Haipatikani kwenye kikapu."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         try:
             with transaction.atomic():
-                _audit(request, "trash.hard_deleted", model, obj.pk,
-                       f"Hard-deleted {model.__name__}#{obj.pk}")
+                _audit(
+                    request, "trash.hard_deleted", model, obj.pk,
+                    f"Hard-deleted {model.__name__}#{obj.pk}",
+                )
                 obj.hard_delete()
         except ProtectedError:
-            return Response({"detail": "Haifutiki — inatumika mahali pengine."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Haifutiki — inatumika mahali pengine."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -153,8 +261,10 @@ class TrashEmptyByTypeView(APIView):
     def post(self, request, type):
         model = _resolve_model(type)
         if not model or not issubclass(model, SoftDeleteModel):
-            return Response({"detail": "Aina ya kikapu haipatikani."},
-                            status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Aina ya kikapu haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         if _is_protected(model):
             return Response(
                 {"detail": "Aina hii ya rekodi haiwezi kufutwa kabisa."},
@@ -164,8 +274,10 @@ class TrashEmptyByTypeView(APIView):
         for obj in model.all_objects.filter(is_deleted=True).iterator():
             try:
                 with transaction.atomic():
-                    _audit(request, "trash.hard_deleted", model, obj.pk,
-                           f"Empty-by-type: {model.__name__}#{obj.pk}")
+                    _audit(
+                        request, "trash.hard_deleted", model, obj.pk,
+                        f"Empty-by-type: {model.__name__}#{obj.pk}",
+                    )
                     obj.hard_delete()
                 deleted += 1
             except ProtectedError:
@@ -180,8 +292,10 @@ class TrashEmptyAllView(APIView):
         body = request.data if isinstance(request.data, dict) else {}
         if body.get("confirm") != "DELETE ALL":
             return Response({
-                "detail": ('Tuma {"confirm": "DELETE ALL"} ili kuthibitisha. '
-                           "Operesheni hii haiwezi kurudishwa.")
+                "detail": (
+                    'Tuma {"confirm": "DELETE ALL"} ili kuthibitisha. '
+                    "Operesheni hii haiwezi kurudishwa."
+                )
             }, status=status.HTTP_400_BAD_REQUEST)
 
         deleted = skipped = blocked = 0
@@ -194,12 +308,16 @@ class TrashEmptyAllView(APIView):
             for obj in model.all_objects.filter(is_deleted=True).iterator():
                 try:
                     with transaction.atomic():
-                        _audit(request, "trash.hard_deleted", model, obj.pk,
-                               f"Empty-all: {model.__name__}#{obj.pk}")
+                        _audit(
+                            request, "trash.hard_deleted", model, obj.pk,
+                            f"Empty-all: {model.__name__}#{obj.pk}",
+                        )
                         obj.hard_delete()
                     deleted += 1
                 except ProtectedError:
                     skipped += 1
         return Response({
-            "deleted": deleted, "skipped": skipped, "protected_models": blocked,
+            "deleted": deleted,
+            "skipped": skipped,
+            "protected_models": blocked,
         })

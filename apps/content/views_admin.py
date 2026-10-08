@@ -1,5 +1,9 @@
+from django.core.files.storage import default_storage
+from django.utils import timezone
 from rest_framework import permissions, status, viewsets
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import Banner, FAQ, SiteContent, Testimonial
 from .serializers import (
@@ -44,7 +48,6 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAdminUser]
 
     def get_permissions(self):
-        # Public reads on /banners/, /testimonials/, /faqs/.
         method = getattr(self.request, "method", "")
         if method in ("GET", "HEAD", "OPTIONS"):
             return [permissions.AllowAny()]
@@ -148,3 +151,73 @@ class AdminSiteContentView(viewsets.GenericViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(SiteContentSerializer(obj).data)
+
+
+# ============================================================
+# CONTENT IMAGE UPLOAD
+# ============================================================
+class ContentImageUploadView(APIView):
+    """
+    POST /api/admin/content/upload/
+
+    Inapokea file la picha (multipart/form-data, field: "image")
+    na kurudisha URL ya picha iliyohifadhiwa.
+
+    Inatumika kwa banners, testimonials avatar, na mahali pengine
+    popote panapohitaji picha kwenye content.
+    """
+    permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser]
+
+    MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+    ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+    def post(self, request):
+        f = request.FILES.get("image")
+        if not f:
+            return Response(
+                {"detail": "Picha inahitajika (field: 'image')."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if f.size > self.MAX_BYTES:
+            return Response(
+                {"detail": "Picha haiwezi kuzidi 5 MB."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        content_type = getattr(f, "content_type", "") or ""
+        if content_type not in self.ALLOWED_TYPES:
+            return Response(
+                {"detail": "Tumia JPG, PNG au WEBP pekee."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Andaa jina la file
+        name = (f.name or "image.jpg").lower()
+        ext = name.rsplit(".", 1)[-1] if "." in name else "jpg"
+        if ext not in {"jpg", "jpeg", "png", "webp"}:
+            ext = "jpg"
+
+        import uuid
+        now = timezone.now()
+        filename = (
+            f"content/{now.strftime('%Y/%m')}/"
+            f"{uuid.uuid4().hex}.{ext}"
+        )
+
+        # Save file kwenye storage
+        path = default_storage.save(filename, f)
+        url = default_storage.url(path)
+
+        # Absolute URL kama request ipo
+        if request is not None:
+            try:
+                url = request.build_absolute_uri(url)
+            except Exception:
+                pass
+
+        return Response(
+            {"url": url, "path": path},
+            status=status.HTTP_201_CREATED,
+        )

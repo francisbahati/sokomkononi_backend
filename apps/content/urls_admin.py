@@ -1,9 +1,20 @@
 from django.urls import path
 
-from .views_admin import AdminContentViewSet, AdminSiteContentView
+from .views_admin import (
+    AdminContentViewSet,
+    AdminSiteContentView,
+    ContentImageUploadView,
+)
 
 
 urlpatterns = [
+    # Upload endpoint
+    path(
+        "upload/",
+        ContentImageUploadView.as_view(),
+        name="admin-content-upload",
+    ),
+
     # Banners
     path(
         "banners/",
@@ -40,7 +51,7 @@ urlpatterns = [
         name="admin-testimonial-detail",
     ),
 
-    # Site content: about / terms / privacy / help
+    # Site content
     path(
         "about/",
         AdminSiteContentView.as_view({"get": "retrieve", "patch": "partial_update"}),

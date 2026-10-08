@@ -116,7 +116,7 @@ class BoostPackageViewSet(
         return response
 
     # ══════════════════════════════════════════════════════════
-    # UPDATE — log fee.updated (boost package)
+    # UPDATE — log fee.updated (boost package) — full PUT
     # ══════════════════════════════════════════════════════════
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -143,8 +143,37 @@ class BoostPackageViewSet(
 
         return response
 
+    # ══════════════════════════════════════════════════════════
+    # PARTIAL UPDATE — log fee.updated (boost package) — PATCH
+    # Inaruhusu kubadilisha field moja pekee (mfano `is_active`)
+    # bila kutuma fields zote.
+    # ══════════════════════════════════════════════════════════
     def partial_update(self, request, *args, **kwargs):
-        return self.update(request, *args, **kwargs)
+        instance = self.get_object()
+        old_snapshot = self._snapshot(instance)
+
+        # super().partial_update() ina-handle `partial=True` yenyewe,
+        # kwa hiyo inaruhusu fields moja pekee.
+        response = super().partial_update(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_200_OK,
+            status.HTTP_202_ACCEPTED,
+        ):
+            new_snapshot = self._snapshot(instance)
+            diff = self._diff(old_snapshot, new_snapshot)
+            _log(
+                request,
+                action="fee.updated",
+                target="BoostPackage",
+                target_id=instance.id,
+                details=(
+                    f"Updated boost package: "
+                    f"{instance.name or '—'} ({diff})"
+                ),
+            )
+
+        return response
 
     # ══════════════════════════════════════════════════════════
     # DESTROY — log fee.deleted (boost package)

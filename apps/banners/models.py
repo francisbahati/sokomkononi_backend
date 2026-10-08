@@ -1,6 +1,8 @@
+# apps/banners/models.py
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 
 
@@ -60,7 +62,9 @@ class BannerAd(models.Model):
     active = models.BooleanField(default=True, verbose_name="Hai")
 
     created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(verbose_name="Inaisha")
+    expires_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Inaisha",
+    )
 
     class Meta:
         db_table = "banner_ads"
@@ -85,21 +89,58 @@ class BannerAd(models.Model):
 
 class Campaign(models.Model):
     """
-    Admin-managed promotional campaign. Not to be confused with a
-    seller's BannerAd — this is a platform-level marketing push.
+    Admin-managed promotional campaign. Inapunguza bei ya packages
+    (Boost / Leading / Advertisement) kwa kipindi maalum.
     """
 
+    class AppliesTo(models.TextChoices):
+        BOOST = "BOOST", "Boost only"
+        LEADING = "LEADING", "Leading only"
+        ADVERTISEMENT = "ADVERTISEMENT", "Advertisement only"
+        ALL = "ALL", "All promotions"
+
+    # Legacy type (DISCOUNT/BANNER/FEATURE/OTHER) — tunaiweka kama
+    # metadata. Haithiri pricing.
     class Type(models.TextChoices):
         DISCOUNT = "DISCOUNT", "Discount"
         BANNER = "BANNER", "Banner"
         FEATURE = "FEATURE", "Feature"
         OTHER = "OTHER", "Other"
 
-    title = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
+    name = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Jina la kampeni: {sw, en}",
+    )
+    description = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Maelezo: {sw, en}",
+    )
+
+    discount_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0"),
+        validators=[
+            MinValueValidator(Decimal("0")),
+            MaxValueValidator(Decimal("100")),
+        ],
+        help_text="Punguzo kwa asilimia (0-100).",
+    )
+
+    applies_to = models.CharField(
+        max_length=20,
+        choices=AppliesTo.choices,
+        default=AppliesTo.ALL,
+        help_text="Inatumika kwa aina gani ya promotions.",
+    )
 
     type = models.CharField(
-        max_length=20, choices=Type.choices, default=Type.OTHER,
+        max_length=20,
+        choices=Type.choices,
+        default=Type.DISCOUNT,
+        help_text="Legacy type (DISCOUNT/BANNER/FEATURE/OTHER).",
     )
 
     start_date = models.DateTimeField(null=True, blank=True)
@@ -128,4 +169,16 @@ class Campaign(models.Model):
         verbose_name_plural = "Kampeni"
 
     def __str__(self):
-        return self.title
+        name = self.name.get("sw") or self.name.get("en") if isinstance(self.name, dict) else None
+        return name or f"Campaign #{self.pk}"
+
+    def is_live(self, at=None):
+        from django.utils import timezone
+        at = at or timezone.now()
+        if not self.active:
+            return False
+        if self.start_date and self.start_date > at:
+            return False
+        if self.end_date and self.end_date < at:
+            return False
+        return True

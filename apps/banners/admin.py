@@ -18,6 +18,16 @@ class BannerAdAdmin(admin.ModelAdmin):
 
 @admin.register(Campaign)
 class CampaignAdmin(admin.ModelAdmin):
-    list_display = ("id", "title", "type", "active", "start_date", "end_date")
-    list_filter = ("type", "active")
-    search_fields = ("title",)
+    list_display = (
+        "id", "get_name", "discount_percent", "applies_to",
+        "start_date", "end_date", "active", "created_at",
+    )
+    list_filter = ("applies_to", "active", "type")
+    search_fields = ("name",)
+    list_editable = ("active",)
+
+    @admin.display(description="Name")
+    def get_name(self, obj):
+        if isinstance(obj.name, dict):
+            return obj.name.get("sw") or obj.name.get("en") or f"#{obj.pk}"
+        return str(obj.name or f"#{obj.pk}")

@@ -1,18 +1,30 @@
 # apps/banners/services.py
 """
-Banner ad creation + activation.
+Banner ad creation + activation + campaign pricing.
 Inatumia `AdvertisementPackage` kwa bei na muda.
 """
 from datetime import timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.listings.models import Listing
 
-from .models import BannerAd
+from .models import BannerAd, Campaign
 
+
+ZERO = Decimal("0.00")
+
+
+def _round(v):
+    return Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+# ============================================================================
+# BANNER AD
+# ============================================================================
 
 @transaction.atomic
 def create_banner_ad(*, listing_id, seller, package, payment_reference=""):
@@ -164,3 +176,80 @@ def mark_banner_paid_from_webhook(*, ref_id, payment_reference):
         "active", "expires_at",
     ])
     return banner
+
+
+# ============================================================================
+# CAMPAIGN PRICING
+# ============================================================================
+
+def get_active_campaign(applies_to):
+    """
+    Rudisha campaign iliyo hai kwa aina fulani.
+    Kama `applies_to` = "BOOST", inarudisha campaign ya BOOST au ALL.
+    Kama zipo nyingi, chukua ile yenye discount kubwa zaidi.
+    """
+    now = timezone.now()
+    return (
+        Campaign.objects
+        .filter(
+            active=True,
+            applies_to__in=[applies_to, Campaign.AppliesTo.ALL],
+        )
+        .filter(
+            models.Q(start_date__isnull=True) | models.Q(start_date__lte=now)
+        )
+        .filter(
+            models.Q(end_date__isnull=True) | models.Q(end_date__gte=now)
+        )
+        .order_by("-discount_percent")
+        .first()
+    )
+
+
+def calculate_promotion_price(base_price, applies_to):
+    """
+    Hesabu bei ya promotion baada ya discount.
+
+    Args:
+        base_price: Decimal — bei ya kawaida
+        applies_to: "BOOST" | "LEADING" | "ADVERTISEMENT"
+
+    Returns:
+        dict {
+            base_price: Decimal,
+            discount_percent: Decimal,
+            discount_amount: Decimal,
+            final_price: Decimal,
+            campaign_id: int | None,
+            campaign_name: dict | None,
+            campaign_end_date: datetime | None,
+        }
+    """
+    base_price = Decimal(str(base_price or 0))
+    campaign = get_active_campaign(applies_to)
+
+    if campaign and campaign.discount_percent > 0:
+        pct = Decimal(str(campaign.discount_percent))
+        discount_amount = _round(base_price * pct / Decimal("100"))
+        final_price = base_price - discount_amount
+        if final_price < ZERO:
+            final_price = ZERO
+        return {
+            "base_price": _round(base_price),
+            "discount_percent": pct,
+            "discount_amount": _round(discount_amount),
+            "final_price": _round(final_price),
+            "campaign_id": campaign.id,
+            "campaign_name": campaign.name,
+            "campaign_end_date": campaign.end_date,
+        }
+
+    return {
+        "base_price": _round(base_price),
+        "discount_percent": ZERO,
+        "discount_amount": ZERO,
+        "final_price": _round(base_price),
+        "campaign_id": None,
+        "campaign_name": None,
+        "campaign_end_date": None,
+    }

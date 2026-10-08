@@ -38,9 +38,7 @@ class AdvertisementPackageSerializer(serializers.ModelSerializer):
 
     def get_pricing(self, obj):
         try:
-            from apps.promotions.services.campaign_pricing import (
-                calculate_promotion_price,
-            )
+            from apps.banners.services import calculate_promotion_price
             return calculate_promotion_price(obj.price, "ADVERTISEMENT")
         except Exception:
             return None

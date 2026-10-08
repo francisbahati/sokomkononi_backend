@@ -1,3 +1,4 @@
+# apps/boosting/serializers.py
 from rest_framework import serializers
 
 from .models import BoostFeeConfig, BoostPackage, ListingBoost
@@ -5,18 +6,29 @@ from .models import BoostFeeConfig, BoostPackage, ListingBoost
 
 class BoostPackageSerializer(serializers.ModelSerializer):
     duration_days = serializers.SerializerMethodField()
+    pricing = serializers.SerializerMethodField()
 
     class Meta:
         model = BoostPackage
         fields = [
             "id", "name", "duration_hours", "duration_days",
-            "price", "description", "is_active", "ordering",
+            "price", "pricing", "description", "is_active", "ordering",
             "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "duration_days", "created_at", "updated_at"]
+        read_only_fields = [
+            "id", "duration_days", "pricing",
+            "created_at", "updated_at",
+        ]
 
     def get_duration_days(self, obj):
         return obj.duration_hours / 24
+
+    def get_pricing(self, obj):
+        try:
+            from apps.banners.services import calculate_promotion_price
+            return calculate_promotion_price(obj.price, "BOOST")
+        except Exception:
+            return None
 
 
 class ListingBoostSerializer(serializers.ModelSerializer):

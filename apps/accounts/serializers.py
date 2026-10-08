@@ -2,7 +2,11 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import User
+from .models import (
+    NotificationPreference,
+    User,
+    UserPreferences,
+)
 from .services import normalize_tanzania_phone
 
 
@@ -246,3 +250,47 @@ class ChangePasswordSerializer(serializers.Serializer):
 
     def validate_new_password(self, value):
         return _run_password_validators(value)
+
+
+# ============================================================
+# USER PREFERENCES
+# ============================================================
+
+class UserPreferencesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserPreferences
+        fields = [
+            "language", "currency", "region",
+            "show_phone", "show_email",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
+
+
+# ============================================================
+# NOTIFICATION PREFERENCES
+# ============================================================
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = [
+            "email_deals", "email_messages",
+            "email_promotions", "email_newsletter",
+            "sms_deals", "sms_messages", "sms_promotions",
+            "push_deals", "push_messages", "push_promotions",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
+
+
+# ============================================================
+# ACTIVITY
+# ============================================================
+
+class UserActivitySerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    type = serializers.CharField(read_only=True)  # "buyer" | "seller"
+    title = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True, allow_blank=True)
+    created_at = serializers.DateTimeField(read_only=True)

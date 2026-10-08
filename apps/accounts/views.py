@@ -15,14 +15,21 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User
+from .models import (
+    NotificationPreference,
+    User,
+    UserPreferences,
+)
 from .serializers import (
     ChangePasswordSerializer,
     ForgotPasswordSerializer,
     LoginSerializer,
+    NotificationPreferenceSerializer,
     PasswordResetSerializer,
     ProfileSerializer,
     RegisterSerializer,
+    UserActivitySerializer,
+    UserPreferencesSerializer,
     VerifyOTPSerializer,
     VerifyPasswordResetOTPSerializer,
 )
@@ -528,6 +535,7 @@ class AvatarUploadView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
 # ============================================================
 # RESEND OTP (registration)
 # ============================================================
@@ -568,3 +576,188 @@ class ResendOTPView(APIView):
                 "OTP mpya imetumwa."
             ),
         }, status=status.HTTP_200_OK)
+
+
+# ============================================================
+# USER PREFERENCES — GET / PATCH
+# ============================================================
+
+class MePreferencesView(APIView):
+    """
+    GET   /api/auth/me/preferences/
+    PATCH /api/auth/me/preferences/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserPreferencesSerializer
+
+    def _get_object(self, user):
+        obj, _ = UserPreferences.objects.get_or_create(user=user)
+        return obj
+
+    @extend_schema(responses=UserPreferencesSerializer)
+    def get(self, request):
+        obj = self._get_object(request.user)
+        return Response(UserPreferencesSerializer(obj).data)
+
+    @extend_schema(
+        request=UserPreferencesSerializer,
+        responses=UserPreferencesSerializer,
+    )
+    def patch(self, request):
+        obj = self._get_object(request.user)
+        serializer = UserPreferencesSerializer(
+            obj, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+# ============================================================
+# NOTIFICATION PREFERENCES — GET / PATCH
+# ============================================================
+
+class MeNotificationPreferencesView(APIView):
+    """
+    GET   /api/auth/me/notification-preferences/
+    PATCH /api/auth/me/notification-preferences/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = NotificationPreferenceSerializer
+
+    def _get_object(self, user):
+        obj, _ = NotificationPreference.objects.get_or_create(user=user)
+        return obj
+
+    @extend_schema(responses=NotificationPreferenceSerializer)
+    def get(self, request):
+        obj = self._get_object(request.user)
+        return Response(NotificationPreferenceSerializer(obj).data)
+
+    @extend_schema(
+        request=NotificationPreferenceSerializer,
+        responses=NotificationPreferenceSerializer,
+    )
+    def patch(self, request):
+        obj = self._get_object(request.user)
+        serializer = NotificationPreferenceSerializer(
+            obj, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+# ============================================================
+# USER ACTIVITIES — GET
+# Inaunda activities kutoka data halisi:
+#   - listings za seller (recent)
+#   - deals za buyer/seller
+#   - saved items
+# ============================================================
+
+class MeActivitiesView(APIView):
+    """
+    GET /api/auth/me/activities/?limit=10
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses=UserActivitySerializer(many=True))
+    def get(self, request):
+        user = request.user
+        try:
+            limit = min(int(request.query_params.get("limit", 10)), 50)
+        except (ValueError, TypeError):
+            limit = 10
+
+        activities = []
+
+        # ── Listings za seller (recent) ─────────────────────
+        try:
+            from apps.listings.models import Listing
+            recent_listings = (
+                Listing.objects
+                .filter(seller=user)
+                .order_by("-created_at")[:5]
+            )
+            for lst in recent_listings:
+                activities.append({
+                    "id": f"listing-{lst.pk}",
+                    "type": "seller",
+                    "title": {
+                        "sw": f"Umeongeza tangazo: {lst.title}",
+                        "en": f"You added a listing: {lst.title}",
+                    },
+                    "description": {
+                        "sw": f"Hali: {lst.status}",
+                        "en": f"Status: {lst.status}",
+                    },
+                    "created_at": lst.created_at,
+                })
+        except Exception:
+            logger.exception("MeActivitiesView: listings failed")
+
+        # ── Deals (buyer + seller) ───────────────────────────
+        try:
+            from apps.deals.models import DealRoom
+            from django.db.models import Q
+            recent_deals = (
+                DealRoom.objects
+                .filter(Q(buyer=user) | Q(seller=user))
+                .select_related("listing", "buyer", "seller")
+                .order_by("-updated_at")[:5]
+            )
+            for d in recent_deals:
+                is_buyer = d.buyer_id == user.id
+                counterparty = d.seller if is_buyer else d.buyer
+                activities.append({
+                    "id": f"deal-{d.pk}",
+                    "type": "buyer" if is_buyer else "seller",
+                    "title": {
+                        "sw": f"Deal na {counterparty.name}",
+                        "en": f"Deal with {counterparty.name}",
+                    },
+                    "description": {
+                        "sw": f"{d.listing.title} — {d.status}",
+                        "en": f"{d.listing.title} — {d.status}",
+                    },
+                    "created_at": d.updated_at,
+                })
+        except Exception:
+            logger.exception("MeActivitiesView: deals failed")
+
+        # ── Saved items (buyer) ──────────────────────────────
+        try:
+            from apps.saved.models import SavedListing
+            recent_saved = (
+                SavedListing.objects
+                .filter(user=user)
+                .select_related("listing")
+                .order_by("-created_at")[:3]
+            )
+            for s in recent_saved:
+                activities.append({
+                    "id": f"saved-{s.pk}",
+                    "type": "buyer",
+                    "title": {
+                        "sw": f"Umehifadhi: {s.listing.title}",
+                        "en": f"You saved: {s.listing.title}",
+                    },
+                    "description": {
+                        "sw": "Kwenye orodha yako ya kuhifadhi",
+                        "en": "In your saved list",
+                    },
+                    "created_at": s.created_at,
+                })
+        except Exception:
+            logger.exception("MeActivitiesView: saved failed")
+
+        # ── Sort by created_at, take top N ──────────────────
+        activities.sort(
+            key=lambda a: a["created_at"],
+            reverse=True,
+        )
+        activities = activities[:limit]
+
+        serializer = UserActivitySerializer(activities, many=True)
+        return Response(serializer.data)

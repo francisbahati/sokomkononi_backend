@@ -10,6 +10,9 @@ from .views import (
     ForgotPasswordView,
     LoginView,
     LogoutView,
+    MeActivitiesView,
+    MeNotificationPreferencesView,
+    MePreferencesView,
     MeView,
     PasswordResetView,
     ProfileView,
@@ -55,6 +58,22 @@ urlpatterns = [
     ),
 
     path("me/", MeView.as_view(), name="me"),
+    path(
+        "me/preferences/",
+        MePreferencesView.as_view(),
+        name="me-preferences",
+    ),
+    path(
+        "me/notification-preferences/",
+        MeNotificationPreferencesView.as_view(),
+        name="me-notification-preferences",
+    ),
+    path(
+        "me/activities/",
+        MeActivitiesView.as_view(),
+        name="me-activities",
+    ),
+
     path("profile/", ProfileView.as_view(), name="profile"),
     path("profile/avatar/", AvatarUploadView.as_view(), name="profile-avatar"),
     path(

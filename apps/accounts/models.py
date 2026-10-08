@@ -374,3 +374,75 @@ class OTPVerification(models.Model):
             not self.is_used
             and not self.is_expired
         )
+
+
+# ============================================================
+# USER PREFERENCES — singleton per user
+# ============================================================
+class UserPreferences(models.Model):
+    """
+    Mapendeleo ya mtumiaji. Moja kwa kila user (OneToOne).
+    """
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="preferences",
+    )
+    language = models.CharField(
+        max_length=5,
+        choices=[("sw", "Kiswahili"), ("en", "English")],
+        default="sw",
+    )
+    currency = models.CharField(
+        max_length=5,
+        choices=[("TZS", "Tanzanian Shilling"), ("USD", "US Dollar")],
+        default="TZS",
+    )
+    region = models.CharField(max_length=100, default="Dar es Salaam")
+    show_phone = models.BooleanField(default=True)
+    show_email = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_preferences"
+        verbose_name = "User Preferences"
+        verbose_name_plural = "User Preferences"
+
+    def __str__(self):
+        return f"Preferences — {self.user_id}"
+
+
+# ============================================================
+# NOTIFICATION PREFERENCES — singleton per user
+# ============================================================
+class NotificationPreference(models.Model):
+    """
+    Mipangilio ya taarifa. Moja kwa kila user (OneToOne).
+    """
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="notification_preferences",
+    )
+    # Email
+    email_deals = models.BooleanField(default=True)
+    email_messages = models.BooleanField(default=True)
+    email_promotions = models.BooleanField(default=False)
+    email_newsletter = models.BooleanField(default=True)
+    # SMS
+    sms_deals = models.BooleanField(default=True)
+    sms_messages = models.BooleanField(default=False)
+    sms_promotions = models.BooleanField(default=False)
+    # Push
+    push_deals = models.BooleanField(default=True)
+    push_messages = models.BooleanField(default=True)
+    push_promotions = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_notification_preferences"
+        verbose_name = "Notification Preference"
+        verbose_name_plural = "Notification Preferences"
+
+    def __str__(self):
+        return f"NotificationPrefs — {self.user_id}"

@@ -27,3 +27,9 @@ celerybeat-schedule*
 # Backups
 *.bak
 *.bak_*
+
+# ---- local backups + editor files ----
+_fix_backups/
+*.swp
+*.swo
+.DS_Store

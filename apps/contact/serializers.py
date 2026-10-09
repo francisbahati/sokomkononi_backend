@@ -9,7 +9,12 @@ class ContactCreateSerializer(serializers.Serializer):
     phone = serializers.CharField(
         max_length=30, required=False, allow_blank=True,
     )
-    subject = serializers.CharField(max_length=255)
+    subject = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        default="Ujumbe kutoka Contact Form",
+    )
     message = serializers.CharField()
 
     def validate_message(self, value):

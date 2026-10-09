@@ -160,51 +160,6 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
 
         payment_reference = (request.data.get("payment_reference") or "").strip()
-
-        # Free path — only valid when the leading fee is disabled by admin.
-        if payment_reference == "free":
-            try:
-                from .models import LeadingFeeConfig
-                cfg = LeadingFeeConfig.get_solo()
-                if cfg.is_enabled:
-                    return Response(
-                        {"detail": "Ada ya leading bado inatumika. Tumia malipo."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-            except Exception:
-                pass
-
-            import uuid
-            from django.db import transaction
-            with transaction.atomic():
-                now = timezone.now()
-                leading.payment_status = "PAID"
-                leading.payment_reference = f"free-{leading.pk}-{uuid.uuid4().hex[:8]}"
-                leading.paid_at = now
-                leading.status = "ACTIVE"
-                leading.starts_at = now
-                hours = leading.package.duration_hours if leading.package else 168
-                leading.expires_at = now + timedelta(hours=hours)
-                leading.save(update_fields=[
-                    "payment_status", "payment_reference", "paid_at",
-                    "status", "starts_at", "expires_at", "updated_at",
-                ])
-                from apps.listings.models import Listing
-                Listing.objects.filter(pk=leading.listing_id).update(
-                    leading_until=leading.expires_at,
-                    updated_at=now,
-                )
-            return Response(
-                {
-                    "payment_status": "SUCCESS",
-                    "via": "free",
-                    "purchase": ListingLeadingSerializer(
-                        leading, context={"request": request},
-                    ).data,
-                },
-                status=status.HTTP_200_OK,
-            )
-
         if payment_reference == "credits":
             import uuid
             from django.db import transaction

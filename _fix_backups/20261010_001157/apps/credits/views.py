@@ -22,41 +22,15 @@ class UserCreditViewSet(viewsets.GenericViewSet):
         POST /api/credits/me/consume/      (alias — canonical)
     """
     serializer_class = UserCreditSerializer
-    def get_permissions(self):
-        # `services` is a static catalog — safe without auth.
-        # Every other action requires a logged-in user.
-        if self.action == "my_services":
-            return [permissions.AllowAny()]
-        return [permissions.IsAuthenticated()]
-
-    def _require_user(self):
-        from rest_framework.exceptions import NotAuthenticated
-        if not (self.request.user and self.request.user.is_authenticated):
-            raise NotAuthenticated()
+    permission_classes = [permissions.IsAuthenticated]
 
     def list(self, request):
-        self._require_user()
-
         qs = UserCredit.objects.filter(user=request.user)
         return Response(UserCreditSerializer(qs, many=True).data)
 
     @action(detail=False, methods=["get"], url_path="services")
     def my_services(self, request):
-        user = getattr(request, "user", None)
-        if not (user and user.is_authenticated):
-            # Anonymous: return the static catalog of known service keys.
-            CATALOG = [
-                {"service_key": "listing", "label": "Listing Credits"},
-                {"service_key": "boost", "label": "Boost Credits"},
-                {"service_key": "leading", "label": "Leading Credits"},
-                {"service_key": "ads", "label": "Ads Credits"},
-                {"service_key": "reservation", "label": "Reservation Credits"},
-                {"service_key": "success", "label": "Success Fee Credits"},
-                {"service_key": "premium", "label": "Premium Services"},
-                {"service_key": "bundle", "label": "Bundle Credits"},
-            ]
-            return Response(CATALOG)
-        qs = UserService.objects.filter(user=user)
+        qs = UserService.objects.filter(user=request.user)
         return Response(UserServiceSerializer(qs, many=True).data)
 
     @action(detail=False, methods=["get"], url_path=r"has/(?P<service>[^/.]+)")

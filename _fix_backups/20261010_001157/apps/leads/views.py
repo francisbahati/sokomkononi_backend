@@ -38,9 +38,7 @@ class LeadViewSet(viewsets.GenericViewSet):
         )
         if user.is_staff:
             return qs
-        # Frontend contract: seller sees leads on their own listings.
-        # Buyers only see their sent leads through the deal room, not here.
-        return qs.filter(seller=user)
+        return qs.filter(Q(seller=user) | Q(buyer=user))
 
     def list(self, request):
         qs = self.get_queryset()

@@ -133,6 +133,7 @@ class ListingListSerializer(serializers.ModelSerializer):
     fee_amount = serializers.SerializerMethodField()
     is_paid = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
+    seller = serializers.SerializerMethodField()
     leading_expires_at = serializers.DateTimeField(
         source="leading_until", read_only=True,
     )

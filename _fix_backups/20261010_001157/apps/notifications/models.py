@@ -82,9 +82,6 @@ class Notification(SoftDeleteModel):
         MESSAGE_RECEIVED = "MESSAGE_RECEIVED", "Message Received"
         VERIFICATION_REQUEST = "VERIFICATION_REQUEST", "Verification Request"
 
-        LISTING_FEE_PAID = "LISTING_FEE_PAID", "Listing Fee Paid"
-        ACCOUNT_VERIFIED = "ACCOUNT_VERIFIED", "Account Verified"
-
     class Priority(models.TextChoices):
         LOW = "LOW", "Low"
         NORMAL = "NORMAL", "Normal"

@@ -6,8 +6,6 @@ from .models import WaitingListEntry
 
 
 class WaitingListListingSerializer(serializers.ModelSerializer):
-    category = serializers.SerializerMethodField()
-
     class Meta:
         model = Listing
         fields = [
@@ -16,17 +14,10 @@ class WaitingListListingSerializer(serializers.ModelSerializer):
             "price",
             "location",
             "status",
-            "category",
             "is_featured",
             "is_boosted",
             "created_at",
         ]
-
-    def get_category(self, obj):
-        c = getattr(obj, "category", None)
-        if not c:
-            return None
-        return {"id": c.id, "name": c.name, "slug": c.slug}
         read_only_fields = fields
 
 
@@ -40,8 +31,6 @@ class WaitingListEntrySerializer(serializers.ModelSerializer):
     listing = WaitingListListingSerializer(read_only=True)
     buyer = WaitingListBuyerSerializer(read_only=True)
 
-    respond_by = serializers.SerializerMethodField()
-
     class Meta:
         model = WaitingListEntry
         fields = [
@@ -51,18 +40,10 @@ class WaitingListEntrySerializer(serializers.ModelSerializer):
             "status",
             "position",
             "notified_at",
-            "respond_by",
             "joined_at",
             "updated_at",
         ]
         read_only_fields = fields
-
-    def get_respond_by(self, obj):
-        # 48 hours after notification is the response deadline.
-        if not obj.notified_at:
-            return None
-        from datetime import timedelta
-        return obj.notified_at + timedelta(hours=48)
 
 
 class WaitingListCreateSerializer(serializers.Serializer):

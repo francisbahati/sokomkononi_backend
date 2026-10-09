@@ -285,31 +285,10 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             serializer.save()
             return
 
-        # Seller path — allow specific status transitions via PATCH,
-        # but validate them so a seller cannot jump to arbitrary states.
-        new_status = None
-        if hasattr(self.request, "data") and isinstance(self.request.data, dict):
-            new_status = self.request.data.get("status")
-
-        if new_status and new_status != instance.status:
-            allowed = {
-                ("LIVE", "PAUSED"): True,
-                ("PAUSED", "LIVE"): True,
-                ("LIVE", "SOLD"): True,
-                ("RESERVED", "SOLD"): True,
-                ("PAUSED", "SOLD"): True,
-            }
-            if not allowed.get((instance.status, new_status)):
-                from rest_framework.exceptions import ValidationError
-                raise ValidationError({
-                    "status": (
-                        f"Haiwezi kubadilika kutoka {instance.status} "
-                        f"kwenda {new_status}."
-                    )
-                })
-
-        serializer.save(seller=instance.seller)
-
+        serializer.save(
+            seller=instance.seller,
+            status=instance.status,
+        )
 
     def retrieve(self, request, *args, **kwargs):
         """

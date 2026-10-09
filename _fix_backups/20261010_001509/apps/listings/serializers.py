@@ -133,6 +133,7 @@ class ListingListSerializer(serializers.ModelSerializer):
     fee_amount = serializers.SerializerMethodField()
     is_paid = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
+    seller = serializers.SerializerMethodField()
     leading_expires_at = serializers.DateTimeField(
         source="leading_until", read_only=True,
     )
@@ -433,8 +434,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
     fee_amount = serializers.SerializerMethodField()
     fee_status = serializers.SerializerMethodField()
     is_paid = serializers.SerializerMethodField()
-    payment_status = serializers.SerializerMethodField()
-    seller = serializers.SerializerMethodField()
     leading_expires_at = serializers.DateTimeField(
         source="leading_until", read_only=True,
     )
@@ -457,8 +456,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "fee_amount",
             "fee_status",
             "is_paid",
-            "payment_status",
-            "seller",
             "leading_expires_at",
             "status",
             "is_featured",
@@ -548,16 +545,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
     def get_is_paid(self, obj):
         fee = getattr(obj, "listing_fee", None)
         return bool(fee and fee.payment_status == "PAID")
-
-    def get_payment_status(self, obj):
-        fee = getattr(obj, "listing_fee", None)
-        return fee.payment_status if fee else "PENDING"
-
-    def get_seller(self, obj):
-        u = getattr(obj, "seller", None)
-        if not u:
-            return None
-        return {"id": u.id, "name": getattr(u, "name", "") or ""}
 
     def get_payment_status(self, obj):
         fee = getattr(obj, "listing_fee", None)

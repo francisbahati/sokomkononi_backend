@@ -11,10 +11,11 @@ from drf_spectacular.views import (
 )
 
 
-from apps.core.health import health as _health
+from apps.core.health import health as _health, health_deep as _health_deep
 
 urlpatterns = [
     path("health/", _health, name="health"),
+    path("health/deep/", _health_deep, name="health-deep"),
     path("admin/", admin.site.urls),
 
     # Schema / docs

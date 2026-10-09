@@ -1,0 +1,14 @@
+Habari {{ name }},
+
+Karibu SokoMkononi. Nambari yako ya uthibitisho ni:
+
+    {{ otp }}
+
+Ni halali kwa dakika 10 pekee.
+
+USIMSHIRIKISHE mtu mwingine nambari hii. Timu ya SokoMkononi haitakuomba nambari yako kupitia simu, WhatsApp, SMS, au barua pepe.
+
+Kama hukuaomba nambari hii, puuza ujumbe huu.
+
+-- SokoMkononi
+   https://sokomkononi.co.tz

@@ -60,7 +60,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
     "rest_framework", "rest_framework_simplejwt", "rest_framework_simplejwt.token_blacklist",
     "corsheaders", "django_filters", "drf_spectacular",
-    "drf_spectacular_sidecar", "storages", "csp",
+    "drf_spectacular_sidecar", "storages", "csp", "django_ratelimit",
     "apps.core",
     "apps.payments", "apps.contact", "apps.accounts", "apps.categories", "apps.listings",
     "apps.boosting", "apps.deals", "apps.transactions", "apps.finance",
@@ -120,33 +120,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
-
-# ============================================================
-# CACHE — Redis when available, LocMemCache for local dev
-# ============================================================
-_REDIS_CACHE_URL = (
-    os.environ.get("REDIS_CACHE_URL")
-    or os.environ.get("CELERY_BROKER_URL", "")
-)
-
-if _REDIS_CACHE_URL.startswith(("redis://", "rediss://")):
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": _REDIS_CACHE_URL,
-        }
-    }
-    # django-ratelimit needs a shared cache — only load it when Redis
-    # is configured. Local dev (LocMemCache) skips it entirely.
-    if "django_ratelimit" not in INSTALLED_APPS:
-        INSTALLED_APPS.append("django_ratelimit")
-else:
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "soko-default",
-        }
-    }
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Africa/Dar_es_Salaam"

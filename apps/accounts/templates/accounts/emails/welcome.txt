@@ -1,0 +1,7 @@
+Habari {{ name }},
+
+Karibu SokoMkononi! Akaunti yako imethibitishwa.
+
+Ingia: https://sokomkononi.co.tz/dashboard
+
+-- SokoMkononi

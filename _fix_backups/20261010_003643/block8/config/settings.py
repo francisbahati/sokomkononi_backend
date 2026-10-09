@@ -121,33 +121,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# ============================================================
-# CACHE — Redis when available, LocMemCache for local dev
-# ============================================================
-_REDIS_CACHE_URL = (
-    os.environ.get("REDIS_CACHE_URL")
-    or os.environ.get("CELERY_BROKER_URL", "")
-)
-
-if _REDIS_CACHE_URL.startswith(("redis://", "rediss://")):
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": _REDIS_CACHE_URL,
-        }
-    }
-    # django-ratelimit needs a shared cache — only load it when Redis
-    # is configured. Local dev (LocMemCache) skips it entirely.
-    if "django_ratelimit" not in INSTALLED_APPS:
-        INSTALLED_APPS.append("django_ratelimit")
-else:
-    CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "soko-default",
-        }
-    }
-
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Africa/Dar_es_Salaam"
 USE_I18N = True
@@ -302,8 +275,8 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=20),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=14),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": False,

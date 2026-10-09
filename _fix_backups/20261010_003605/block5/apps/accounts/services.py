@@ -306,28 +306,16 @@ def send_registration_otp(pending):
     """
     otp_record, otp, email = _create_otp_record(pending.email, REGISTRATION)
 
-    # Try Celery first (non-blocking). If the broker is unreachable,
-    # fall back to synchronous send so the user still gets the code.
-    queued = False
     try:
-        from .tasks import send_otp_email_task
-        send_otp_email_task.delay(email, otp, "register")
-        queued = True
-        logger.info("Registration OTP queued via Celery for %s", email)
-    except Exception as exc:
-        logger.warning("Celery unavailable (%s) — sending sync", exc)
-
-    if not queued:
-        try:
-            from .email_service import send_otp_email
-            result = send_otp_email(user=email, otp=otp, purpose="register")
-            if not result.ok:
-                raise RuntimeError(result.error or "send_failed")
-            logger.info("Registration OTP sent synchronously to %s", email)
-        except Exception:
-            otp_record.delete()
-            logger.exception("Failed to send registration OTP to %s", email)
-            raise
+        # Sync send — no Celery. Any SMTP exception propagates.
+        send_email_otp(email, otp)
+        logger.info("Registration OTP sent synchronously to %s", email)
+    except Exception:
+        # Roll back the OTP row so the user isn't stuck with an unused
+        # code that was never delivered.
+        otp_record.delete()
+        logger.exception("Failed to send registration OTP to %s", email)
+        raise
 
     return email
 
@@ -391,26 +379,13 @@ def send_password_reset_otp(user):
 
     otp_record, otp, email = _create_otp_record(user.email, PASSWORD_RESET)
 
-    queued = False
     try:
-        from .tasks import send_otp_email_task
-        send_otp_email_task.delay(email, otp, "reset")
-        queued = True
-        logger.info("Password-reset OTP queued via Celery for %s", email)
-    except Exception as exc:
-        logger.warning("Celery unavailable (%s) — sending sync", exc)
-
-    if not queued:
-        try:
-            from .email_service import send_otp_email
-            result = send_otp_email(user=email, otp=otp, purpose="reset")
-            if not result.ok:
-                raise RuntimeError(result.error or "send_failed")
-            logger.info("Password-reset OTP sent synchronously to %s", email)
-        except Exception:
-            otp_record.delete()
-            logger.exception("Failed to send password-reset OTP to %s", email)
-            raise
+        send_password_reset_email(email, otp)
+        logger.info("Password-reset OTP sent synchronously to %s", email)
+    except Exception:
+        otp_record.delete()
+        logger.exception("Failed to send password-reset OTP to %s", email)
+        raise
 
     return email
 

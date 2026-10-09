@@ -442,21 +442,3 @@ class NotificationPreference(models.Model):
 
     def __str__(self):
         return f"NotificationPrefs — {self.user_id}"
-
-# ============================================================
-# TERMS + PRIVACY ACCEPTANCE TRACKING
-# ============================================================
-class TermsAcceptance(models.Model):
-    user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="terms_acceptances",
-    )
-    terms_version = models.CharField(max_length=20)
-    privacy_version = models.CharField(max_length=20, blank=True)
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.TextField(blank=True)
-    accepted_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "terms_acceptances"
-        ordering = ["-accepted_at"]
-        indexes = [models.Index(fields=["user", "terms_version"])]

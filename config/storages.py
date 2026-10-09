@@ -30,3 +30,9 @@ class CloudflareR2MediaStorage(S3Boto3Storage):
     querystring_auth = False
     file_overwrite = False
     default_acl = None
+    # Emit a 1-year immutable Cache-Control header on every upload.
+    # Safe because filenames include a UUID — replacing an image
+    # produces a new URL, so old cached entries never go stale.
+    object_parameters = {
+        "CacheControl": "public, max-age=31536000, immutable",
+    }

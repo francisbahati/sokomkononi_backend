@@ -1,4 +1,5 @@
 import logging
+import uuid
 
 from django.core.files.base import ContentFile
 from django.db.models.signals import pre_save
@@ -41,3 +42,43 @@ def add_watermark_to_listing_image(sender, instance, **kwargs):
             "[watermark] Failed for %s: %s",
             instance.image.name, exc,
         )
+
+
+@receiver(pre_save, sender=ListingImage)
+def generate_listing_image_variants(sender, instance, **kwargs):
+    """
+    Generate WebP variants of the (already watermarked) image.
+
+    Registration order matters: this signal runs AFTER the watermark
+    signal, so `instance.image` is the watermarked file.
+    """
+    if not instance.image:
+        return
+
+    update_fields = kwargs.get("update_fields")
+
+    if instance.pk:
+        if update_fields:
+            if "image" not in update_fields:
+                return
+        else:
+            if all([instance.thumb, instance.card,
+                    instance.detail, instance.large]):
+                return
+
+    try:
+        from .image_variants import generate_webp_variants
+        variants = generate_webp_variants(instance.image)
+        for name, content in variants.items():
+            field = getattr(instance, name)
+            field.save(
+                f"{instance.listing_id}_{uuid.uuid4().hex[:8]}_{name}.webp",
+                content,
+                save=False,
+            )
+        logger.info(
+            "[variants] Generated %d for image pk=%s",
+            len(variants), instance.pk,
+        )
+    except Exception:
+        logger.exception("[variants] Failed for image pk=%s", instance.pk)

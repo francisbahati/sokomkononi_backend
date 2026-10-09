@@ -198,6 +198,27 @@ class ListingImage(models.Model):
         upload_to="listings/",
         verbose_name="Picha",
     )
+    # WebP variants — auto-generated on save, never uploaded by users.
+    thumb = models.ImageField(
+        upload_to="listings/variants/",
+        null=True, blank=True, editable=False,
+        verbose_name="Thumb (WebP 200px)",
+    )
+    card = models.ImageField(
+        upload_to="listings/variants/",
+        null=True, blank=True, editable=False,
+        verbose_name="Card (WebP 400px)",
+    )
+    detail = models.ImageField(
+        upload_to="listings/variants/",
+        null=True, blank=True, editable=False,
+        verbose_name="Detail (WebP 800px)",
+    )
+    large = models.ImageField(
+        upload_to="listings/variants/",
+        null=True, blank=True, editable=False,
+        verbose_name="Large (WebP 1200px)",
+    )
 
     is_primary = models.BooleanField(
         default=False,

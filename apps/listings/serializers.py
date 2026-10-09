@@ -21,48 +21,55 @@ from .services.listing_fee import calculate_listing_fee
 
 class ListingImageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    thumb = serializers.SerializerMethodField()
+    card = serializers.SerializerMethodField()
+    detail = serializers.SerializerMethodField()
+    large = serializers.SerializerMethodField()
 
     class Meta:
         model = ListingImage
         fields = [
-            "id",
-            "image",
-            "image_url",
-            "is_primary",
-            "ordering",
-            "created_at",
+            "id", "image", "image_url",
+            "thumb", "card", "detail", "large",
+            "is_primary", "ordering", "created_at",
         ]
         read_only_fields = [
-            "id",
-            "image_url",
+            "id", "image", "image_url",
+            "thumb", "card", "detail", "large",
             "created_at",
         ]
 
-    def get_image_url(self, obj):
+    def _abs(self, url):
+        if not url:
+            return None
         request = self.context.get("request")
+        try:
+            return request.build_absolute_uri(url) if request else url
+        except Exception:
+            return url
 
-        if not obj.image:
+    def _url(self, field):
+        if not field:
+            return None
+        try:
+            return self._abs(field.url)
+        except Exception:
             return None
 
-        url = obj.image.url
-
-        if request:
-            return request.build_absolute_uri(url)
-
-        return url
+    def get_image_url(self, obj):
+        return self._url(obj.detail) or self._url(obj.image)
+    def get_thumb(self, obj):  return self._url(obj.thumb)
+    def get_card(self, obj):   return self._url(obj.card)
+    def get_detail(self, obj): return self._url(obj.detail)
+    def get_large(self, obj):  return self._url(obj.large)
 
     def validate_ordering(self, value):
         if value < 0:
             raise serializers.ValidationError(
                 "Mpangilio hauwezi kuwa chini ya sifuri."
             )
-
         return value
 
-
-# ============================================================================
-# CATEGORY
-# ============================================================================
 
 class ListingCategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -218,37 +225,26 @@ class ListingListSerializer(serializers.ModelSerializer):
         return fee.payment_status == "PAID"
 
     def get_primary_image(self, obj):
-        image = (
-            obj.images
-            .filter(is_primary=True)
-            .first()
-        )
-
+        image = obj.images.filter(is_primary=True).first()
         if not image:
-            image = (
-                obj.images
-                .order_by(
-                    "ordering",
-                    "created_at",
-                )
-                .first()
-            )
-
-        if not image or not image.image:
+            image = obj.images.order_by("ordering", "created_at").first()
+        if not image:
             return None
+        # Prefer the WebP variant; fall back through sizes then original.
+        for attr in ("card", "detail", "image"):
+            f = getattr(image, attr, None)
+            if f:
+                try:
+                    url = f.url
+                    request = self.context.get("request")
+                    return (
+                        request.build_absolute_uri(url)
+                        if request else url
+                    )
+                except Exception:
+                    continue
+        return None
 
-        request = self.context.get("request")
-        url = image.image.url
-
-        if request:
-            return request.build_absolute_uri(url)
-
-        return url
-
-
-# ============================================================================
-# PROPERTY DETAILS
-# ============================================================================
 
 class PropertyDetailsSerializer(serializers.ModelSerializer):
     class Meta:
@@ -876,32 +872,25 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
         return fee.payment_status == "PAID"
 
     def get_primary_image(self, obj):
-        image = (
-            obj.images
-            .filter(is_primary=True)
-            .first()
-        )
-
+        image = obj.images.filter(is_primary=True).first()
         if not image:
-            image = (
-                obj.images
-                .order_by(
-                    "ordering",
-                    "created_at",
-                )
-                .first()
-            )
-
-        if not image or not image.image:
+            image = obj.images.order_by("ordering", "created_at").first()
+        if not image:
             return None
-
-        request = self.context.get("request")
-        url = image.image.url
-
-        if request:
-            return request.build_absolute_uri(url)
-
-        return url
+        # Prefer the WebP variant; fall back through sizes then original.
+        for attr in ("card", "detail", "image"):
+            f = getattr(image, attr, None)
+            if f:
+                try:
+                    url = f.url
+                    request = self.context.get("request")
+                    return (
+                        request.build_absolute_uri(url)
+                        if request else url
+                    )
+                except Exception:
+                    continue
+        return None
 
     def get_fee_status(self, obj):
         fee = getattr(obj, "listing_fee", None)

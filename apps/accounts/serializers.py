@@ -131,6 +131,8 @@ class ProfileSerializer(serializers.ModelSerializer):
     seller_status = serializers.SerializerMethodField()
     buyer_status = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
+    bio = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -139,11 +141,13 @@ class ProfileSerializer(serializers.ModelSerializer):
             "avatar", "date_joined", "is_verified", "is_staff",
             "is_superuser", "seller_status", "buyer_status",
             "role",
+            "bio", "location",
         ]
         read_only_fields = [
             "id", "email", "date_joined", "is_verified",
             "is_staff", "is_superuser", "seller_status", "buyer_status",
             "avatar", "role",
+            "bio", "location",
         ]
 
     def validate_phone(self, value):
@@ -168,6 +172,19 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def get_role(self, obj):
         return get_user_role(obj)
+
+    def get_bio(self, obj):
+        try:
+            return obj.preferences.bio or ""
+        except Exception:
+            return ""
+
+    def get_location(self, obj):
+        try:
+            prefs = obj.preferences
+            return prefs.location or prefs.region or ""
+        except Exception:
+            return ""
 
 
 # ============================================================
@@ -310,6 +327,7 @@ class UserPreferencesSerializer(serializers.ModelSerializer):
         fields = [
             "language", "currency", "region",
             "show_phone", "show_email",
+            "bio", "location",
             "updated_at",
         ]
         read_only_fields = ["updated_at"]

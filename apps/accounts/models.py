@@ -202,11 +202,8 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
             if not email_taken:
                 self.email = self.deleted_email
 
-            # Clear deleted_email either way — either reclaimed or lost.
             self.deleted_email = None
 
-        # If the phone has been reclaimed by another active user,
-        # drop it so the unique_active_user_phone constraint holds.
         if self.phone:
             phone_taken = (
                 User.all_objects
@@ -247,7 +244,6 @@ class PendingRegistration(models.Model):
         verbose_name="Barua pepe",
     )
 
-    # Contact info only, carried over to User on verification.
     phone = models.CharField(
         max_length=20,
         unique=True,
@@ -401,6 +397,9 @@ class UserPreferences(models.Model):
     region = models.CharField(max_length=100, default="Dar es Salaam")
     show_phone = models.BooleanField(default=True)
     show_email = models.BooleanField(default=False)
+    # ✅ MPYA — bio na location zinahifadhiwa hapa
+    bio = models.TextField(blank=True, default="")
+    location = models.CharField(max_length=255, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -424,16 +423,13 @@ class NotificationPreference(models.Model):
         on_delete=models.CASCADE,
         related_name="notification_preferences",
     )
-    # Email
     email_deals = models.BooleanField(default=True)
     email_messages = models.BooleanField(default=True)
     email_promotions = models.BooleanField(default=False)
     email_newsletter = models.BooleanField(default=True)
-    # SMS
     sms_deals = models.BooleanField(default=True)
     sms_messages = models.BooleanField(default=False)
     sms_promotions = models.BooleanField(default=False)
-    # Push
     push_deals = models.BooleanField(default=True)
     push_messages = models.BooleanField(default=True)
     push_promotions = models.BooleanField(default=False)

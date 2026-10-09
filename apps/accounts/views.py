@@ -160,7 +160,6 @@ class LoginView(APIView):
         responses={200: OpenApiResponse(description="Login imefanikiwa.")},
     )
     def post(self, request):
-        # LOGIN DIAGNOSTIC — safe to remove after the issue is resolved.
         logger.info(
             "[login] attempt identifier=%r has_cookie=%s has_auth_header=%s",
             (request.data or {}).get("identifier", ""),
@@ -204,8 +203,6 @@ class LogoutView(APIView):
         responses={205: OpenApiResponse(description="Logout imefanikiwa.")},
     )
     def post(self, request):
-        # Logout is idempotent — client-side token deletion is what
-        # matters. Blacklist the refresh token only if one is supplied.
         refresh_token = None
         if isinstance(request.data, dict):
             refresh_token = request.data.get("refresh")
@@ -256,16 +253,31 @@ class ProfileView(APIView):
         responses={200: ProfileSerializer},
     )
     def patch(self, request):
-        serializer = ProfileSerializer(
+        # 1. Sasisha User fields (name, phone)
+        user_serializer = ProfileSerializer(
             request.user, data=request.data, partial=True,
         )
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+        user_serializer.is_valid(raise_exception=True)
+        user_serializer.save()
 
+        # 2. Sasisha UserPreferences (bio, location)
+        prefs, _ = UserPreferences.objects.get_or_create(user=request.user)
+        prefs_updates = []
+        if "bio" in request.data:
+            prefs.bio = (request.data.get("bio") or "").strip()
+            prefs_updates.append("bio")
+        if "location" in request.data:
+            prefs.location = (request.data.get("location") or "").strip()
+            prefs_updates.append("location")
+        if prefs_updates:
+            prefs_updates.append("updated_at")
+            prefs.save(update_fields=prefs_updates)
+
+        # 3. Rudisha profile mpya
         return Response(
             {
                 "message": "Wasifu umefanikiwa kusasishwa.",
-                "profile": serializer.data,
+                "profile": ProfileSerializer(request.user).data,
             },
             status=status.HTTP_200_OK,
         )
@@ -385,8 +397,6 @@ class ForgotPasswordView(APIView):
         try:
             send_password_reset_otp(user)
         except OTPThrottled as exc:
-            # Normal rate limit — return 429 so the frontend can show
-            # a "wait 60 seconds" countdown.
             return Response(
                 getattr(exc, "detail", {"detail": str(exc)}),
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -435,8 +445,6 @@ class VerifyPasswordResetOTPView(APIView):
 
         reset_token = create_password_reset_token(user)
 
-        # reset_token exposed at top level AND inside `data` for
-        # backward-compatible clients.
         return Response(
             {
                 "message": (
@@ -569,7 +577,6 @@ class ResendOTPView(APIView):
             except Exception:
                 logger.exception("Resend OTP failed for %s", email)
 
-        # Always return generic — do not leak whether the email is pending.
         return Response({
             "message": (
                 "Kama kuna usajili unaosubiri kwa barua pepe hii, "
@@ -650,10 +657,6 @@ class MeNotificationPreferencesView(APIView):
 
 # ============================================================
 # USER ACTIVITIES — GET
-# Inaunda activities kutoka data halisi:
-#   - listings za seller (recent)
-#   - deals za buyer/seller
-#   - saved items
 # ============================================================
 
 class MeActivitiesView(APIView):
@@ -752,7 +755,6 @@ class MeActivitiesView(APIView):
         except Exception:
             logger.exception("MeActivitiesView: saved failed")
 
-        # ── Sort by created_at, take top N ──────────────────
         activities.sort(
             key=lambda a: a["created_at"],
             reverse=True,

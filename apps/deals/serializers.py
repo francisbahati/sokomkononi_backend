@@ -346,6 +346,10 @@ class DealMessageCreateSerializer(serializers.Serializer):
 # DEAL ROOM LIST
 # ============================================================
 class DealRoomListSerializer(serializers.ModelSerializer):
+    listing = DealListingSerializer(read_only=True)
+    buyer = DealUserSerializer(read_only=True)
+    seller = DealUserSerializer(read_only=True)
+
     listing_title = serializers.CharField(
         source="listing.title", read_only=True,
     )
@@ -353,6 +357,8 @@ class DealRoomListSerializer(serializers.ModelSerializer):
         source="listing.price",
         max_digits=15, decimal_places=2, read_only=True,
     )
+    category = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
     buyer_name = serializers.CharField(source="buyer.name", read_only=True)
     seller_name = serializers.CharField(source="seller.name", read_only=True)
     latest_offer = serializers.SerializerMethodField()
@@ -360,15 +366,36 @@ class DealRoomListSerializer(serializers.ModelSerializer):
     class Meta:
         model = DealRoom
         fields = [
-            "id", "listing", "listing_title", "listing_price",
-            "buyer", "buyer_name", "seller", "seller_name",
-            "status", "agreed_price", "agreed_at", "latest_offer",
+            "id",
+            "listing", "listing_title", "listing_price",
+            "category", "location",
+            "buyer", "buyer_name",
+            "seller", "seller_name",
+            "status", "agreed_price", "agreed_at",
+            "latest_offer",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
 
+    def get_category(self, obj):
+        try:
+            if obj.listing and obj.listing.category:
+                return obj.listing.category.name
+        except Exception:
+            pass
+        return ""
+
+    def get_location(self, obj):
+        try:
+            return obj.listing.location if obj.listing else ""
+        except Exception:
+            return ""
+
     def get_latest_offer(self, obj):
-        offers = list(obj.offers.all())
+        try:
+            offers = list(obj.offers.all())
+        except Exception:
+            return None
         if not offers:
             return None
         offers.sort(key=lambda o: o.created_at, reverse=True)
@@ -377,9 +404,7 @@ class DealRoomListSerializer(serializers.ModelSerializer):
         ).data
 
 
-# ============================================================
-# DEAL ROOM DETAIL
-# ============================================================
+
 class DealRoomDetailSerializer(serializers.ModelSerializer):
     listing = DealListingSerializer(read_only=True)
     buyer = DealUserSerializer(read_only=True)

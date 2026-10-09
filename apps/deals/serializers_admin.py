@@ -1,4 +1,4 @@
-# apps/deals/serializers_admin.py
+"""Admin-specific deal serializers."""
 from rest_framework import serializers
 
 from .models import DealRoom, NegotiationOffer
@@ -33,13 +33,18 @@ class AdminOfferSerializer(serializers.ModelSerializer):
 
 
 class AdminDealRoomSerializer(serializers.ModelSerializer):
+    buyerId = serializers.IntegerField(source="buyer.id", read_only=True)
+    sellerId = serializers.IntegerField(source="seller.id", read_only=True)
+    listingId = serializers.IntegerField(source="listing.id", read_only=True)
     listingTitle = serializers.CharField(source="listing.title", read_only=True)
     buyerName = serializers.CharField(source="buyer.name", read_only=True)
     sellerName = serializers.CharField(source="seller.name", read_only=True)
     askingPrice = serializers.DecimalField(
-        source="listing.price", max_digits=15, decimal_places=2,
-        read_only=True,
+        source="listing.price",
+        max_digits=15, decimal_places=2, read_only=True,
     )
+    category = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
     currentOffer = serializers.SerializerMethodField()
     messages = serializers.SerializerMethodField()
     reservationFee = serializers.SerializerMethodField()
@@ -52,14 +57,18 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = DealRoom
         fields = [
-            "id", "status", "listingTitle", "buyerName", "sellerName",
-            "askingPrice", "currentOffer", "messages",
-            "reservationFee", "reservationHours", "reservationMethod",
-            "reservationExpiresAt", "paymentProof", "disputeNote",
+            "id", "status",
+            "buyerId", "sellerId", "listingId",
+            "listingTitle", "buyerName", "sellerName",
+            "askingPrice", "category", "location",
+            "currentOffer", "messages",
+            "reservationFee", "reservationHours",
+            "reservationMethod", "reservationExpiresAt",
+            "paymentProof", "disputeNote",
             "created_at", "updated_at",
         ]
 
-    # ── Helpers ────────────────────────────────────────────
+    # ── helpers ──────────────────────────────────────────────
     def _txn(self, obj):
         return getattr(obj, "transaction", None)
 
@@ -67,28 +76,69 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
         txn = self._txn(obj)
         return getattr(txn, "reservation", None) if txn else None
 
-    # ── Current offer ──────────────────────────────────────
+    def get_category(self, obj):
+        try:
+            if obj.listing and obj.listing.category:
+                return obj.listing.category.name
+        except Exception:
+            pass
+        return ""
+
+    def get_location(self, obj):
+        try:
+            return obj.listing.location if obj.listing else ""
+        except Exception:
+            return ""
+
     def get_currentOffer(self, obj):
-        latest = obj.offers.order_by("-created_at").first()
+        try:
+            latest = obj.offers.order_by("-created_at").first()
+        except Exception:
+            latest = None
         if not latest:
-            return float(obj.agreed_price) if obj.agreed_price else 0
+            try:
+                return float(obj.agreed_price) if obj.agreed_price else 0
+            except Exception:
+                return 0
         return float(latest.amount)
 
-    # ── Messages (offers as bubbles) ───────────────────────
     def get_messages(self, obj):
-        return [
-            AdminOfferSerializer(o, context={"deal_room": obj}).data
-            for o in obj.offers.order_by("created_at")
-        ]
+        try:
+            qs = obj.offers.order_by("created_at")
+        except Exception:
+            return []
+        out = []
+        for o in qs:
+            try:
+                room = o.deal_room
+                if o.offered_by_id == room.buyer_id:
+                    sender = "buyer"
+                elif o.offered_by_id == room.seller_id:
+                    sender = "seller"
+                else:
+                    sender = "admin"
+            except Exception:
+                sender = "unknown"
+            out.append({
+                "id": o.id,
+                "sender": sender,
+                "text": o.message or "",
+                "amount": float(o.amount),
+                "status": o.status,
+                "at": o.created_at,
+            })
+        return out
 
-    # ── Reservation fields ─────────────────────────────────
     def get_reservationFee(self, obj):
         r = self._reservation(obj)
-        return float(r.deposit_amount) if r else None
+        try:
+            return float(r.deposit_amount) if r else None
+        except Exception:
+            return None
 
     def get_reservationHours(self, obj):
         r = self._reservation(obj)
-        return r.duration_hours if r else None
+        return getattr(r, "duration_hours", None) if r else None
 
     def get_reservationMethod(self, obj):
         r = self._reservation(obj)
@@ -96,9 +146,8 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
 
     def get_reservationExpiresAt(self, obj):
         r = self._reservation(obj)
-        return r.expires_at if r else None
+        return getattr(r, "expires_at", None) if r else None
 
-    # ── Payment proof ──────────────────────────────────────
     def get_paymentProof(self, obj):
         txn = self._txn(obj)
         if not txn:
@@ -117,7 +166,6 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
             "url": url,
         }
 
-    # ── Dispute note ───────────────────────────────────────
     def get_disputeNote(self, obj):
         txn = self._txn(obj)
         if not txn:

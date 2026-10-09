@@ -261,7 +261,6 @@ CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(
 REST_FRAMEWORK = {
     # FIX: stop DRF from hijacking ?format=pdf|csv|doc (it returned 404).
     "URL_FORMAT_OVERRIDE": None,
-    # JWT-only API. SessionAuthentication was removed because it
     # enforces CSRF on unsafe methods (POST/PUT/PATCH/DELETE) when a
     # session cookie happens to be present — which broke API calls
     # whenever a stale Django admin session existed on the same origin.

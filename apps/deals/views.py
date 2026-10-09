@@ -40,11 +40,7 @@ from .services.notifications import (
 )
 
 
-# ============================================================
-# AUDIT LOG HELPER
-# ============================================================
 def _log(request, action, target="", target_id=None, details=""):
-    """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -121,10 +117,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         return qs.filter(Q(buyer=user) | Q(seller=user))
 
     def update(self, request, *args, **kwargs):
-        """
-        Deal status may only be changed by the accept-offer / cancel
-        endpoints. Reject any other status write.
-        """
         if "status" in request.data:
             return Response(
                 {
@@ -143,27 +135,38 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         serializer.is_valid(raise_exception=True)
 
+        # Kama deal room ipo tayari, irudishe (200) badala ya kosa (400).
+        existing = getattr(serializer, "_existing_deal_room", None)
+        if existing:
+            response_serializer = DealRoomDetailSerializer(
+                existing,
+                context={"request": request, "deal_room": existing},
+            )
+            return Response(
+                response_serializer.data, status=status.HTTP_200_OK,
+            )
+
         try:
             with transaction.atomic():
                 deal_room = serializer.save()
+                transaction.on_commit(
+                    lambda: notify_deal_room_created(deal_room=deal_room)
+                )
         except IntegrityError:
             existing = DealRoom.objects.filter(
                 listing_id=serializer.validated_data["listing_id"],
                 buyer=request.user,
             ).first()
             if existing:
-                raise ValidationError({
-                    "listing_id": (
-                        f"Deal Room tayari ipo. Deal Room ID: {existing.id}"
-                    )
-                })
+                response_serializer = DealRoomDetailSerializer(
+                    existing,
+                    context={"request": request, "deal_room": existing},
+                )
+                return Response(
+                    response_serializer.data, status=status.HTTP_200_OK,
+                )
             raise
 
-        transaction.on_commit(
-            lambda: notify_deal_room_created(deal_room=deal_room)
-        )
-
-        # Auto-create a Lead for the seller
         try:
             from apps.leads.services.lead import upsert_lead_from_deal_room
             upsert_lead_from_deal_room(deal_room)
@@ -186,9 +189,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
-    # ========================================================
-    # OFFERS — GET (list)
-    # ========================================================
     @extend_schema(
         responses={200: NegotiationOfferSerializer(many=True)},
     )
@@ -197,7 +197,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         url_path="offers", url_name="offers-list",
     )
     def offers_list(self, request, pk=None):
-        """GET /api/deals/{id}/offers/ — admin sees all, participants see theirs."""
         deal_room = self.get_object()
         qs = (
             NegotiationOffer.objects
@@ -211,24 +210,14 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
-    # ========================================================
-    # MESSAGES — GET (list)
-    # ========================================================
     @extend_schema(responses={200: None})
     @action(
         detail=True, methods=["get"],
         url_path="messages", url_name="messages-list",
     )
     def messages_list(self, request, pk=None):
-        """
-        GET /api/deals/{id}/messages/ — chat messages tied to the deal.
-
-        Derives messages from the linked Conversation if one exists;
-        otherwise returns the negotiation-offer thread as text lines.
-        """
         deal_room = self.get_object()
 
-        # Try the messaging app first.
         try:
             from apps.messaging.models import Conversation, Message
             conv = (
@@ -260,7 +249,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
 
-        # Fallback: represent offers as messages.
         offers = (
             NegotiationOffer.objects
             .filter(deal_room=deal_room)
@@ -280,11 +268,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             for o in offers
         ])
 
-    # ========================================================
-    # MESSAGES — POST (create)
-    # Inatumia DealMessageCreateSerializer ili kuzuia phone/email
-    # kama reservation haijalipwa (backend defense).
-    # ========================================================
     @extend_schema(
         request=DealMessageCreateSerializer,
         responses={201: None},
@@ -294,16 +277,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         url_path="messages", url_name="messages-create",
     )
     def messages_create(self, request, pk=None):
-        """
-        POST /api/deals/{id}/messages/ — send a chat message.
-
-        Creates the linked Conversation on first use, then appends
-        a Message. Returns the created message in the same shape as
-        messages_list so the frontend can update the bubble in place.
-        """
         deal_room = self.get_object()
 
-        # Validate (block phone/email if reservation not paid)
         serializer = DealMessageCreateSerializer(
             data=request.data,
             context={"request": request, "deal_room": deal_room},
@@ -354,16 +329,12 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    # ========================================================
-    # PAYMENT PROOF — GET
-    # ========================================================
     @extend_schema(responses={200: None})
     @action(
         detail=True, methods=["get"],
         url_path="payment-proof", url_name="payment-proof",
     )
     def payment_proof(self, request, pk=None):
-        """GET /api/deals/{id}/payment-proof/ — proof from the linked transaction."""
         deal_room = self.get_object()
         txn = getattr(deal_room, "transaction", None)
         if not txn:
@@ -390,9 +361,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             "confirmed_at": txn.seller_confirmed_at,
         })
 
-    # ========================================================
-    # OFFER — POST (create)
-    # ========================================================
     @extend_schema(
         request=NegotiationOfferCreateSerializer,
         responses={201: NegotiationOfferSerializer},
@@ -469,7 +437,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             lambda: notify_new_offer(deal_room=deal_room, offer=new_offer)
         )
 
-        # Update the lead message count for this buyer/listing pair
         try:
             from apps.leads.services.lead import upsert_lead_from_deal_room
             upsert_lead_from_deal_room(deal_room)
@@ -484,9 +451,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    # ========================================================
-    # ACCEPT OFFER — POST
-    # ========================================================
     @extend_schema(
         request=DealRoomAcceptOfferSerializer,
         responses={200: DealRoomDetailSerializer},
@@ -551,11 +515,9 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 ),
             })
 
-        # Mark accepted
         offer.status = NegotiationOffer.Status.ACCEPTED
         offer.save(update_fields=["status", "updated_at"])
 
-        # Reject remaining pending siblings
         siblings_pending = NegotiationOffer.objects.filter(
             deal_room=deal_room,
             status=NegotiationOffer.Status.PENDING,
@@ -579,7 +541,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             listing.status = Listing.Status.RESERVED
             listing.save(update_fields=["status", "updated_at"])
 
-        # Cancel sibling Deal Rooms for the same listing
         sibling_rooms = (
             DealRoom.objects
             .select_for_update()
@@ -634,9 +595,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ========================================================
-    # RESOLVE — pre-reservation dispute resolution (admin only)
-    # ========================================================
     @action(
         detail=True, methods=["post"],
         url_path="resolve", url_name="resolve",
@@ -644,13 +602,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     )
     @transaction.atomic
     def resolve(self, request, pk=None):
-        """
-        POST /api/deals/{id}/resolve/
-        Body: { resolution: "continue" | "cancel", note: "..." }
-
-        Admin-only. Used when a deal is CANCELLED/DISPUTED before any
-        Transaction exists.
-        """
         deal_room = get_object_or_404(
             DealRoom.objects
             .select_for_update(of=("self",))
@@ -705,9 +656,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ========================================================
-    # CANCEL — POST (na LOG)
-    # ========================================================
     @extend_schema(
         request=DealRoomCancelSerializer,
         responses={200: DealRoomDetailSerializer},
@@ -755,7 +703,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             updated_at=timezone.now(),
         )
 
-        # Admin actions pekee (staff)
         if request.user.is_staff:
             _log(
                 request,

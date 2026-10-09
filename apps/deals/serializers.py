@@ -12,7 +12,6 @@ from .models import DealRoom, NegotiationOffer
 
 # ============================================================
 # PHONE / EMAIL DETECTION
-# Block messages containing contact info kama reservation haijalipwa.
 # ============================================================
 _PHONE_PATTERNS = [
     re.compile(r"\b0[4-9]\d{7,8}\b"),
@@ -23,7 +22,6 @@ _PHONE_PATTERNS = [
     re.compile(r"\+256\d{7,9}\b"),
     re.compile(r"\b256\d{7,9}\b"),
     re.compile(r"\+\d{8,15}\b"),
-    re.compile(r"\b\d{9,15}\b"),
 ]
 
 _EMAIL_PATTERN = re.compile(
@@ -47,19 +45,32 @@ def contains_contact_info(text):
 # LISTING
 # ============================================================
 class DealListingSerializer(serializers.ModelSerializer):
-    category_name = serializers.CharField(source="category.name", read_only=True)
+    category_name = serializers.SerializerMethodField()
+    category_slug = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
         fields = [
             "id", "title", "description", "price", "location",
-            "status", "category_name",
+            "status", "category_name", "category_slug",
         ]
         read_only_fields = fields
 
+    def get_category_name(self, obj):
+        try:
+            return obj.category.name if obj.category else ""
+        except Exception:
+            return ""
+
+    def get_category_slug(self, obj):
+        try:
+            return obj.category.slug if obj.category else ""
+        except Exception:
+            return ""
+
 
 # ============================================================
-# USER — phone + email zenye masharti
+# USER
 # ============================================================
 class DealUserSerializer(serializers.ModelSerializer):
     phone = serializers.SerializerMethodField()
@@ -73,19 +84,16 @@ class DealUserSerializer(serializers.ModelSerializer):
     def _reservation_paid(self):
         request = self.context.get("request")
         deal_room = self.context.get("deal_room")
-
         if not request or not request.user.is_authenticated:
             return False
         if not deal_room:
             return False
         if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
             return False
-
         try:
             txn = deal_room.transaction
         except Exception:
             return False
-
         from apps.transactions.models import Transaction
         return txn.status in [
             Transaction.Status.RESERVED,
@@ -98,10 +106,7 @@ class DealUserSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return False
-        return (
-            request.user.id == obj.id
-            or request.user.is_staff
-        )
+        return request.user.id == obj.id or request.user.is_staff
 
     def _prefs(self, obj):
         try:
@@ -112,27 +117,21 @@ class DealUserSerializer(serializers.ModelSerializer):
     def get_phone(self, obj):
         if self._is_self_or_staff(obj):
             return getattr(obj, "phone", None)
-
         if not self._reservation_paid():
             return None
-
         prefs = self._prefs(obj)
         if prefs is not None and not prefs.show_phone:
             return None
-
         return getattr(obj, "phone", None)
 
     def get_email(self, obj):
         if self._is_self_or_staff(obj):
             return getattr(obj, "email", None)
-
         if not self._reservation_paid():
             return None
-
         prefs = self._prefs(obj)
         if prefs is not None and not prefs.show_email:
             return None
-
         return getattr(obj, "email", None)
 
 
@@ -194,21 +193,16 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
         value = (value or "").strip()
         if not value:
             return value
-
         deal_room = self.context.get("deal_room")
         request = self.context.get("request")
-
         if not deal_room or not request or not request.user.is_authenticated:
             return value
-
         if request.user.id == deal_room.seller_id:
             return value
-
         try:
             txn = deal_room.transaction
         except Exception:
             txn = None
-
         from apps.transactions.models import Transaction
         reservation_paid = bool(
             txn and txn.status in [
@@ -218,42 +212,32 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
                 Transaction.Status.COMPLETED,
             ]
         )
-
         if not reservation_paid and contains_contact_info(value):
             raise serializers.ValidationError(
                 "Hairuhusiwi kutuma namba ya simu, email, au taarifa za "
                 "mawasiliano kwenye offer kabla ya kulipa Reservation Fee."
             )
-
         return value
 
     def validate(self, attrs):
         deal_room = self.context.get("deal_room")
         request = self.context.get("request")
-
         if not deal_room:
             raise serializers.ValidationError("Deal Room haijapatikana.")
         if not request or not request.user.is_authenticated:
             raise serializers.ValidationError(
                 "Ni lazima uwe umeingia kwenye akaunti."
             )
-
         if deal_room.status not in [
-            DealRoom.Status.OPEN,
-            DealRoom.Status.NEGOTIATING,
+            DealRoom.Status.OPEN, DealRoom.Status.NEGOTIATING,
         ]:
             raise serializers.ValidationError(
                 "Deal Room hii haipokei offers mpya."
             )
-
-        if request.user.id not in [
-            deal_room.buyer_id,
-            deal_room.seller_id,
-        ]:
+        if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
             raise serializers.ValidationError(
                 "Huruhusiwi kutuma offer kwenye Deal Room hii."
             )
-
         responded_to_id = attrs.get("responded_to")
         if responded_to_id:
             try:
@@ -262,16 +246,12 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
                 )
             except NegotiationOffer.DoesNotExist:
                 raise serializers.ValidationError({
-                    "responded_to": (
-                        "Offer uliyochagua haipo kwenye Deal Room hii."
-                    )
+                    "responded_to": "Offer uliyochagua haipo kwenye Deal Room hii."
                 })
-
             if offer.offered_by_id == request.user.id:
                 raise serializers.ValidationError({
                     "responded_to": "Huwezi kujibu offer yako mwenyewe."
                 })
-
             if offer.status in [
                 NegotiationOffer.Status.ACCEPTED,
                 NegotiationOffer.Status.REJECTED,
@@ -280,7 +260,6 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({
                     "responded_to": "Offer hii haiwezi kujibiwa tena."
                 })
-
         return attrs
 
 
@@ -299,7 +278,6 @@ class DealMessageCreateSerializer(serializers.Serializer):
     def validate(self, attrs):
         deal_room = self.context.get("deal_room")
         request = self.context.get("request")
-
         if not deal_room:
             raise serializers.ValidationError("Deal Room haijapatikana.")
         if not request or not request.user.is_authenticated:
@@ -310,15 +288,12 @@ class DealMessageCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Huruhusiwi kutuma ujumbe kwenye Deal Room hii."
             )
-
         if request.user.id == deal_room.seller_id:
             return attrs
-
         try:
             txn = deal_room.transaction
         except Exception:
             txn = None
-
         from apps.transactions.models import Transaction
         reservation_paid = bool(
             txn and txn.status in [
@@ -328,17 +303,11 @@ class DealMessageCreateSerializer(serializers.Serializer):
                 Transaction.Status.COMPLETED,
             ]
         )
-
         if not reservation_paid and contains_contact_info(attrs["text"]):
             raise serializers.ValidationError({
-                "text": (
-                    "Hairuhusiwi kutuma namba ya simu, email, au taarifa "
-                    "za mawasiliano kwenye chat kabla ya kulipa "
-                    "Reservation Fee. Lipia kwanza ili kuona taarifa za "
-                    "muuzaji."
-                )
+                "text": "Hairuhusiwi kutuma namba ya simu, email, au taarifa "
+                        "za mawasiliano kwenye chat kabla ya kulipa Reservation Fee."
             })
-
         return attrs
 
 
@@ -350,40 +319,30 @@ class DealRoomListSerializer(serializers.ModelSerializer):
     buyer = DealUserSerializer(read_only=True)
     seller = DealUserSerializer(read_only=True)
 
-    listing_title = serializers.CharField(
-        source="listing.title", read_only=True,
-    )
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
     listing_price = serializers.DecimalField(
-        source="listing.price",
-        max_digits=15, decimal_places=2, read_only=True,
+        source="listing.price", max_digits=15, decimal_places=2, read_only=True,
     )
     category = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
-    buyer_name = serializers.CharField(source="buyer.name", read_only=True)
-    seller_name = serializers.CharField(source="seller.name", read_only=True)
     latest_offer = serializers.SerializerMethodField()
 
     class Meta:
         model = DealRoom
         fields = [
-            "id",
-            "listing", "listing_title", "listing_price",
+            "id", "listing", "listing_title", "listing_price",
             "category", "location",
-            "buyer", "buyer_name",
-            "seller", "seller_name",
-            "status", "agreed_price", "agreed_at",
-            "latest_offer",
+            "buyer", "seller",
+            "status", "agreed_price", "agreed_at", "latest_offer",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
 
     def get_category(self, obj):
         try:
-            if obj.listing and obj.listing.category:
-                return obj.listing.category.name
+            return obj.listing.category.name if obj.listing and obj.listing.category else ""
         except Exception:
-            pass
-        return ""
+            return ""
 
     def get_location(self, obj):
         try:
@@ -404,7 +363,9 @@ class DealRoomListSerializer(serializers.ModelSerializer):
         ).data
 
 
-
+# ============================================================
+# DEAL ROOM DETAIL
+# ============================================================
 class DealRoomDetailSerializer(serializers.ModelSerializer):
     listing = DealListingSerializer(read_only=True)
     buyer = DealUserSerializer(read_only=True)
@@ -420,12 +381,15 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     reservation_method = serializers.SerializerMethodField()
     reservation_expires_at = serializers.SerializerMethodField()
     dispute_note = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
 
     class Meta:
         model = DealRoom
         fields = [
             "id", "deal_room_id",
             "listing", "buyer", "seller",
+            "category", "location",
             "status", "agreed_price", "agreed_at",
             "offers", "offer_count", "latest_offer",
             "transaction_id", "payment_proof",
@@ -436,12 +400,31 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def _txn(self, obj):
+        return getattr(obj, "transaction", None)
+
+    def _reservation(self, obj):
+        txn = self._txn(obj)
+        return getattr(txn, "reservation", None) if txn else None
+
+    def get_category(self, obj):
+        try:
+            return obj.listing.category.name if obj.listing and obj.listing.category else ""
+        except Exception:
+            return ""
+
+    def get_location(self, obj):
+        try:
+            return obj.listing.location if obj.listing else ""
+        except Exception:
+            return ""
+
     def get_transaction_id(self, obj):
-        txn = getattr(obj, "transaction", None)
+        txn = self._txn(obj)
         return txn.id if txn else None
 
     def get_payment_proof(self, obj):
-        txn = getattr(obj, "transaction", None)
+        txn = self._txn(obj)
         if not txn:
             return None
         proof = getattr(txn, "final_payment_proof", None)
@@ -462,13 +445,6 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             "confirmed": txn.seller_confirmed_payment,
             "confirmed_at": txn.seller_confirmed_at,
         }
-
-    def _txn(self, obj):
-        return getattr(obj, "transaction", None)
-
-    def _reservation(self, obj):
-        txn = self._txn(obj)
-        return getattr(txn, "reservation", None) if txn else None
 
     def get_reservation_fee(self, obj):
         r = self._reservation(obj)
@@ -495,12 +471,17 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             return ""
         return txn.cancellation_reason or ""
 
-
     def get_offer_count(self, obj):
-        return len(obj.offers.all())
+        try:
+            return len(obj.offers.all())
+        except Exception:
+            return 0
 
     def get_latest_offer(self, obj):
-        offers = list(obj.offers.all())
+        try:
+            offers = list(obj.offers.all())
+        except Exception:
+            return None
         if not offers:
             return None
         offers.sort(key=lambda o: o.created_at, reverse=True)
@@ -527,8 +508,7 @@ class DealRoomCreateSerializer(serializers.Serializer):
 
         if listing.status != Listing.Status.LIVE:
             raise serializers.ValidationError(
-                "Deal Room inaweza kuanzishwa kwa tangazo "
-                "lililo AVAILABLE pekee."
+                "Deal Room inaweza kuanzishwa kwa tangazo lililo AVAILABLE pekee."
             )
 
         request = self.context.get("request")
@@ -536,7 +516,6 @@ class DealRoomCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Ni lazima uwe umeingia kwenye akaunti."
             )
-
         if listing.seller_id == request.user.id:
             raise serializers.ValidationError(
                 "Huwezi kuanzisha Deal Room kwenye tangazo lako mwenyewe."
@@ -545,12 +524,7 @@ class DealRoomCreateSerializer(serializers.Serializer):
         existing = DealRoom.objects.filter(
             listing=listing, buyer=request.user,
         ).first()
-
-        if existing:
-            self._existing_deal_room = existing
-            return value
-
-        self._existing_deal_room = None
+        self._existing_deal_room = existing
         return value
 
     def create(self, validated_data):
@@ -567,7 +541,7 @@ class DealRoomCreateSerializer(serializers.Serializer):
 
 
 # ============================================================
-# DEAL ROOM CANCEL
+# CANCEL
 # ============================================================
 class DealRoomCancelSerializer(serializers.Serializer):
     reason = serializers.CharField(
@@ -579,7 +553,7 @@ class DealRoomCancelSerializer(serializers.Serializer):
 
 
 # ============================================================
-# ACCEPT OFFER — CHAGUO A
+# ACCEPT OFFER
 # ============================================================
 class DealRoomAcceptOfferSerializer(serializers.Serializer):
     offer_id = serializers.IntegerField(required=True)
@@ -588,44 +562,33 @@ class DealRoomAcceptOfferSerializer(serializers.Serializer):
         deal_room = self.context.get("deal_room")
         if not deal_room:
             raise serializers.ValidationError("Deal Room haijapatikana.")
-
         try:
-            offer = NegotiationOffer.objects.get(
-                pk=value, deal_room=deal_room,
-            )
+            offer = NegotiationOffer.objects.get(pk=value, deal_room=deal_room)
         except NegotiationOffer.DoesNotExist:
             raise serializers.ValidationError(
                 "Offer haijapatikana kwenye Deal Room hii."
             )
-
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             raise serializers.ValidationError(
                 "Ni lazima uwe umeingia kwenye akaunti."
             )
-
         if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
             raise serializers.ValidationError(
                 "Huruhusiwi kukubali offer kwenye Deal Room hii."
             )
-
         if offer.offered_by_id == request.user.id:
             raise serializers.ValidationError(
                 "Huwezi kukubali offer yako mwenyewe."
             )
-
         if offer.status != NegotiationOffer.Status.PENDING:
             raise serializers.ValidationError(
-                "Offer hii haiwezi kukubaliwa kwa sababu hali yake "
-                "si PENDING."
+                "Offer hii haiwezi kukubaliwa kwa sababu hali yake si PENDING."
             )
-
         if deal_room.status not in [
-            DealRoom.Status.OPEN,
-            DealRoom.Status.NEGOTIATING,
+            DealRoom.Status.OPEN, DealRoom.Status.NEGOTIATING,
         ]:
             raise serializers.ValidationError(
                 "Deal Room hii haiwezi kukubali offer."
             )
-
         return value

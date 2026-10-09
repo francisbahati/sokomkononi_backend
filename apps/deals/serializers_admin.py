@@ -12,10 +12,7 @@ class AdminOfferSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = NegotiationOffer
-        fields = [
-            "id", "sender", "text", "at",
-            "amount", "offerAmount", "status",
-        ]
+        fields = ["id", "sender", "text", "at", "amount", "offerAmount", "status"]
 
     def get_sender(self, obj):
         room = self.context.get("deal_room") or obj.deal_room
@@ -40,8 +37,7 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     buyerName = serializers.CharField(source="buyer.name", read_only=True)
     sellerName = serializers.CharField(source="seller.name", read_only=True)
     askingPrice = serializers.DecimalField(
-        source="listing.price",
-        max_digits=15, decimal_places=2, read_only=True,
+        source="listing.price", max_digits=15, decimal_places=2, read_only=True,
     )
     category = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
@@ -68,7 +64,6 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
 
-    # ── helpers ──────────────────────────────────────────────
     def _txn(self, obj):
         return getattr(obj, "transaction", None)
 
@@ -120,12 +115,8 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
             except Exception:
                 sender = "unknown"
             out.append({
-                "id": o.id,
-                "sender": sender,
-                "text": o.message or "",
-                "amount": float(o.amount),
-                "status": o.status,
-                "at": o.created_at,
+                "id": o.id, "sender": sender, "text": o.message or "",
+                "amount": float(o.amount), "status": o.status, "at": o.created_at,
             })
         return out
 

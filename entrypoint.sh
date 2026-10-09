@@ -5,6 +5,7 @@ echo "============================================================"
 echo "SokoMkononi — entrypoint"
 echo "============================================================"
 
+# ── Wait for Postgres ───────────────────────────────────────
 if [ -n "$DB_HOST" ] && [ -n "$DB_PORT" ]; then
     echo "Waiting for PostgreSQL at $DB_HOST:$DB_PORT ..."
     python - <<'PY'
@@ -26,6 +27,7 @@ else
     exit 1
 fi
 
+# ── Wait for Redis (if configured) ──────────────────────────
 BROKER_URL="${CELERY_BROKER_URL:-}"
 if [ -n "$BROKER_URL" ]; then
     case "$BROKER_URL" in
@@ -56,31 +58,39 @@ else
     echo "Skipping Redis wait — CELERY_BROKER_URL is not set."
 fi
 
+# ── Skip init entirely (worker containers use this) ─────────
 if [ "${SOKO_SKIP_INIT:-0}" = "1" ]; then
     echo "SOKO_SKIP_INIT=1 — skipping migrate/collectstatic/superuser."
     echo "Starting application..."
     exec "$@"
 fi
 
-if [ "${SOKO_RUN_MIGRATIONS:-0}" = "1" ]; then
+# ── Migrations (ALWAYS run on web container) ────────────────
+# Default changed from 0 to 1 — this is the correct behaviour
+# for a web container. Set SOKO_RUN_MIGRATIONS=0 explicitly only
+# if you're running a dedicated migration job elsewhere.
+if [ "${SOKO_RUN_MIGRATIONS:-1}" = "1" ]; then
     echo "Applying database migrations..."
     python manage.py migrate --noinput
 else
-    echo "SOKO_RUN_MIGRATIONS=0 — skipping migrations (separate job runs them)."
+    echo "SOKO_RUN_MIGRATIONS=0 — skipping migrations."
 fi
 
-if [ "${SOKO_RUN_SEEDERS:-0}" = "1" ]; then
+# ── Seeders (idempotent) ────────────────────────────────────
+# Default changed from 0 to 1 — seeders use update_or_create,
+# so running them on every start is safe and prevents the
+# "fee rule not configured" errors for new categories.
+if [ "${SOKO_RUN_SEEDERS:-1}" = "1" ]; then
     echo "Fixing orphan listings (category=NULL)..."
     python manage.py fix_orphan_listings --apply || echo "WARN: orphan fix failed, continuing."
 
     echo "Seeding categories + fee rules..."
     python manage.py seed_all_fee_rules || echo "WARN: seed failed, continuing."
 else
-    echo "Skipping destructive seeders (set SOKO_RUN_SEEDERS=1 to enable)."
+    echo "SOKO_RUN_SEEDERS=0 — skipping seeders."
 fi
 
-# Only CREATE a superuser if one does not already exist.
-# We deliberately do NOT reset the password of an existing superuser.
+# ── Superuser (create only if missing) ──────────────────────
 if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
     echo "Ensuring superuser exists: $DJANGO_SUPERUSER_EMAIL"
     python manage.py shell -c "
@@ -100,6 +110,7 @@ else
     echo "Skipping superuser creation — DJANGO_SUPERUSER_EMAIL/PASSWORD not set."
 fi
 
+# ── Static files ────────────────────────────────────────────
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 

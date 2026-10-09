@@ -533,8 +533,11 @@ CSRF_COOKIE_SECURE = not DEBUG
 # default flat fee (TZS 3,000). Recommended: False — during launch
 # you want no surprise charges. If a rule is missing, the API
 # returns a clear "not configured" error and the admin fixes it.
+# Default True: a missing fee rule falls back to the default flat fee
+# (TZS 3,000) instead of raising "not configured" and blocking the
+# seller. Set LISTING_FEE_ALLOW_FALLBACK=False in .env to opt out.
 LISTING_FEE_ALLOW_FALLBACK = env_bool(
-    "LISTING_FEE_ALLOW_FALLBACK", False,
+    "LISTING_FEE_ALLOW_FALLBACK", True,
 )
 
 # How long a PENDING listing fee stays frozen before we re-price it

@@ -17,6 +17,7 @@ from .services.notification import (
 
 logger = logging.getLogger(__name__)
 
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -30,6 +31,7 @@ def _safe_create(**kwargs):
 
     transaction.on_commit(_do_create)
 
+
 def _safe_create_for_admins(**kwargs):
     """Unda notification kwa admins wote ndani ya on_commit."""
     def _do_create():
@@ -41,6 +43,7 @@ def _safe_create_for_admins(**kwargs):
             )
 
     transaction.on_commit(_do_create)
+
 
 # ============================================================
 # 1. USER — mtumiaji mpya amejisajili
@@ -63,8 +66,9 @@ def notify_admin_new_user(sender, instance, created, **kwargs):
         priority=Notification.Priority.NORMAL,
         related_object_type="accounts.User",
         related_object_id=instance.id,
-        action_url=f"{_admin_path()}/users",
+        action_url="",
     )
+
 
 # ============================================================
 # 2. USER — amefutwa
@@ -97,9 +101,10 @@ def notify_admin_user_deleted(sender, instance, **kwargs):
             priority=Notification.Priority.HIGH,
             related_object_type="accounts.User",
             related_object_id=instance.id,
-            action_url=f"{_admin_path()}/trash",
+            action_url="",
             exclude_user_id=instance.id,
         )
+
 
 # ============================================================
 # 3. LISTING — mpya imewekwa
@@ -129,8 +134,9 @@ def notify_admin_new_listing(sender, instance, created, **kwargs):
         priority=Notification.Priority.NORMAL,
         related_object_type="listings.Listing",
         related_object_id=instance.id,
-        action_url=f"{_admin_path()}/moderation",
+        action_url="",
     )
+
 
 # ============================================================
 # 4. LISTING — imefutwa (soft delete)
@@ -162,8 +168,9 @@ def notify_admin_listing_deleted(sender, instance, **kwargs):
             priority=Notification.Priority.NORMAL,
             related_object_type="listings.Listing",
             related_object_id=instance.id,
-            action_url=f"{_admin_path()}/trash",
+            action_url="",
         )
+
 
 # ============================================================
 # 5. LEAD MPYA (buyer amewasiliana)
@@ -197,10 +204,11 @@ def notify_new_lead(sender, instance, created, **kwargs):
             priority=Notification.Priority.HIGH,
             related_object_type="leads.Lead",
             related_object_id=instance.id,
-            action_url=f"/dashboard/seller/leads",
+            action_url="",
         )
     except Exception as exc:
         logger.exception("[notifications] lead signal failed: %s", exc)
+
 
 # ============================================================
 # 6. RESERVATION CREATED
@@ -225,12 +233,13 @@ def notify_reservation_created(sender, instance, created, **kwargs):
                 f"Reservation itaisha baada ya muda uliowekwa."
             ),
             priority=Notification.Priority.HIGH,
-            related_object_type="transactions.Reservation",
-            related_object_id=instance.id,
-            action_url=f"/dashboard/seller/transactions/{transaction_obj.id}",
+            related_object_type="transactions.Transaction",
+            related_object_id=transaction_obj.id,
+            action_url="",
         )
     except Exception as exc:
         logger.exception("[notifications] reservation signal failed: %s", exc)
+
 
 # ============================================================
 # 8. VERIFICATION REQUEST — mpya imewasilishwa (admin)
@@ -274,9 +283,10 @@ def notify_admin_new_verification(sender, instance, created, **kwargs):
         priority=Notification.Priority.HIGH,
         related_object_type="verifications.VerificationRequest",
         related_object_id=instance.id,
-        action_url=f"{_admin_path()}/verification",
+        action_url="",
         exclude_user_id=instance.user_id,
     )
+
 
 # ============================================================
 # 9. VERIFICATION REQUEST — imeidhinishwa / imekataliwa (user)
@@ -312,7 +322,7 @@ def notify_verification_status_changed(sender, instance, **kwargs):
             priority=Notification.Priority.HIGH,
             related_object_type="verifications.VerificationRequest",
             related_object_id=instance.id,
-            action_url="/dashboard/verification",
+            action_url="",
         )
     elif instance.status == "REJECTED":
         reason = instance.rejection_reason or "Hakuna sababu iliyotolewa."
@@ -330,10 +340,5 @@ def notify_verification_status_changed(sender, instance, **kwargs):
             priority=Notification.Priority.HIGH,
             related_object_type="verifications.VerificationRequest",
             related_object_id=instance.id,
-            action_url="/dashboard/verification",
+            action_url="",
         )
-
-def _admin_path():
-    """Local alias for the shared admin-path helper."""
-    from apps.core.admin_path import get_admin_path
-    return get_admin_path()

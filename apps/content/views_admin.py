@@ -48,9 +48,7 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAdminUser]
 
     def get_permissions(self):
-        method = getattr(self.request, "method", "")
-        if method in ("GET", "HEAD", "OPTIONS"):
-            return [permissions.AllowAny()]
+        # Reads for staff only. Public reads live under /api/content/.
         return [IsAdminUser()]
 
     def _resolve(self, kind):
@@ -64,7 +62,12 @@ class AdminContentViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         Model, Serializer = pair
-        return Response(Serializer(Model.objects.all(), many=True).data)
+        qs = Model.objects.all()
+        user = getattr(request, "user", None)
+        if not (user and user.is_authenticated and user.is_staff):
+            if hasattr(Model, "active"):
+                qs = qs.filter(active=True)
+        return Response(Serializer(qs, many=True).data)
 
     def create_content(self, request, kind=None):
         pair = self._resolve(kind)

@@ -34,7 +34,9 @@ class NotificationSerializer(serializers.ModelSerializer):
 
         Inarudisha None kama object haipo au URL haijasajiliwa.
         """
-        return obj.resolved_action_url
+        # Prefer the reverse-resolved URL; fall back to the stored
+        # action_url so deep links don't silently become None.
+        return obj.resolved_action_url or (obj.action_url or None)
 
 
 class NotificationMarkReadSerializer(serializers.Serializer):

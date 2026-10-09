@@ -134,7 +134,10 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
             listing.status = Listing.Status.LIVE
             listing.save(update_fields=["status", "updated_at"])
 
-    transaction.save()
+    transaction.save(update_fields=[
+        "buyer_decision", "buyer_decision_note", "buyer_decision_at",
+        "status", "cancelled_at", "cancellation_reason", "updated_at",
+    ])
     db_transaction.on_commit(
         lambda: notify_buyer_decision(transaction=transaction)
     )

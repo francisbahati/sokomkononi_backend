@@ -19,6 +19,7 @@ import logging
 from django.middleware.csrf import CsrfViewMiddleware
 
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 
@@ -62,7 +63,7 @@ class FlexibleJWTAuthentication(JWTAuthentication):
             return None
 
         # Strictly access tokens only.
-        if validated.get("token_type") != "access":
+        if not isinstance(validated, AccessToken):
             return None
         if validated.get("purpose"):
             return None

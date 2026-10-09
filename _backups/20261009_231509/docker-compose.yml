@@ -1,0 +1,99 @@
+services:
+  web:
+    networks: [soko_internal]
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DEBUG: "False"
+    ports:
+      - "8000:8000"
+    volumes:
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS http://127.0.0.1:8000/health/ || exit 1"
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    networks: [soko_internal]
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  celery_worker:
+    networks: [soko_internal]
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DEBUG: "False"
+      SOKO_SKIP_INIT: "1"
+    command: celery -A config worker -l info --concurrency=2
+    volumes:
+      - media_files:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  celery_beat:
+    networks: [soko_internal]
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DEBUG: "False"
+      SOKO_SKIP_INIT: "1"
+    command: celery -A config beat -l info
+    volumes:
+      - beat_data:/app/celerybeat
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  soko_internal:
+    driver: bridge
+
+volumes:
+  static_files:
+  media_files:
+  redis_data:
+  beat_data:

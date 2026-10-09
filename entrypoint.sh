@@ -62,8 +62,12 @@ if [ "${SOKO_SKIP_INIT:-0}" = "1" ]; then
     exec "$@"
 fi
 
-echo "Applying database migrations..."
-python manage.py migrate --noinput
+if [ "${SOKO_RUN_MIGRATIONS:-0}" = "1" ]; then
+    echo "Applying database migrations..."
+    python manage.py migrate --noinput
+else
+    echo "SOKO_RUN_MIGRATIONS=0 — skipping migrations (separate job runs them)."
+fi
 
 if [ "${SOKO_RUN_SEEDERS:-0}" = "1" ]; then
     echo "Fixing orphan listings (category=NULL)..."

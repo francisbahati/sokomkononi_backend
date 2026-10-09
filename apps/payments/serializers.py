@@ -22,7 +22,12 @@ class OrderStatusSerializer(serializers.Serializer):
 
 
 class PayoutCreateSerializer(serializers.Serializer):
-    amount = serializers.DecimalField(max_digits=15, decimal_places=2)
+    MIN = 1000
+    MAX = 100_000_000
+    amount = serializers.DecimalField(
+        max_digits=15, decimal_places=2,
+        min_value=MIN, max_value=MAX,
+    )
     method = serializers.CharField(max_length=100)
     account_number = serializers.CharField(max_length=64)
     account_name = serializers.CharField(

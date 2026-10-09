@@ -78,6 +78,10 @@ def notify_admin_user_deleted(sender, instance, **kwargs):
     """Admin anajulishwa mtumiaji amefutwa."""
     if not instance.pk:
         return
+    # Cheap exit: only proceed if is_deleted is among the updated fields.
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and "is_deleted" not in update_fields:
+        return
 
     try:
         old = sender.all_objects.get(pk=instance.pk)
@@ -145,6 +149,9 @@ def notify_admin_new_listing(sender, instance, created, **kwargs):
 def notify_admin_listing_deleted(sender, instance, **kwargs):
     """Admin anajulishwa listing imefutwa."""
     if not instance.pk:
+        return
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and "is_deleted" not in update_fields:
         return
 
     try:
@@ -295,6 +302,9 @@ def notify_admin_new_verification(sender, instance, created, **kwargs):
 def notify_verification_status_changed(sender, instance, **kwargs):
     """Mtumiaji anajulishwa verification yake imeidhinishwa au imekataliwa."""
     if not instance.pk:
+        return
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and "status" not in update_fields:
         return
 
     try:

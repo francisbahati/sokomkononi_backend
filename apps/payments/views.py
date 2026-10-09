@@ -65,35 +65,51 @@ RETRY = "retry"       # transient: ask FimiPay to send it again
 def _verify_amount(prefix, ref_id_int, reported_amount, order_id):
     """
     Compare FimiPay-reported amount against the DB-stored amount.
-    Returns True if acceptable, False if we must reject.
+
+    Returns True if EXACTLY equal, False otherwise.
+    Over- and under-payments both return False and are logged loudly.
     """
     if reported_amount is None:
-        # FimiPay did not send an amount — allow but log loudly.
-        logger.warning("Webhook missing amount for order_id=%s", order_id)
-        return True
+        logger.error("Webhook missing amount for order_id=%s", order_id)
+        return False
 
     try:
-        reported = Decimal(str(reported_amount))
+        reported = Decimal(str(reported_amount)).quantize(Decimal("0.01"))
     except Exception:
-        logger.error("Webhook non-numeric amount for order_id=%s: %r",
-                     order_id, reported_amount)
+        logger.error(
+            "Webhook non-numeric amount for order_id=%s: %r",
+            order_id, reported_amount,
+        )
         return False
 
     expected = _lookup_expected_amount(prefix, ref_id_int)
     if expected is None:
-        return True
-
-    if reported < expected:
+        # No record — reject; the router will treat it as IGNORED.
         logger.error(
-            "UNDERPAYMENT order_id=%s expected=%s reported=%s",
-            order_id, expected, reported,
+            "Webhook: no DB record for order_id=%s (prefix=%s, ref=%s)",
+            order_id, prefix, ref_id_int,
+        )
+        return False
+
+    expected = Decimal(str(expected)).quantize(Decimal("0.01"))
+
+    if reported != expected:
+        direction = "UNDERPAYMENT" if reported < expected else "OVERPAYMENT"
+        logger.error(
+            "%s order_id=%s expected=%s reported=%s",
+            direction, order_id, expected, reported,
         )
         return False
     return True
 
 
 def _lookup_expected_amount(prefix, ref_id_int):
-    """Fetch the DB-stored amount for the given order prefix + ref."""
+    """Fetch the DB-stored amount for the given order prefix + ref.
+
+    Returns the amount (Decimal) or None if no record exists.
+    Re-raises on unexpected errors so the webhook retries.
+    """
+    from django.core.exceptions import ObjectDoesNotExist
     try:
         if prefix == "LSF":
             from apps.listings.models import ListingFee
@@ -116,8 +132,11 @@ def _lookup_expected_amount(prefix, ref_id_int):
         if prefix == "RSV":
             from apps.transactions.models import Reservation
             return Reservation.objects.get(pk=ref_id_int).deposit_amount
-    except Exception:
+    except ObjectDoesNotExist:
         return None
+    except Exception:
+        logger.exception("Amount lookup failed for %s-%s", prefix, ref_id_int)
+        raise
     return None
 
 

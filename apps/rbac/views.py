@@ -4,6 +4,15 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.response import Response
 
 
+class IsSuperUser(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_superuser
+        )
+
+
 class IsAdminUser(permissions.BasePermission):
     def has_permission(self, request, view):
         return bool(
@@ -78,6 +87,11 @@ class RoleViewSet(viewsets.GenericViewSet):
 
     def partial_update(self, request, pk=None):
         obj = get_object_or_404(Role, pk=pk)
+        if obj.is_system and not request.user.is_superuser:
+            return Response(
+                {"detail": "Role za mfumo haziwezi kubadilishwa."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = RoleSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         d = serializer.validated_data
@@ -107,7 +121,12 @@ class RoleViewSet(viewsets.GenericViewSet):
 
 class StaffViewSet(viewsets.GenericViewSet):
     serializer_class = StaffAssignmentSerializer
-    permission_classes = [IsAdminUser]
+
+    def get_permissions(self):
+        # Reads: any staff. Writes: superuser only (privilege escalation guard).
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsAdminUser()]
+        return [IsSuperUser()]
 
     def get_queryset(self):
         return StaffAssignment.objects.select_related("user", "role")

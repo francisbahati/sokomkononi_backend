@@ -79,7 +79,6 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     # MUST come before CsrfViewMiddleware so the flag is set
     # before Django checks it.
-    "config.middleware.DisableCsrfForApiMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -191,7 +190,7 @@ _CSP_DIRECTIVES = {
 
 _EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin")
 
-if env_bool("CSP_REPORT_ONLY", True):  # TEMP: unblock Swagger UI
+if env_bool("CSP_REPORT_ONLY", DEBUG):  # report-only in dev, enforce in prod
     # django-csp 4.0 native report-only mode.
     CONTENT_SECURITY_POLICY_REPORT_ONLY = {
         "DIRECTIVES": _CSP_DIRECTIVES,
@@ -207,10 +206,13 @@ else:
 
 
 # ---------------- CORS ----------------
-CORS_ALLOWED_ORIGINS = env_list(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:5173,https://sokomkononi.co.tz,https://www.sokomkononi.co.tz",
+_cors_default = (
+    "http://localhost:3000,http://localhost:5173,"
+    "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz"
+    if DEBUG else
+    "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz"
 )
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", _cors_default)
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
 CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
 CORS_ALLOW_HEADERS = [
@@ -251,7 +253,11 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-    "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.ScopedRateThrottle",),
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
     "DEFAULT_THROTTLE_RATES": {
         "register": "10/hour",
         "login": "20/min",
@@ -359,7 +365,16 @@ if not DEBUG and env_bool("RESTRICT_DOCS", True):
     ]
 
 # ---------------- EMAIL ----------------
-EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+_default_email_backend = (
+    "django.core.mail.backends.console.EmailBackend"
+    if DEBUG else
+    "django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", _default_email_backend)
+if not DEBUG and EMAIL_BACKEND.endswith("console.EmailBackend"):
+    raise ImproperlyConfigured(
+        "EMAIL_BACKEND=console is not allowed when DEBUG=False."
+    )
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = env_int("EMAIL_PORT", 587)
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
@@ -423,6 +438,7 @@ CELERY_BEAT_SCHEDULE = {
         "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
     "cleanup-otp": {"task": "accounts.cleanup_old_otps", "schedule": crontab(hour=2, minute=15)},
     "cleanup-outstanding-tokens": {"task": "accounts.cleanup_expired_tokens", "schedule": crontab(hour=2, minute=25)},
+    "announcements-flush-scheduled": {"task": "announcements.flush_scheduled", "schedule": crontab(minute="*/5")},
 }
 
 # ---------------- SECURITY (prod) ----------------
@@ -432,9 +448,9 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = 300
+    SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = False
+    SECURE_HSTS_PRELOAD = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
     SECURE_REFERRER_POLICY = "same-origin"

@@ -1684,7 +1684,7 @@ class ListingFeePaymentView(APIView):
             from apps.credits.services import consume_credit
 
             with db_tx.atomic():
-                if not consume_credit(request.user, "listing"):
+                if not consume_credit(user=request.user, service_key="listing"):
                     return Response(
                         {"detail": "Hakuna listing credits za kutosha."},
                         status=status.HTTP_402_PAYMENT_REQUIRED,

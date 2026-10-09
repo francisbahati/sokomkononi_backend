@@ -51,16 +51,21 @@ def has_credit(user, service_key, required=1):
 
 
 @transaction.atomic
-def consume_credit(user, service_key, required=1):
+def consume_credit(*, user, service_key, required=1):
     """
-    Consume credit moja (au `required`) ya service_key kwa user.
+    Consume `required` credits of `service_key` for `user`.
 
-    Returns:
-        True  — kama ilifanikiwa
-        False — kama hana credit ya kutosha au imeisha muda
+    Contract:
+        Returns True  on success.
+        Returns False if insufficient / expired / no row.
+    NEVER raises for "insufficient" — callers check the boolean.
     """
     if not user or not user.is_authenticated:
         return False
+    try:
+        required = int(required)
+    except (TypeError, ValueError):
+        required = 1
     if required < 1:
         return True
 
@@ -75,13 +80,14 @@ def consume_credit(user, service_key, required=1):
 
     if credit.expires_at and credit.expires_at < timezone.now():
         return False
-
     if credit.remaining < required:
         return False
 
     credit.remaining -= required
     credit.save(update_fields=["remaining", "updated_at"])
     return True
+
+
 
 @transaction.atomic
 def grant_bundle_credits(

@@ -1,35 +1,18 @@
 """
-SokoMkononi middleware.
+DEPRECATED — the CSRF-bypass middleware was removed in the security
+hardening pass. Cookie-based auth now correctly enforces CSRF; bearer
+token auth is unaffected (CSRF only applies to cookie sessions).
 
-DisableCsrfForApiMiddleware
-----------------------------
-Ensures Django's CsrfViewMiddleware never enforces CSRF on API paths.
-
-Why this exists:
-    The SokoMkononi API is authenticated exclusively with JWT Bearer
-    tokens. CSRF is a cookie-based attack vector and is irrelevant to
-    a token-authenticated API. This middleware guarantees no cookie —
-    stale sessionid, csrftoken, injected by an extension, or set by a
-    previous backend config — can trigger a 403 on /api/*.
-
-Scope:
-    Applies only to paths beginning with `/api/`.
-    Django admin (`/django-admin/`), the browsable API, and any
-    non-API Django view keep their normal CSRF enforcement.
+This module is kept as a shim so `import config.middleware` does not
+break for older code that still references it.
 """
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class DisableCsrfForApiMiddleware:
+    """No-op. Remove from MIDDLEWARE in settings.py."""
+
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        path = request.path or ""
-        if path.startswith("/api/"):
-            # Django's CsrfViewMiddleware.process_view() bails out
-            # immediately when this flag is set on the request.
-            request._dont_enforce_csrf_checks = True
         return self.get_response(request)

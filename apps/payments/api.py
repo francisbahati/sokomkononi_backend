@@ -33,6 +33,42 @@ from .serializers import (
 )
 
 
+
+
+def _user_owns_order(user, prefix, ref_id):
+    """Return True if `user` owns the record referenced by order_id."""
+    if user.is_staff:
+        return True
+    try:
+        if prefix == "LSF":
+            from apps.listings.models import ListingFee
+            return ListingFee.objects.filter(
+                listing_id=ref_id, seller=user,
+            ).exists()
+        if prefix == "BST":
+            from apps.boosting.models import ListingBoost
+            return ListingBoost.objects.filter(pk=ref_id, seller=user).exists()
+        if prefix == "LDS":
+            from apps.leading_fees.models import ListingLeading
+            return ListingLeading.objects.filter(pk=ref_id, seller=user).exists()
+        if prefix == "BND":
+            from apps.bundles.models import BundlePurchase
+            return BundlePurchase.objects.filter(pk=ref_id, user=user).exists()
+        if prefix == "ADV":
+            from apps.banners.models import BannerAd
+            return BannerAd.objects.filter(pk=ref_id, seller=user).exists()
+        if prefix == "SFE":
+            from apps.finance.models import SuccessFeePayment
+            return SuccessFeePayment.objects.filter(pk=ref_id, user=user).exists()
+        if prefix == "RSV":
+            from apps.transactions.models import Reservation
+            return Reservation.objects.filter(
+                pk=ref_id, transaction__buyer=user,
+            ).exists()
+    except Exception:
+        return False
+    return False
+
 # ============================================================
 # Collections
 # ============================================================
@@ -49,9 +85,19 @@ def create_order_view(request):
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def order_status_view(request):
+    from .order_ids import parse_order_id
     serializer = OrderStatusSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    data = get_order_status(serializer.validated_data["order_id"])
+    order_id = serializer.validated_data["order_id"]
+
+    prefix, ref_id = parse_order_id(order_id)
+    if not prefix or ref_id is None:
+        return Response({"detail": "order_id si sahihi."}, status=400)
+
+    if not _user_owns_order(request.user, prefix, ref_id):
+        return Response({"detail": "Haipatikani."}, status=404)
+
+    data = get_order_status(order_id)
     return Response(data)
 
 
@@ -71,32 +117,25 @@ def transactions_view(request):
 # ============================================================
 
 def _apply_status(payout, data):
-    """Map FimiPay status to our enum and update the row in place."""
+    """Map FimiPay status to our enum and persist only changed fields."""
+    from django.utils import timezone
     raw = (data.get("status") or "").lower()
     mapping = {
-        "pending": Payout.Status.PENDING,
+        "pending":    Payout.Status.PENDING,
         "processing": Payout.Status.PROCESSING,
-        "completed": Payout.Status.COMPLETED,
-        "success": Payout.Status.COMPLETED,
-        "failed": Payout.Status.FAILED,
-        "rejected": Payout.Status.REJECTED,
+        "completed":  Payout.Status.COMPLETED,
+        "success":    Payout.Status.COMPLETED,
+        "failed":     Payout.Status.FAILED,
+        "rejected":   Payout.Status.REJECTED,
     }
-    new_status = mapping.get(raw, payout.status)
-    changed = False
-    if payout.status != new_status:
-        payout.status = new_status
-        changed = True
-    if payout.fimi_status != raw:
-        payout.fimi_status = raw
-        changed = True
-    if data != payout.raw_response:
-        payout.raw_response = data
-        changed = True
-    from django.utils import timezone
+    payout.status = mapping.get(raw, payout.status)
+    payout.fimi_status = raw
+    payout.raw_response = data
     payout.last_synced_at = timezone.now()
-    changed = True
-    if changed:
-        payout.save()
+    payout.save(update_fields=[
+        "status", "fimi_status", "raw_response", "last_synced_at",
+    ])
+
 
 
 class PayoutListCreateView(generics.ListAPIView):
@@ -116,6 +155,14 @@ class PayoutCreateView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request):
+        from django.core.cache import cache
+        idem = request.META.get("HTTP_IDEMPOTENCY_KEY")
+        cache_key = f"payout_create:{request.user.id}:{idem}" if idem else None
+        if cache_key:
+            cached = cache.get(cache_key)
+            if cached:
+                return Response(cached, status=status.HTTP_200_OK)
+
         serializer = PayoutCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -133,10 +180,10 @@ class PayoutCreateView(APIView):
             raw_response=data,
         )
         _apply_status(payout, data)
-        return Response(
-            PayoutSerializer(payout).data,
-            status=status.HTTP_201_CREATED,
-        )
+        payload = PayoutSerializer(payout).data
+        if cache_key:
+            cache.set(cache_key, payload, timeout=600)
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 class PayoutDetailView(APIView):

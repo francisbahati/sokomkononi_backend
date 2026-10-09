@@ -1,9 +1,7 @@
+"""Public promotions routes — delegate to the canonical CampaignViewSet."""
 from django.urls import path
 
-from .views_promotions import (
-    CampaignViewSet,
-    PromotionsAnalyticsView,
-)
+from .views import CampaignViewSet, PromotionsAnalyticsView
 
 
 urlpatterns = [
@@ -25,5 +23,10 @@ urlpatterns = [
             "delete": "destroy",
         }),
         name="promotions-campaign-detail",
+    ),
+    path(
+        "campaigns/<int:pk>/toggle/",
+        CampaignViewSet.as_view({"post": "toggle"}),
+        name="promotions-campaign-toggle",
     ),
 ]

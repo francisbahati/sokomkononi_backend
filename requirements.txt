@@ -1,57 +1,76 @@
-amqp==5.3.1
-asgiref==3.12.1
-attrs==26.1.0
-billiard==4.3.0
+# SokoMkononi — working dependency set (Python 3.11–3.13)
+# Pinned to versions that actually exist on PyPI and are mutually compatible.
+
+# --- Django core ---
+Django==5.1.15
+asgiref==3.8.1
+sqlparse==0.5.2
+
+# --- DRF ecosystem ---
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.6.0
+django-csp==3.8
+django-filter==24.3
+django-storages==1.14.4
+drf-spectacular==0.27.2
+drf-spectacular-sidecar==2024.7.1
+inflection==0.5.1
+uritemplate==4.1.1
+PyYAML==6.0.2
+
+# --- Celery / broker ---
+celery==5.4.0
+kombu==5.4.2
+amqp==5.2.0
+billiard==4.2.1
+vine==5.1.0
+redis==5.2.1
+click==8.1.7
+click-didyoumean==0.3.1
+click-plugins==1.1.1
+click-repl==0.3.0
+prompt_toolkit==3.0.48
+wcwidth==0.2.13
+tzdata==2024.2
+
+# --- Database / cache ---
+psycopg2-binary==2.9.10
+
+# --- Files / media ---
+pillow==11.1.0
 boto3==1.35.36
 botocore==1.35.36
-celery==5.5.3
-certifi==2026.7.22
-charset-normalizer==3.5.1
-click==8.5.0
-click-didyoumean==0.3.1
-click-plugins==1.1.1.2
-click-repl==0.4.0
-Django==6.1.1
-django-cors-headers==4.7.0
-django-csp==4.0
-django-filter==26.1
-django-storages==1.14.4
-djangorestframework==3.18.1
-djangorestframework_simplejwt==5.5.1
-drf-spectacular==0.30.0
-gunicorn==23.0.0
-idna==3.19
-inflection==0.5.1
-jmespath==1.0.1
-jsonschema==4.26.0
-jsonschema-specifications==2025.9.1
-kombu==5.5.4
-packaging==26.3
-pillow==12.3.0
-prompt_toolkit==3.0.53
-psycopg2-binary==2.9.12
-PyJWT==2.13.0
-pynextsms==1.0.0
-python-dateutil==2.9.0.post0
-python-dotenv==1.2.3
-PyYAML==6.0.3
-redis==5.2.1
-referencing==0.37.0
-requests==2.34.2
-rpds-py==2026.6.3
 s3transfer==0.10.3
-six==1.17.0
-sqlparse==0.6.0
-typing_extensions==4.16.0
-tzdata==2026.4
-uritemplate==4.2.0
-urllib3==2.7.0
-vine==5.1.0
-wcwidth==0.8.3
-whitenoise==6.8.2
-drf-spectacular-sidecar==2024.7.1
-reportlab==4.0.9
-python-docx==1.1.0
+jmespath==1.0.1
 
-# Optional error tracking (activated only when SENTRY_DSN is set)
+# --- HTTP / crypto / utils ---
+requests==2.32.3
+urllib3==2.2.3
+certifi==2024.8.30
+charset-normalizer==3.4.0
+idna==3.10
+PyJWT==2.9.0
+python-dateutil==2.9.0.post0
+six==1.16.0
+python-dotenv==1.0.1
+typing_extensions==4.12.2
+packaging==24.2
+attrs==24.2.0
+
+# --- JSON schema (drf-spectacular uses these) ---
+jsonschema==4.23.0
+jsonschema-specifications==2024.10.1
+referencing==0.35.1
+rpds-py==0.21.0
+
+# --- Reports ---
+reportlab==4.2.5
+python-docx==1.1.2
+
+# --- Production server ---
+gunicorn==23.0.0
+whitenoise==6.8.2
+
+# --- Optional error tracking (activated when SENTRY_DSN is set) ---
 sentry-sdk==2.19.2

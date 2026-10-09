@@ -165,7 +165,7 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             from django.db import transaction
 
             with transaction.atomic():
-                if not consume_credit(request.user, "leading"):
+                if not consume_credit(user=request.user, service_key="leading"):
                     return Response(
                         {"detail": "Hakuna leading credits za kutosha."},
                         status=status.HTTP_402_PAYMENT_REQUIRED,

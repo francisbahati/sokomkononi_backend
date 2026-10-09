@@ -1,18 +1,11 @@
-"""
-Celery tasks for the boosting app.
-
-Deactivates boosts that have passed their expiry and clears the
-listing-level boost flag when no active boost remains.
-"""
-
+"""Celery tasks for the boosting app."""
 import logging
 
 from celery import shared_task
+from django.db import transaction
 from django.utils import timezone
 
 from .models import ListingBoost
-from .services.boost import expire_boost
-
 
 logger = logging.getLogger(__name__)
 
@@ -20,32 +13,32 @@ logger = logging.getLogger(__name__)
 @shared_task(name="boosting.expire_stale_boosts")
 def expire_stale_boosts():
     """
-    Move every ACTIVE boost past its expiry to EXPIRED.
+    Move every ACTIVE boost past its expiry to EXPIRED and clear the
+    listing-level boost flag when no active boost remains.
+
+    Batched: one UPDATE for boost statuses, one UPDATE for the affected
+    listings — no per-row transactions.
     """
     now = timezone.now()
+    expired_qs = ListingBoost.objects.filter(
+        status=ListingBoost.BoostStatus.ACTIVE,
+        expires_at__lt=now,
+    )
 
-    boost_ids = list(
-        ListingBoost.objects
-        .filter(
-            status=ListingBoost.BoostStatus.ACTIVE,
-            expires_at__lt=now,
+    listing_ids = list(expired_qs.values_list("listing_id", flat=True).distinct())
+    if not listing_ids:
+        return {"expired": 0}
+
+    with transaction.atomic():
+        expired_count = expired_qs.update(
+            status=ListingBoost.BoostStatus.EXPIRED,
+            updated_at=now,
         )
-        .values_list("pk", flat=True)
-    )
+        from apps.listings.models import Listing
+        Listing.objects.filter(
+            pk__in=listing_ids,
+            boosted_until__lte=now,
+        ).update(is_boosted=False, boosted_until=None, updated_at=now)
 
-    expired = 0
-    failed = 0
-
-    for boost_id in boost_ids:
-        try:
-            boost = ListingBoost.objects.get(pk=boost_id)
-            expire_boost(boost=boost)
-            expired += 1
-        except Exception:
-            failed += 1
-            logger.exception("Failed to expire boost %s", boost_id)
-
-    logger.info(
-        "expire_stale_boosts: expired=%s failed=%s", expired, failed
-    )
-    return {"expired": expired, "failed": failed}
+    logger.info("expire_stale_boosts: expired=%s", expired_count)
+    return {"expired": expired_count}

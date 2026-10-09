@@ -60,7 +60,11 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
         qs = Announcement.objects.all()
         if user.is_authenticated and user.is_staff:
             return qs
-        return qs.filter(sent=True)
+        now = __import__("django.utils.timezone", fromlist=["now"]).now()
+        from django.db.models import Q
+        return qs.filter(sent=True).filter(
+            Q(scheduled_for__isnull=True) | Q(scheduled_for__lte=now)
+        )
 
     def list(self, request):
         qs = self.get_queryset()
@@ -79,8 +83,18 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get"], url_path="sent",
             permission_classes=[permissions.AllowAny])
     def sent(self, request):
-        qs = Announcement.objects.filter(sent=True)
-        serializer = AnnouncementSerializer(qs, many=True)
+        from django.db.models import Q
+        from django.utils import timezone
+        now = timezone.now()
+        qs = Announcement.objects.filter(sent=True).filter(
+            Q(scheduled_for__isnull=True) | Q(scheduled_for__lte=now)
+        )
+        page = self.paginate_queryset(qs)
+        serializer = AnnouncementSerializer(
+            page if page is not None else qs, many=True,
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
     def create(self, request):

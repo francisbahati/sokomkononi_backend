@@ -152,7 +152,7 @@ class BannerAdViewSet(viewsets.ModelViewSet):
             from django.db import transaction
 
             with transaction.atomic():
-                if not consume_credit(request.user, "ads"):
+                if not consume_credit(user=request.user, service_key="ads"):
                     return Response(
                         {"detail": "Hakuna ads credits za kutosha."},
                         status=status.HTTP_402_PAYMENT_REQUIRED,

@@ -38,6 +38,19 @@ class AuditLog(models.Model):
         blank=True,
         verbose_name="Maelezo",
     )
+
+    ip_address = models.GenericIPAddressField(
+        null=True, blank=True, verbose_name="IP",
+    )
+    user_agent = models.CharField(
+        max_length=255, blank=True, verbose_name="User agent",
+    )
+    request_path = models.CharField(
+        max_length=500, blank=True, verbose_name="Njia",
+    )
+    request_method = models.CharField(
+        max_length=10, blank=True, verbose_name="Method",
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name="Imeundwa",

@@ -104,7 +104,7 @@ class BundlePurchaseViewSet(viewsets.GenericViewSet):
             from .services import mark_purchase_paid
 
             with transaction.atomic():
-                if not consume_credit(request.user, "bundle"):
+                if not consume_credit(user=request.user, service_key="bundle"):
                     return Response(
                         {"detail": "Hakuna bundle credits za kutosha."},
                         status=status.HTTP_402_PAYMENT_REQUIRED,

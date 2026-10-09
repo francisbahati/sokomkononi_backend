@@ -48,6 +48,17 @@ class WebhookViewSet(viewsets.GenericViewSet):
 
     def destroy(self, request, pk=None):
         obj = self.get_object()
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="webhook.deleted",
+                target="Webhook",
+                target_id=obj.id,
+                details=f"event={obj.event} url={obj.url}",
+            )
+        except Exception:
+            pass
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

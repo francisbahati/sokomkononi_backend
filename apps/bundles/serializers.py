@@ -107,7 +107,6 @@ class BundlePurchaseSerializer(serializers.ModelSerializer):
     credits = serializers.JSONField(source="credits_snapshot", read_only=True)
     services = serializers.JSONField(source="services_snapshot", read_only=True)
     payment_status = serializers.CharField(source="status", read_only=True)
-    updated_at = serializers.DateTimeField(read_only=True)
 
     class Meta:
         model = BundlePurchase
@@ -116,7 +115,7 @@ class BundlePurchaseSerializer(serializers.ModelSerializer):
             "amount", "credits", "credits_snapshot",
             "services", "services_snapshot",
             "status", "payment_reference", "payment_status",
-            "paid_at", "expires_at", "created_at", "updated_at",
+            "paid_at", "expires_at", "created_at",
         ]
         read_only_fields = fields
 

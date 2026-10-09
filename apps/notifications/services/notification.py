@@ -160,7 +160,11 @@ def create_notification(
 #   create_notification(...)                       # in-app, kila wakati
 #   send_notification_via_channels(recipient, ...) # email/SMS/push kwa prefs
 #
-def send_notification_via_channels(
+def send_notification_via_channels(   # noqa: F811  (documented stub)
+    # NOTE: email/SMS/push delivery is not yet implemented.
+    # This function currently returns False for every channel.
+    # Wire it to real providers before relying on it.
+
     *,
     recipient,
     notification_type,

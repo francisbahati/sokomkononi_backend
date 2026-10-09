@@ -330,7 +330,7 @@ def confirm_reservation_payment(*, reservation, payment_reference, user=None):
         from apps.credits.services import consume_credit
         # Runs inside this atomic block: if activation fails below, the
         # credit is rolled back instead of being lost.
-        if not consume_credit(transaction.buyer, "reservation"):
+        if not consume_credit(user=transaction.buyer, service_key="reservation"):
             raise ValidationError(
                 "Hakuna reservation credits za kutosha."
             )
@@ -422,11 +422,43 @@ def mark_reservation_paid_from_webhook(*, ref_id, payment_reference):
 
     if reservation.status != Reservation.Status.PENDING_PAYMENT:
         # Money was received but the reservation can no longer be
-        # activated (cancelled / expired). Needs a manual refund.
-        raise ValidationError(
-            f"Reservation {reservation.pk} imelipwa lakini haipo tena "
-            f"kwenye hatua ya kusubiri malipo ({reservation.status})."
+        # activated. Record the payment, flag for refund, alert admins.
+        reservation.payment_status = Reservation.PaymentStatus.PAID
+        reservation.payment_reference = (
+            str(payment_reference or "").strip()
+            or reservation.payment_reference
         )
+        reservation.paid_at = timezone.now()
+        reservation.save(update_fields=[
+            "payment_status", "payment_reference", "paid_at", "updated_at",
+        ])
+
+        import logging as _l
+        _l.getLogger(__name__).error(
+            "REFUND REQUIRED: reservation %s paid but status=%s",
+            reservation.pk, reservation.status,
+        )
+        try:
+            from apps.notifications.models import Notification
+            from apps.notifications.services.notification import (
+                create_notification_for_admins,
+            )
+            create_notification_for_admins(
+                notification_type=Notification.NotificationType.GENERAL,
+                title="Refund inahitajika — Reservation imelipwa baada ya kuisha",
+                message=(
+                    f"Reservation #{reservation.pk} ililipwa na mteja "
+                    f"lakini ilikuwa imeisha / imefungwa. "
+                    f"Tafadhali fanya refund manually."
+                ),
+                priority=Notification.Priority.URGENT,
+                related_object_type="Reservation",
+                related_object_id=reservation.pk,
+                action_url="",
+            )
+        except Exception:
+            pass
+        return reservation
 
     reference = (
         str(payment_reference or "").strip() or reservation.payment_reference

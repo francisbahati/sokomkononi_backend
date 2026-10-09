@@ -89,6 +89,64 @@ class BannerAdViewSet(viewsets.ModelViewSet):
             )
 
         payment_reference = (request.data.get("payment_reference") or "").strip()
+
+        # ============================================================
+        # ✅ MPYA — "free" branch
+        # Admin akizima advertisement fee, seller anaweza kutuma
+        # payment_reference="free" ili ku-activate banner moja kwa moja.
+        # ============================================================
+        if payment_reference == "free":
+            # Angalia kama advertisement fee imezimwa.
+            # Kama bado inatumika, kataa — mtu asitumie "free" kudanganya.
+            try:
+                from apps.advertisement_fees.models import (
+                    AdvertisementFeeConfig,
+                )
+                cfg = AdvertisementFeeConfig.objects.first()
+                if cfg and cfg.is_enabled:
+                    return Response(
+                        {
+                            "detail": (
+                                "Advertisement fee bado inatumika. "
+                                "Hauwezi kutumia 'free'."
+                            ),
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            except Exception:
+                # Kama app haipo, tunaendelea — kwa sababu mfumo
+                # hauwezi kuangalia. Bora kuruhusu kuliko kukataa.
+                pass
+
+            import uuid
+
+            hours = banner.package.duration_hours if banner.package else 168
+            banner.payment_status = "PAID"
+            banner.payment_reference = (
+                f"free-{banner.pk}-{uuid.uuid4().hex[:12]}"
+            )
+            banner.paid_at = timezone.now()
+            banner.active = True
+            banner.expires_at = timezone.now() + timedelta(hours=hours)
+            banner.save(update_fields=[
+                "payment_status", "payment_reference",
+                "paid_at", "active", "expires_at",
+            ])
+
+            return Response(
+                {
+                    "payment_status": "SUCCESS",
+                    "via": "free",
+                    "banner": BannerAdSerializer(
+                        banner, context={"request": request}
+                    ).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # ============================================================
+        # "credits" branch — seller anatumia credits
+        # ============================================================
         if payment_reference == "credits":
             import uuid
             from django.db import transaction
@@ -122,6 +180,9 @@ class BannerAdViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
+        # ============================================================
+        # FimiPay — malipo halisi
+        # ============================================================
         from .services import initiate_banner_payment
         data = initiate_banner_payment(
             banner=banner, user=request.user,

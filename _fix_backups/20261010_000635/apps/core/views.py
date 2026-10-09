@@ -298,15 +298,12 @@ class TrashEmptyAllView(APIView):
                 )
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        deleted = skipped = 0
-        blocked_models = []
+        deleted = skipped = blocked = 0
         for model in apps.get_models():
             if not issubclass(model, SoftDeleteModel) or model._meta.abstract:
                 continue
             if _is_protected(model):
-                blocked_models.append(
-                    f"{model._meta.app_label}.{model.__name__}"
-                )
+                blocked += 1
                 continue
             for obj in model.all_objects.filter(is_deleted=True).iterator():
                 try:
@@ -322,5 +319,5 @@ class TrashEmptyAllView(APIView):
         return Response({
             "deleted": deleted,
             "skipped": skipped,
-            "protected_models": blocked_models,
+            "protected_models": blocked,
         })

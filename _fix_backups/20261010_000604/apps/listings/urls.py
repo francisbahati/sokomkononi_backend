@@ -45,10 +45,6 @@ listing_publish = ListingViewSet.as_view({"post": "publish"})
 listing_pause = ListingViewSet.as_view({"post": "pause"})
 listing_unpause = ListingViewSet.as_view({"post": "unpause"})
 listing_mark_sold = ListingViewSet.as_view({"post": "mark_sold"})
-listing_disapprove = ListingViewSet.as_view({"post": "disapprove"})
-listing_restore = ListingViewSet.as_view({"post": "restore"})
-listing_trash = ListingViewSet.as_view({"get": "trash"})
-
 
 property_detail_list = PropertyDetailsViewSet.as_view({"post": "create"})
 property_detail = PropertyDetailsViewSet.as_view({
@@ -150,10 +146,6 @@ urlpatterns = [
     path("<int:pk>/pause/", listing_pause, name="listing-pause"),
     path("<int:pk>/unpause/", listing_unpause, name="listing-unpause"),
     path("<int:pk>/mark-sold/", listing_mark_sold, name="listing-mark-sold"),
-    path("<int:pk>/disapprove/", listing_disapprove, name="listing-disapprove"),
-    path("<int:pk>/restore/", listing_restore, name="listing-restore"),
-    path("trash/", listing_trash, name="listing-trash"),
-
     path("<int:pk>/", listing_detail, name="listing-detail"),
 
     path(

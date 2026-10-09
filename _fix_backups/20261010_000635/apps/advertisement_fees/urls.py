@@ -1,6 +1,6 @@
 # apps/advertisement_fees/urls.py
 from django.urls import include, path
-from rest_framework.routers import SimpleRouter
+from rest_framework.routers import DefaultRouter
 
 from .views import (
     AdvertisementFeeConfigViewSet,
@@ -8,7 +8,7 @@ from .views import (
 )
 
 
-package_router = SimpleRouter()
+package_router = DefaultRouter()
 package_router.register(r"", AdvertisementPackageViewSet, basename="advertisement-package")
 
 

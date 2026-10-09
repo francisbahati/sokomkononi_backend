@@ -78,10 +78,6 @@ class Notification(SoftDeleteModel):
 
 
 
-        LISTING_RELEASED = "LISTING_RELEASED", "Listing Released"
-        MESSAGE_RECEIVED = "MESSAGE_RECEIVED", "Message Received"
-        VERIFICATION_REQUEST = "VERIFICATION_REQUEST", "Verification Request"
-
     class Priority(models.TextChoices):
         LOW = "LOW", "Low"
         NORMAL = "NORMAL", "Normal"

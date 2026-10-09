@@ -390,11 +390,6 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     deal_room_id = serializers.IntegerField(source="id", read_only=True)
     transaction_id = serializers.SerializerMethodField()
     payment_proof = serializers.SerializerMethodField()
-    reservation_fee = serializers.SerializerMethodField()
-    reservation_hours = serializers.SerializerMethodField()
-    reservation_method = serializers.SerializerMethodField()
-    reservation_expires_at = serializers.SerializerMethodField()
-    dispute_note = serializers.SerializerMethodField()
 
     class Meta:
         model = DealRoom
@@ -404,9 +399,6 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             "status", "agreed_price", "agreed_at",
             "offers", "offer_count", "latest_offer",
             "transaction_id", "payment_proof",
-            "reservation_fee", "reservation_hours",
-            "reservation_method", "reservation_expires_at",
-            "dispute_note",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
@@ -429,47 +421,10 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             url = None
         return {
             "url": url,
-            "data_url": url,
-            "method": "Bank/Card",
             "reference": txn.final_payment_reference or "",
-            "submitted_at": txn.final_payment_uploaded_at,
             "uploaded_at": txn.final_payment_uploaded_at,
             "confirmed": txn.seller_confirmed_payment,
-            "confirmed_at": txn.seller_confirmed_at,
         }
-
-    def _txn(self, obj):
-        return getattr(obj, "transaction", None)
-
-    def _reservation(self, obj):
-        txn = self._txn(obj)
-        return getattr(txn, "reservation", None) if txn else None
-
-    def get_reservation_fee(self, obj):
-        r = self._reservation(obj)
-        try:
-            return str(r.deposit_amount) if r else None
-        except Exception:
-            return None
-
-    def get_reservation_hours(self, obj):
-        r = self._reservation(obj)
-        return getattr(r, "duration_hours", None) if r else None
-
-    def get_reservation_method(self, obj):
-        r = self._reservation(obj)
-        return getattr(r, "payment_method", None) if r else None
-
-    def get_reservation_expires_at(self, obj):
-        r = self._reservation(obj)
-        return getattr(r, "expires_at", None) if r else None
-
-    def get_dispute_note(self, obj):
-        txn = self._txn(obj)
-        if not txn:
-            return ""
-        return txn.cancellation_reason or ""
-
 
     def get_offer_count(self, obj):
         return len(obj.offers.all())

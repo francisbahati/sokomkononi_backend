@@ -19,16 +19,15 @@ class AnnouncementSerializer(serializers.ModelSerializer):
 
 
 class AnnouncementCreateSerializer(serializers.Serializer):
-    type = serializers.ChoiceField(
+    typeId = serializers.ChoiceField(
         choices=Announcement.Type.choices,
         default=Announcement.Type.FEE_CHANGE,
     )
     title = serializers.CharField(max_length=255)
-    title_en = serializers.CharField(
+    titleEn = serializers.CharField(
         max_length=255, required=False, allow_blank=True,
     )
     message = serializers.CharField()
-    message_en = serializers.CharField(required=False, allow_blank=True)
-    scheduled_for = serializers.DateTimeField(required=False, allow_null=True)
+    messageEn = serializers.CharField(required=False, allow_blank=True)
+    scheduledFor = serializers.DateTimeField(required=False, allow_null=True)
     sent = serializers.BooleanField(required=False, default=True)
-

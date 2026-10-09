@@ -2093,17 +2093,6 @@ class AdminBulkApproveView(APIView):
                 succeeded.append(pk)
             except Exception as exc:
                 failed.append({"id": pk, "error": str(exc)})
-        try:
-            from apps.audit.services.audit import log_action
-            log_action(
-                request=request,
-                action="listing.bulk_approved",
-                target="Listing",
-                target_id=None,
-                details=f"Bulk approved {len(succeeded)}: ids={succeeded[:20]}",
-            )
-        except Exception:
-            pass
         return Response({"succeeded": succeeded, "failed": failed})
 
 
@@ -2124,17 +2113,6 @@ class AdminBulkRejectView(APIView):
                 succeeded.append(pk)
             except Exception as exc:
                 failed.append({"id": pk, "error": str(exc)})
-        try:
-            from apps.audit.services.audit import log_action
-            log_action(
-                request=request,
-                action="listing.bulk_rejected",
-                target="Listing",
-                target_id=None,
-                details=f"Bulk rejected {len(succeeded)}: ids={succeeded[:20]}",
-            )
-        except Exception:
-            pass
         return Response({"succeeded": succeeded, "failed": failed})
 
 
@@ -2155,17 +2133,6 @@ class AdminBulkDeleteView(APIView):
                 succeeded.append(pk)
             except Exception as exc:
                 failed.append({"id": pk, "error": str(exc)})
-        try:
-            from apps.audit.services.audit import log_action
-            log_action(
-                request=request,
-                action="listing.bulk_deleted",
-                target="Listing",
-                target_id=None,
-                details=f"Bulk deleted {len(succeeded)}: ids={succeeded[:20]}",
-            )
-        except Exception:
-            pass
         return Response({"succeeded": succeeded, "failed": failed})
 
 

@@ -47,8 +47,6 @@ class Notification(SoftDeleteModel):
             "TRANSACTION_COMPLETED",
             "Transaction Completed",
         )
-        DISPUTE_RESOLVED = "DISPUTE_RESOLVED", "Dispute Resolved"
-
 
         TRANSACTION_CANCELLED = (
             "TRANSACTION_CANCELLED",
@@ -69,18 +67,6 @@ class Notification(SoftDeleteModel):
             "BOOST_ACTIVATED",
             "Boost Activated",
         )
-        BOOST_PURCHASED = "BOOST_PURCHASED", "Boost Purchased"
-        LEADING_PURCHASED = "LEADING_PURCHASED", "Leading Purchased"
-        ADVERTISEMENT_PURCHASED = "ADVERTISEMENT_PURCHASED", "Advertisement Purchased"
-        BUNDLE_PURCHASED = "BUNDLE_PURCHASED", "Bundle Purchased"
-
-
-
-
-
-        LISTING_RELEASED = "LISTING_RELEASED", "Listing Released"
-        MESSAGE_RECEIVED = "MESSAGE_RECEIVED", "Message Received"
-        VERIFICATION_REQUEST = "VERIFICATION_REQUEST", "Verification Request"
 
     class Priority(models.TextChoices):
         LOW = "LOW", "Low"

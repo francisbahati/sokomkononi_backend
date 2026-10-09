@@ -42,7 +42,6 @@ class BannerSerializer(serializers.ModelSerializer):
     title = serializers.SerializerMethodField()
     subtitle = serializers.SerializerMethodField()
     ctaText = serializers.SerializerMethodField()
-    ordering = serializers.IntegerField(source="order", read_only=True)
 
     title_sw = serializers.CharField(required=False, allow_blank=True, write_only=True)
     title_en = serializers.CharField(required=False, allow_blank=True, write_only=True)
@@ -55,7 +54,7 @@ class BannerSerializer(serializers.ModelSerializer):
         model = Banner
         fields = [
             "id", "title", "subtitle", "ctaText",
-            "cta_link", "image_url", "active", "order", "ordering", "created_at",
+            "cta_link", "image_url", "active", "order", "created_at",
             "title_sw", "title_en", "subtitle_sw", "subtitle_en",
             "cta_text_sw", "cta_text_en",
         ]

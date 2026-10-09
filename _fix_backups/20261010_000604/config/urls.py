@@ -54,7 +54,6 @@ urlpatterns = [
 
     # Admin routes
     path("api/admin/users/", include("apps.accounts.urls_admin")),
-    path("api/admin/reports/", include("apps.finance.urls_admin_reports")),
     path("api/admin/content/", include("apps.content.urls_admin")),
     # Admin reports live at /api/finance/reports/
 

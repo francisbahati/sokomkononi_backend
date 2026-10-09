@@ -103,12 +103,12 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
         d = serializer.validated_data
 
         obj = Announcement.objects.create(
-            type=d["type"],
+            type=d["typeId"],
             title=d["title"],
-            title_en=d.get("title_en", ""),
+            title_en=d.get("titleEn", ""),
             message=d["message"],
-            message_en=d.get("message_en", ""),
-            scheduled_for=d.get("scheduled_for"),
+            message_en=d.get("messageEn", ""),
+            scheduled_for=d.get("scheduledFor"),
             sent=d.get("sent", True),
             created_by=request.user,
         )

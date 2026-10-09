@@ -1,6 +1,6 @@
 # apps/leading_fees/urls.py
 from django.urls import include, path
-from rest_framework.routers import SimpleRouter
+from rest_framework.routers import DefaultRouter
 
 from .views import (
     LeadingFeeConfigViewSet,
@@ -9,10 +9,10 @@ from .views import (
 )
 
 
-package_router = SimpleRouter()
+package_router = DefaultRouter()
 package_router.register(r"", LeadingPackageViewSet, basename="leading-package")
 
-purchase_router = SimpleRouter()
+purchase_router = DefaultRouter()
 purchase_router.register(r"", ListingLeadingViewSet, basename="listing-leading")
 
 

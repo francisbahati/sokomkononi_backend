@@ -1,5 +1,5 @@
 from django.urls import include, path
-from rest_framework.routers import SimpleRouter
+from rest_framework.routers import DefaultRouter
 
 from .views import (
     BoostFeeConfigView,
@@ -8,7 +8,7 @@ from .views import (
 )
 
 
-router = SimpleRouter()
+router = DefaultRouter()
 
 router.register(
     r"packages",

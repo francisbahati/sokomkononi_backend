@@ -48,32 +48,6 @@ class RoleSerializer(serializers.ModelSerializer):
                 data.setdefault("description_en", desc["en"])
         return super().to_internal_value(data)
 
-    VALID_PERMISSIONS = {
-        "overview", "users", "moderation", "verification", "deals",
-        "revenue", "bundles", "promotions", "reports", "support",
-        "content", "audit", "trash", "system", "staff",
-    }
-
-    def validate_permissions(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError("permissions lazima iwe list.")
-        bad = set(value) - self.VALID_PERMISSIONS
-        if bad:
-            raise serializers.ValidationError(
-                f"Permission keys si sahihi: {sorted(bad)}. "
-                f"Zinazoruhusiwa: {sorted(self.VALID_PERMISSIONS)}"
-            )
-        return value
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data["label"] = {"sw": instance.label_sw, "en": instance.label_en}
-        data["description"] = {
-            "sw": instance.description_sw,
-            "en": instance.description_en,
-        }
-        return data
-
     def create(self, validated_data):
         validated_data.pop("label", None)
         validated_data.pop("description", None)
@@ -87,46 +61,19 @@ class RoleSerializer(serializers.ModelSerializer):
 
 class StaffAssignmentSerializer(serializers.ModelSerializer):
     role_key = serializers.CharField(source="role.key", read_only=True)
-    role_label = serializers.SerializerMethodField()
     name = serializers.CharField(source="user.name", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
-
-    def get_role_label(self, obj):
-        return {"sw": obj.role.label_sw, "en": obj.role.label_en}
 
     class Meta:
         model = StaffAssignment
         fields = [
             "id", "user", "name", "email",
-            "role", "role_key", "role_label", "active", "added_at",
+            "role", "role_key", "active", "added_at",
         ]
-        read_only_fields = ["id", "name", "email", "role_key", "role_label", "added_at"]
+        read_only_fields = ["id", "name", "email", "role_key", "added_at"]
 
 
 class StaffCreateSerializer(serializers.Serializer):
-    user = serializers.IntegerField(required=False)
-    role = serializers.IntegerField(required=False)
-    user_id = serializers.IntegerField(required=False)
-    role_key = serializers.CharField(max_length=60, required=False)
+    user_id = serializers.IntegerField()
+    role_key = serializers.CharField(max_length=60)
     active = serializers.BooleanField(required=False, default=True)
-
-    def validate(self, attrs):
-        user_id = attrs.get("user") or attrs.get("user_id")
-        if not user_id:
-            raise serializers.ValidationError({"user": "user inahitajika."})
-        attrs["user_id"] = user_id
-
-        role_id = attrs.get("role")
-        role_key = attrs.get("role_key")
-        if not role_id and not role_key:
-            raise serializers.ValidationError({"role": "role inahitajika."})
-        if role_id:
-            from .models import Role
-            try:
-                r = Role.objects.get(pk=role_id)
-                attrs["role_key"] = r.key
-            except Role.DoesNotExist:
-                raise serializers.ValidationError({"role": "Role haipatikani."})
-        return attrs
-
-

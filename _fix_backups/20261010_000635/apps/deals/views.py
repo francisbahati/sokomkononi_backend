@@ -1,6 +1,5 @@
 # apps/deals/views.py
 from django.db import IntegrityError, transaction
-from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -76,9 +75,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     )
 
     http_method_names = ["get", "post", "head", "options"]
-
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ["seller", "buyer", "status", "listing"]
 
     def get_serializer_class(self):
         if self.action == "create":

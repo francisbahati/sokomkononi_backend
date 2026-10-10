@@ -85,6 +85,9 @@ class Notification(SoftDeleteModel):
         LISTING_FEE_PAID = "LISTING_FEE_PAID", "Listing Fee Paid"
         ACCOUNT_VERIFIED = "ACCOUNT_VERIFIED", "Account Verified"
 
+        PRICE_DROP = "PRICE_DROP", "Price Drop"
+        SEARCH_ALERT = "SEARCH_ALERT", "Search Alert"
+
     class Priority(models.TextChoices):
         LOW = "LOW", "Low"
         NORMAL = "NORMAL", "Normal"

@@ -21,6 +21,7 @@ from .views import (
     VehicleDetailsViewSet,
 )
 from .views_fee_rules import ListingFeeRuleViewSet
+from .release_reservation import ReleaseReservationView
 from .views_duplicate import check_duplicate_listing
 
 
@@ -152,6 +153,11 @@ urlpatterns = [
     path("<int:pk>/mark-sold/", listing_mark_sold, name="listing-mark-sold"),
     path("<int:pk>/disapprove/", listing_disapprove, name="listing-disapprove"),
     path("<int:pk>/restore/", listing_restore, name="listing-restore"),
+    path(
+        "<int:pk>/release-reservation/",
+        ReleaseReservationView.as_view(),
+        name="listing-release-reservation",
+    ),
     path("trash/", listing_trash, name="listing-trash"),
 
     path("<int:pk>/", listing_detail, name="listing-detail"),

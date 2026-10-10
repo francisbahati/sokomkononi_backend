@@ -145,6 +145,121 @@ class WaitingListViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     @action(
+        detail=True,
+        methods=["post"],
+        url_path="claim",
+    )
+    def claim(self, request, pk=None):
+        """
+        Buyer claims a NOTIFIED waitlist slot and starts a reservation.
+
+        Enforces:
+          - entry.status == NOTIFIED
+          - entry.buyer == request.user
+          - respond_by (if set) has not passed
+          - listing is still LIVE
+        """
+        from django.utils import timezone
+        from apps.transactions.models import Transaction
+        from apps.transactions.services.reservation import create_reservation
+
+        entry = self.get_queryset().filter(pk=pk).first()
+        if not entry:
+            return Response(
+                {"detail": "Haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if entry.buyer_id != request.user.id:
+            return Response(
+                {"detail": "Huna ruhusa."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if entry.status != WaitingListEntry.Status.NOTIFIED:
+            return Response(
+                {
+                    "detail": (
+                        "Nafasi yako bado haijafunguliwa. "
+                        "Subiri taarifa ya kukamilisha reservation."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        respond_by = getattr(entry, "respond_by", None)
+        if respond_by and respond_by <= timezone.now():
+            return Response(
+                {"detail": "Muda wa kuchukua nafasi umepita."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        listing = entry.listing
+        if listing.status != "LIVE":
+            return Response(
+                {"detail": "Tangazo halipo tena."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Reuse an existing transaction, or create one, then start a
+        # reservation on behalf of the buyer.
+        from apps.deals.models import DealRoom
+        deal_room = (
+            DealRoom.objects
+            .filter(listing=listing, buyer=request.user)
+            .order_by("-created_at")
+            .first()
+        )
+        if not deal_room:
+            return Response(
+                {
+                    "detail": (
+                        "Anzisha mazungumzo (Deal Room) na muuzaji "
+                        "kwanza ili kuweka reservation."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        txn, _ = Transaction.objects.get_or_create(
+            deal_room=deal_room,
+            defaults={
+                "listing": listing,
+                "buyer": request.user,
+                "seller": listing.seller,
+                "agreed_price": deal_room.agreed_price or listing.price,
+                "status": Transaction.Status.RESERVATION_PENDING,
+            },
+        )
+
+        try:
+            reservation = create_reservation(
+                transaction=txn,
+                user=request.user,
+                duration_hours=24,
+            )
+        except Exception as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Mark the waitlist entry as FULFILLED so it drops out of queue
+        entry.status = WaitingListEntry.Status.FULFILLED
+        entry.save(update_fields=["status", "updated_at"])
+
+        return Response(
+            {
+                "ok": True,
+                "waiting_list_id": entry.id,
+                "transaction_id": txn.id,
+                "reservation_id": reservation.id,
+                "reservation_status": reservation.status,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
         detail=False,
         methods=["get"],
         url_path=r"listing/(?P<listing_id>\d+)",

@@ -9,10 +9,13 @@ os.environ.setdefault(
 )
 os.environ.setdefault("FIMIPAY_SECRET_KEY", "sk_test_local")
 os.environ.setdefault("FIMIPAY_WEBHOOK_SECRET", "local-webhook-secret")
-os.environ.setdefault("EMAIL_HOST", "localhost")
-os.environ.setdefault("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 
 from .settings import *  # noqa
+
+# Local dev: run Celery tasks inline (no Redis broker needed)
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
+  # noqa
 
 # ----------------------------------------------------------------------
 # Local overrides
@@ -27,8 +30,6 @@ DATABASES = {
         "NAME": BASE_DIR / "db.sqlite3",
     }
 }
-
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # Keep CSRF/CORS permissive locally
 CORS_ALLOW_CREDENTIALS = True

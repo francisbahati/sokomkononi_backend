@@ -81,12 +81,28 @@ def send_otp_email(*, user, otp, purpose="register"):
 
 
 def send_welcome_email(*, user):
-    to_email = getattr(user, "email", None)
+    """
+    Send the welcome email.
+
+    `user` can be a User instance, a dict with {email, name}, or a
+    plain email string. This lets tests and scripts call it easily.
+    """
+    if isinstance(user, str):
+        to_email = user
+        name = "mteja"
+    elif isinstance(user, dict):
+        to_email = user.get("email") or user.get("EMAIL")
+        name = user.get("name") or user.get("NAME") or "mteja"
+    else:
+        to_email = getattr(user, "email", None)
+        name = getattr(user, "name", "") or "mteja"
+
     if not to_email:
         return EmailResult(False, "no email")
+
     return _send(
         to_email=to_email,
         subject="Karibu SokoMkononi!",
         template_base="welcome",
-        context={"name": getattr(user, "name", "") or "mteja"},
+        context={"name": name},
     )

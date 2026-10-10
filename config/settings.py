@@ -448,6 +448,9 @@ CELERY_RESULT_EXPIRES = 60 * 60 * 24
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# Dev only — when True, Celery runs tasks inline (no broker needed).
+CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", False)
+CELERY_TASK_EAGER_PROPAGATES = True
 
 CELERY_BEAT_SCHEDULE = {
     "purge-soft-deleted": {"task": "core.purge_soft_deleted", "schedule": crontab(hour=3, minute=0)},

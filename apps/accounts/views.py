@@ -732,12 +732,22 @@ class MeActivitiesView(APIView):
         # ── Saved items (buyer) ──────────────────────────────
         try:
             from apps.saved.models import SavedListing
-            recent_saved = (
-                SavedListing.objects
-                .filter(user=user)
-                .select_related("listing")
-                .order_by("-created_at")[:3]
-            )
+            # Pick the correct timestamp field at runtime so this never
+                # breaks if the model's field name changes.
+                _saved_fields = {
+                    f.name for f in SavedListing._meta.get_fields()
+                }
+                _saved_order = next(
+                    (n for n in ("saved_at", "created_at", "id")
+                     if n in _saved_fields),
+                    "id",
+                )
+                recent_saved = (
+                    SavedListing.objects
+                    .filter(user=user)
+                    .select_related("listing")
+                    .order_by(f"-{_saved_order}")[:3]
+                )
             for s in recent_saved:
                 activities.append({
                     "id": f"saved-{s.pk}",

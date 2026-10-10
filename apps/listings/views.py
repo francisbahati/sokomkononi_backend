@@ -71,6 +71,8 @@ from .services.listing_moderation import (
 
 from .views_helpers import require_int_listing_id
 
+from .ownership import get_owned_or_public_listing
+
 logger = logging.getLogger(__name__)
 
 # ============================================================================
@@ -1502,7 +1504,17 @@ class ListingFeeView(APIView):
         listing_id, err = require_int_listing_id(listing_id)
         if err:
             return err
-        listing = get_object_or_404(Listing, id=listing_id)
+        listing = get_owned_or_public_listing(request.user, listing_id)
+        if not listing:
+            return Response(
+                {
+                    "detail": (
+                        "Tangazo halipatikani. Kama ni lako, "
+                        "fungua Mali Zangu na ujaribu tena."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         if (
             not request.user.is_staff
@@ -1591,8 +1603,17 @@ class ListingFeePaymentView(APIView):
         listing_id, err = require_int_listing_id(listing_id)
         if err:
             return err
-
-        listing = get_object_or_404(Listing, id=listing_id)
+        listing = get_owned_or_public_listing(request.user, listing_id)
+        if not listing:
+            return Response(
+                {
+                    "detail": (
+                        "Tangazo halipatikani. Kama ni lako, "
+                        "fungua Mali Zangu na ujaribu tena."
+                    ),
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         if not request.user.is_staff and listing.seller_id != request.user.id:
             return Response(

@@ -1,354 +1,295 @@
-# ============================================================
-# apps/notifications/signals.py
-# Signals zinazounda notifications automatically.
-# ============================================================
+"""
+Auto-emit notifications on events.
 
+Every domain that wants to notify the bell calls the two helpers:
+
+    _notify(user, TYPE, title, message, **extra)
+    _notify_admin(TYPE, title, message, **extra)
+
+The helper swallows its own exceptions so a signal failure never
+breaks the caller's transaction.
+"""
 import logging
 
-from django.db import transaction
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from .models import Notification
-from .services.notification import (
-    create_notification,
-    create_notification_for_admins,
-)
 
 logger = logging.getLogger(__name__)
 
 
-# ============================================================
-# HELPERS
-# ============================================================
+# ── helper functions (used by every receiver) ────────────────
+
 def _safe_create(**kwargs):
-    """Unda notification kwa user ndani ya on_commit."""
-    def _do_create():
-        try:
-            create_notification(**kwargs)
-        except Exception as exc:
-            logger.exception("[notifications] failed to create: %s", exc)
-
-    transaction.on_commit(_do_create)
+    """Create one Notification, swallow any error."""
+    try:
+        return Notification.objects.create(**kwargs)
+    except Exception:
+        logger.exception("notifications._safe_create failed: %s", kwargs)
+        return None
 
 
-def _safe_create_for_admins(**kwargs):
-    """Unda notification kwa admins wote ndani ya on_commit."""
-    def _do_create():
-        try:
-            create_notification_for_admins(**kwargs)
-        except Exception as exc:
-            logger.exception(
-                "[notifications] failed to create for admins: %s", exc
+def _notify(recipient, ntype, title, message="", **extra):
+    """Notify one user."""
+    if recipient is None:
+        return None
+    priority = extra.pop("priority", Notification.Priority.NORMAL)
+    return _safe_create(
+        recipient=recipient,
+        audience=Notification.Audience.USER,
+        notification_type=ntype,
+        title=title,
+        message=message,
+        priority=priority,
+        **extra,
+    )
+
+
+def _notify_admin(ntype, title, message="", **extra):
+    """Notify every active staff user."""
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    priority = extra.pop("priority", Notification.Priority.NORMAL)
+    try:
+        admins = User.objects.filter(is_staff=True, is_active=True)
+        rows = [
+            Notification(
+                recipient=admin,
+                audience=Notification.Audience.ADMIN,
+                notification_type=ntype,
+                title=title,
+                message=message,
+                priority=priority,
+                **extra,
             )
-
-    transaction.on_commit(_do_create)
-
-
-# ============================================================
-# 1. USER — mtumiaji mpya amejisajili
-# ============================================================
-@receiver(post_save, sender="accounts.User")
-def notify_admin_new_user(sender, instance, created, **kwargs):
-    """Admin anajulishwa mtumiaji mpya amejisajili."""
-    if not created:
-        return
-    if instance.is_staff:
-        return  # ruka admins wenyewe
-
-    _safe_create_for_admins(
-        notification_type=Notification.NotificationType.GENERAL,
-        title="Mtumiaji mpya amejisajili",
-        message=(
-            f'{instance.name or "Mtumiaji"} ({instance.email}) '
-            f"amejisajili kwenye SokoMkononi."
-        ),
-        priority=Notification.Priority.NORMAL,
-        related_object_type="accounts.User",
-        related_object_id=instance.id,
-        action_url="",
-    )
+            for admin in admins
+        ]
+        if rows:
+            return Notification.objects.bulk_create(rows)
+    except Exception:
+        logger.exception("notifications._notify_admin failed")
+    return None
 
 
-# ============================================================
-# 2. USER — amefutwa
-# ============================================================
-@receiver(pre_save, sender="accounts.User")
-def notify_admin_user_deleted(sender, instance, **kwargs):
-    """Admin anajulishwa mtumiaji amefutwa."""
-    if not instance.pk:
-        return
-    # Cheap exit: only proceed if is_deleted is among the updated fields.
-    update_fields = kwargs.get("update_fields")
-    if update_fields is not None and "is_deleted" not in update_fields:
-        return
+# ── Listing events ──────────────────────────────────────────
 
-    try:
-        old = sender.all_objects.get(pk=instance.pk)
-    except sender.DoesNotExist:
-        return
-
-    # Angalia kama is_deleted ilibadilika kutoka False → True
-    if not old.is_deleted and instance.is_deleted:
-        # Kama ni admin mwenyewe, usitume
-        if instance.is_staff:
-            return
-
-        _safe_create_for_admins(
-            notification_type=Notification.NotificationType.ACCOUNT_DELETED,
-            title="Mtumiaji amefutwa",
-            message=(
-                f'{instance.name or "Mtumiaji"} ({instance.email}) '
-                f"amefuta akaunti yake.\n\n"
-                f"Sababu: {instance.deletion_reason or 'Hakuna sababu'}"
-            ),
-            priority=Notification.Priority.HIGH,
-            related_object_type="accounts.User",
-            related_object_id=instance.id,
-            action_url="",
-            exclude_user_id=instance.id,
-        )
-
-
-# ============================================================
-# 3. LISTING — mpya imewekwa
-# ============================================================
 @receiver(post_save, sender="listings.Listing")
-def notify_admin_new_listing(sender, instance, created, **kwargs):
-    """Admin anajulishwa listing mpya imewekwa."""
+def on_listing_saved(sender, instance, created, **kwargs):
     if not created:
         return
-
-    seller_name = (
-        instance.seller.name if instance.seller else "Muuzaji"
+    seller = getattr(instance, "seller", None)
+    title = getattr(instance, "title", "—")
+    seller_label = (
+        (getattr(seller, "name", "") or getattr(seller, "email", ""))
+        if seller else "—"
     )
-    category_name = (
-        instance.category.name if instance.category else "—"
-    )
 
-    _safe_create_for_admins(
-        notification_type=Notification.NotificationType.LISTING_CREATED,
-        title="Tangazo jipya limewekwa",
-        message=(
-            f'{seller_name} ameweka tangazo jipya: "{instance.title}"\n'
-            f"Kategoria: {category_name}\n"
-            f"Bei: TZS {instance.price:,}\n"
-            f"Mahali: {instance.location}"
-        ),
-        priority=Notification.Priority.NORMAL,
-        related_object_type="listings.Listing",
+    # Notify admin queue
+    _notify_admin(
+        "LISTING_CREATED",
+        f"Tangazo jipya: {title}",
+        f"Na {seller_label}",
+        related_object_type="listing",
         related_object_id=instance.id,
-        action_url="",
+        action_url=f"/dashboard/admin/moderation?listing={instance.id}",
+    )
+    # Notify the seller (their listing is in the queue)
+    if seller is not None:
+        _notify(
+            seller,
+            "LISTING_CREATED",
+            f"Tangazo lako linakaguliwa: {title}",
+            "Litakuwa hai mara baada ya kuidhinishwa.",
+            related_object_type="listing",
+            related_object_id=instance.id,
+            action_url="/dashboard/listings",
+        )
+
+
+# ── Deal room events ────────────────────────────────────────
+
+@receiver(post_save, sender="deals.DealRoom")
+def on_deal_created(sender, instance, created, **kwargs):
+    if not created:
+        return
+    listing = getattr(instance, "listing", None)
+    listing_title = getattr(listing, "title", "—") if listing else "—"
+
+    if instance.seller_id:
+        _notify(
+            instance.seller,
+            "TRANSACTION_CREATED",
+            f"Deal mpya: {listing_title}",
+            "Mnunuzi ameanza mazungumzo.",
+            related_object_type="deal",
+            related_object_id=instance.id,
+            action_url=f"/dashboard/deals?deal={instance.id}",
+        )
+    if instance.buyer_id:
+        _notify(
+            instance.buyer,
+            "TRANSACTION_CREATED",
+            f"Umefungua Deal Room: {listing_title}",
+            "Subiri majibu ya muuzaji.",
+            related_object_type="deal",
+            related_object_id=instance.id,
+            action_url=f"/dashboard/buyer/deals?deal={instance.id}",
+        )
+
+
+# ── Messaging events ────────────────────────────────────────
+
+@receiver(post_save, sender="messaging.Message")
+def on_message_sent(sender, instance, created, **kwargs):
+    if not created:
+        return
+    convo = getattr(instance, "conversation", None)
+    if convo is None:
+        return
+    sender_id = instance.sender_id
+    recipient = (
+        convo.seller if sender_id == convo.buyer_id else convo.buyer
+    )
+    if recipient is None:
+        return
+
+    sender_name = "—"
+    try:
+        sender_name = (
+            getattr(instance.sender, "name", "")
+            or getattr(instance.sender, "email", "")
+        )
+    except Exception:
+        pass
+
+    _notify(
+        recipient,
+        "MESSAGE_RECEIVED",
+        f"Ujumbe mpya kutoka {sender_name}",
+        (instance.text or "")[:120],
+        related_object_type="conversation",
+        related_object_id=convo.id,
+        action_url=f"/dashboard/messages?c={convo.id}",
     )
 
 
-# ============================================================
-# 4. LISTING — imefutwa (soft delete)
-# ============================================================
-@receiver(pre_save, sender="listings.Listing")
-def notify_admin_listing_deleted(sender, instance, **kwargs):
-    """Admin anajulishwa listing imefutwa."""
-    if not instance.pk:
-        return
-    update_fields = kwargs.get("update_fields")
-    if update_fields is not None and "is_deleted" not in update_fields:
-        return
+# ── Waiting list events ─────────────────────────────────────
 
-    try:
-        old = sender.all_objects.get(pk=instance.pk)
-    except sender.DoesNotExist:
-        return
-
-    # Angalia kama is_deleted ilibadilika False → True
-    if not old.is_deleted and instance.is_deleted:
-        seller_name = (
-            instance.seller.name if instance.seller else "Muuzaji"
-        )
-
-        _safe_create_for_admins(
-            notification_type=Notification.NotificationType.LISTING_DELETED,
-            title="Tangazo limefutwa",
-            message=(
-                f'{seller_name} amefuta tangazo "{instance.title}".\n\n'
-                f"Sababu: {instance.deletion_reason or 'Hakuna sababu'}"
-            ),
-            priority=Notification.Priority.NORMAL,
-            related_object_type="listings.Listing",
-            related_object_id=instance.id,
-            action_url="",
-        )
-
-
-# ============================================================
-# 5. LEAD MPYA (buyer amewasiliana)
-# ============================================================
-@receiver(post_save, sender="leads.Lead")
-def notify_new_lead(sender, instance, created, **kwargs):
-    """Seller anajulishwa lead mpya."""
+@receiver(post_save, sender="waiting_list.WaitingListEntry")
+def on_waitlist_change(sender, instance, created, **kwargs):
     if not created:
         return
+    listing = getattr(instance, "listing", None)
+    title = getattr(listing, "title", "—") if listing else "—"
+    recipient = (
+        getattr(instance, "buyer", None)
+        or getattr(instance, "user", None)
+    )
+    if recipient is not None:
+        _notify(
+            recipient,
+            "WAITING_LIST_JOINED",
+            f"Umejiunga na waiting list: {title}",
+            "Utapata taarifa nafasi ikifunguka.",
+            related_object_type="listing",
+            related_object_id=getattr(listing, "id", None),
+            action_url="/dashboard/buyer/waiting",
+        )
 
-    if not instance.listing_id:
+
+# ── Feedback events ────────────────────────────────────────
+
+@receiver(post_save, sender="feedback.Feedback")
+def on_feedback_created(sender, instance, created, **kwargs):
+    if not created:
         return
-
+    user = getattr(instance, "user", None)
+    user_label = "—"
     try:
-        listing = instance.listing
-        seller = listing.seller
-        buyer_name = (
-            getattr(instance, "buyer_name", "")
-            or getattr(instance, "name", "")
-            or "Mnunuzi"
+        user_label = (
+            getattr(user, "name", "") or getattr(user, "email", "")
         )
+    except Exception:
+        pass
+    _notify_admin(
+        "VERIFICATION_REQUEST",
+        f"Maoni mapya: {instance.subject}",
+        f"Kutoka {user_label} ({instance.author_side})",
+        related_object_type="feedback",
+        related_object_id=instance.id,
+        action_url="/dashboard/admin/support?view=feedback",
+    )
 
-        _safe_create(
-            recipient=seller,
-            notification_type=Notification.NotificationType.GENERAL,
-            title="Ujumbe mpya kutoka kwa mnunuzi",
-            message=(
-                f'{buyer_name} ana nia ya mali yako '
-                f'"{listing.title}". Jibu haraka.'
-            ),
-            priority=Notification.Priority.HIGH,
-            related_object_type="leads.Lead",
-            related_object_id=instance.id,
-            action_url="",
+
+# ── Ticket events ──────────────────────────────────────────
+
+@receiver(post_save, sender="tickets.Ticket")
+def on_ticket_created(sender, instance, created, **kwargs):
+    if not created:
+        return
+    user = getattr(instance, "user", None)
+    user_label = "—"
+    try:
+        user_label = (
+            getattr(user, "name", "") or getattr(user, "email", "")
         )
-    except Exception as exc:
-        logger.exception("[notifications] lead signal failed: %s", exc)
+    except Exception:
+        pass
+    _notify_admin(
+        "VERIFICATION_REQUEST",
+        f"Ticket mpya: {instance.subject}",
+        f"Kutoka {user_label} — kategoria: {instance.category}",
+        related_object_type="ticket",
+        related_object_id=instance.id,
+        action_url=f"/dashboard/admin/support?ticket={instance.id}",
+    )
 
 
-# ============================================================
-# 6. RESERVATION CREATED
-# ============================================================
+# ── Reservation events ─────────────────────────────────────
+
 @receiver(post_save, sender="transactions.Reservation")
-def notify_reservation_created(sender, instance, created, **kwargs):
-    """Seller anajulishwa mtu amehifadhi mali yake."""
+def on_reservation_created(sender, instance, created, **kwargs):
     if not created:
         return
-
     try:
-        transaction_obj = instance.transaction
-        listing = transaction_obj.listing
-        seller = listing.seller
-
-        _safe_create(
-            recipient=seller,
-            notification_type=Notification.NotificationType.RESERVATION_CREATED,
-            title="Mali yako imehifadhiwa",
-            message=(
-                f'Mtu amehifadhi "{listing.title}". '
-                f"Reservation itaisha baada ya muda uliowekwa."
-            ),
-            priority=Notification.Priority.HIGH,
-            related_object_type="transactions.Transaction",
-            related_object_id=transaction_obj.id,
-            action_url="",
-        )
-    except Exception as exc:
-        logger.exception("[notifications] reservation signal failed: %s", exc)
+        txn = instance.transaction
+        listing = txn.listing
+        seller = txn.seller
+    except Exception:
+        return
+    if seller is None:
+        return
+    _notify(
+        seller,
+        "RESERVATION_CREATED",
+        f"Reservation mpya: {listing.title}",
+        "Mnunuzi ameanza mchakato wa reservation.",
+        related_object_type="transaction",
+        related_object_id=txn.id,
+        action_url=f"/dashboard/deals?deal={txn.deal_room_id}",
+    )
 
 
-# ============================================================
-# 8. VERIFICATION REQUEST — mpya imewasilishwa (admin)
-# ============================================================
+# ── Verification events ────────────────────────────────────
+
 @receiver(post_save, sender="verifications.VerificationRequest")
-def notify_admin_new_verification(sender, instance, created, **kwargs):
-    """Admin anajulishwa verification request mpya."""
+def on_verification_created(sender, instance, created, **kwargs):
     if not created:
         return
-
-    # Ruka kama ni staff mwenyewe
-    if instance.user and instance.user.is_staff:
-        return
-
-    user_name = instance.user_name or (
-        instance.user.name if instance.user else "Mtumiaji"
-    )
-    user_email = instance.user_email or (
-        instance.user.email if instance.user else "—"
-    )
-
-    # Type labels kwa lugha rahisi
-    TYPE_LABELS = {
-        "SELLER": "Muuzaji",
-        "BUYER": "Mnunuzi",
-        "PROPERTY": "Mali (Nyumba/Jengo)",
-        "VEHICLE": "Gari",
-        "BUSINESS": "Biashara",
-    }
-    type_label = TYPE_LABELS.get(instance.type, instance.type)
-
-    _safe_create_for_admins(
-        notification_type=Notification.NotificationType.GENERAL,
-        title="Ombi jipya la uthibitisho",
-        message=(
-            f'{user_name} ({user_email}) amewasilisha ombi la '
-            f"uthibitisho wa {type_label}.\n\n"
-            f"Mada: {instance.subject or '—'}\n"
-            f"Angalia na uidhinishe."
-        ),
-        priority=Notification.Priority.HIGH,
-        related_object_type="verifications.VerificationRequest",
-        related_object_id=instance.id,
-        action_url="",
-        exclude_user_id=instance.user_id,
-    )
-
-
-# ============================================================
-# 9. VERIFICATION REQUEST — imeidhinishwa / imekataliwa (user)
-# ============================================================
-@receiver(pre_save, sender="verifications.VerificationRequest")
-def notify_verification_status_changed(sender, instance, **kwargs):
-    """Mtumiaji anajulishwa verification yake imeidhinishwa au imekataliwa."""
-    if not instance.pk:
-        return
-    update_fields = kwargs.get("update_fields")
-    if update_fields is not None and "status" not in update_fields:
-        return
-
+    user = getattr(instance, "user", None)
+    user_label = "—"
     try:
-        old = sender.all_objects.get(pk=instance.pk)
-    except sender.DoesNotExist:
-        return
-
-    # Angalia kama status ilibadilika kutoka PENDING
-    if old.status != "PENDING" or instance.status == "PENDING":
-        return
-
-    if not instance.user:
-        return
-
-    if instance.status == "APPROVED":
-        _safe_create(
-            recipient=instance.user,
-            notification_type=Notification.NotificationType.GENERAL,
-            title="Uthibitisho wako umeidhinishwa",
-            message=(
-                f'Ombi lako la uthibitisho wa {instance.get_type_display()} '
-                f"limeidhinishwa. Sasa unaweza kufurahia huduma zote za "
-                f"SokoMkononi."
-            ),
-            priority=Notification.Priority.HIGH,
-            related_object_type="verifications.VerificationRequest",
-            related_object_id=instance.id,
-            action_url="",
+        user_label = (
+            getattr(user, "name", "") or getattr(user, "email", "")
         )
-    elif instance.status == "REJECTED":
-        reason = instance.rejection_reason or "Hakuna sababu iliyotolewa."
-
-        _safe_create(
-            recipient=instance.user,
-            notification_type=Notification.NotificationType.GENERAL,
-            title="Uthibitisho wako umekataliwa",
-            message=(
-                f'Ombi lako la uthibitisho wa {instance.get_type_display()} '
-                f"limekataliwa.\n\n"
-                f"Sababu: {reason}\n\n"
-                f"Unaweza kuwasilisha tena baada ya kurekebisha."
-            ),
-            priority=Notification.Priority.HIGH,
-            related_object_type="verifications.VerificationRequest",
-            related_object_id=instance.id,
-            action_url="",
-        )
+    except Exception:
+        pass
+    _notify_admin(
+        "VERIFICATION_REQUEST",
+        f"Ombi la uthibitisho: {instance.type}",
+        f"Kutoka {user_label}",
+        related_object_type="verification",
+        related_object_id=instance.id,
+        action_url="/dashboard/admin/verification",
+    )

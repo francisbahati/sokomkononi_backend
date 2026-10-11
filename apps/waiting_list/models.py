@@ -27,6 +27,11 @@ class WaitingListEntry(models.Model):
     notified_at = models.DateTimeField(
         null=True, blank=True, verbose_name="Muda wa kutaarifiwa",
     )
+    respond_by = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name="Jibu kabla ya",
+        help_text="Deadline for the notified buyer to claim the slot.",
+    )
     joined_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Muda wa kujiunga",
     )

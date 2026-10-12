@@ -17,6 +17,7 @@ from .views_success_fee import (
     SuccessFeeStatusView,
     SuccessFeeDownloadView,
 )
+from .views_receipt import TransactionReceiptView
 
 
 router = DefaultRouter()
@@ -66,6 +67,15 @@ urlpatterns = [
         "success-fee/download/",
         SuccessFeeDownloadView.as_view(),
         name="success-fee-download",
+    ),
+
+    # ═══════════════════════════════════════════════════════════
+    # Receipt per transaction
+    # ═══════════════════════════════════════════════════════════
+    path(
+        "transactions/<int:pk>/receipt/",
+        TransactionReceiptView.as_view(),
+        name="transaction-receipt",
     ),
 
     # ═══════════════════════════════════════════════════════════

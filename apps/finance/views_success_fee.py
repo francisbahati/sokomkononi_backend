@@ -4,8 +4,17 @@ Success Fee views:
 - POST /api/finance/success-fee/           — FimiPay order (existing)
 - GET  /api/finance/success-fee/status/    — Check if download is free/paid
 - GET  /api/finance/success-fee/download/  — Download transactions (PDF/CSV/DOC)
+
+SASISHO:
+  - Inapokea `period` param: today | week | two_weeks | month | year | all
+  - _get_user_transactions() sasa inachukua pia:
+    • Transaction (buyer + seller) — sale, purchase
+    • SuccessFeePayment
+    • BundlePurchase
+  - ✅ Inarudisha COMPLETED/PAID pekee (pending/failed hazionekani)
 """
 import csv
+from datetime import timedelta
 from io import BytesIO
 
 from django.http import HttpResponse
@@ -17,9 +26,10 @@ from rest_framework.views import APIView
 
 from apps.listings.models import ListingFee
 from apps.boosting.models import ListingBoost
-from apps.transactions.models import Reservation
+from apps.transactions.models import Reservation, Transaction
+from apps.bundles.models import BundlePurchase
 
-from .models import SuccessFeeConfig
+from .models import SuccessFeeConfig, SuccessFeePayment
 from .services_success_fee import (
     DEFAULT_PURPOSE,
     compute_download_fee,
@@ -30,10 +40,39 @@ from .services_success_fee import (
 
 
 # ============================================================
+# PERIOD RANGE
+# ============================================================
+PERIOD_DAYS = {
+    "today": 0,
+    "week": 7,
+    "two_weeks": 14,
+    "month": 30,
+    "year": 365,
+    "all": None,
+}
+
+
+def get_period_start(period):
+    """Rudisha datetime ya mwanzo wa period, au None kwa 'all'."""
+    period = (period or "all").lower().strip()
+    if period not in PERIOD_DAYS:
+        period = "all"
+
+    days = PERIOD_DAYS[period]
+    if days is None:
+        return None
+
+    now = timezone.now()
+    if days == 0:
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return now - timedelta(days=days)
+
+
+# ============================================================
 # HELPERS
 # ============================================================
 def _get_success_fee_config():
-    """Pata SuccessFeeConfig (singleton)."""
     obj, _ = SuccessFeeConfig.objects.get_or_create(
         key="default",
         defaults={
@@ -51,72 +90,177 @@ def _get_success_fee_config():
 
 
 def _map_status(payment_status):
-    """Map payment status → display status."""
     mapping = {
         "PAID": "Completed",
         "PENDING": "Pending",
         "FAILED": "Failed",
         "REFUNDED": "Refunded",
+        "COMPLETED": "Completed",
+        "CANCELLED": "Cancelled",
     }
-    return mapping.get(payment_status, "Pending")
+    return mapping.get(str(payment_status).upper(), "Pending")
 
 
 def _is_sw():
-    """Check kama request ni Kiswahili (kutoka header au default sw)."""
-    return True  # Kwa sasa default Kiswahili; tunaweza kutumia header baadaye
+    return True
 
 
-def _get_user_transactions(user):
+def _get_user_transactions(user, period="all"):
     """
-    Chukua miamala yote ya user:
-    - ListingFee (seller)
-    - ListingBoost (seller)
-    - Reservation (buyer)
+    Chukua miamala ILIYOKAMILIKA (completed/paid) pekee:
+    - ListingFee (seller) — payment_status = PAID
+    - ListingBoost (seller) — payment_status = PAID
+    - Reservation (buyer) — payment_status = PAID
+    - Transaction (buyer + seller) — status = COMPLETED
+    - SuccessFeePayment — payment_status = PAID
+    - BundlePurchase — status = PAID
     """
     records = []
+    start = get_period_start(period)
 
-    # ── Listing Fees ──
-    for item in ListingFee.objects.filter(
-        seller=user,
-    ).select_related("listing").order_by("-created_at"):
+    # ── Listing Fees (PAID pekee) ──
+    qs = (
+        ListingFee.objects
+        .filter(seller=user, payment_status="PAID")
+        .select_related("listing")
+        .order_by("-created_at")
+    )
+    if start:
+        qs = qs.filter(created_at__gte=start)
+    for item in qs:
         records.append({
-            "date": item.created_at,
+            "date": item.paid_at or item.created_at,
             "ref": item.payment_reference or f"LF-{item.pk}",
             "type": "Ada ya Kuchapisha" if _is_sw() else "Listing Fee",
             "title": item.listing.title if item.listing else "—",
             "amount": float(item.amount or 0),
-            "status": _map_status(item.payment_status),
+            "status": "Completed",
             "paid_at": item.paid_at,
         })
 
-    # ── Boosts ──
-    for item in ListingBoost.objects.filter(
-        seller=user,
-    ).select_related("listing", "package").order_by("-created_at"):
+    # ── Boosts (PAID pekee) ──
+    qs = (
+        ListingBoost.objects
+        .filter(seller=user, payment_status="PAID")
+        .select_related("listing", "package")
+        .order_by("-created_at")
+    )
+    if start:
+        qs = qs.filter(created_at__gte=start)
+    for item in qs:
         records.append({
-            "date": item.created_at,
+            "date": item.paid_at or item.created_at,
             "ref": item.payment_reference or f"B-{item.pk}",
             "type": "Ada ya Kukuza" if _is_sw() else "Boost Fee",
             "title": item.listing.title if item.listing else "—",
             "amount": float(item.amount or 0),
-            "status": _map_status(item.payment_status),
+            "status": "Completed",
             "paid_at": item.paid_at,
         })
 
-    # ── Reservations (buyer) ──
-    for item in Reservation.objects.filter(
-        transaction__buyer=user,
-    ).select_related(
-        "transaction", "transaction__listing",
-    ).order_by("-created_at"):
+    # ── Reservations (buyer, PAID pekee) ──
+    qs = (
+        Reservation.objects
+        .filter(transaction__buyer=user, payment_status="PAID")
+        .select_related("transaction", "transaction__listing")
+        .order_by("-created_at")
+    )
+    if start:
+        qs = qs.filter(created_at__gte=start)
+    for item in qs:
         listing = item.transaction.listing if item.transaction else None
         records.append({
-            "date": item.created_at,
+            "date": item.paid_at or item.created_at,
             "ref": item.payment_reference or f"R-{item.pk}",
             "type": "Ada ya Uhifadhi" if _is_sw() else "Reservation Fee",
             "title": listing.title if listing else "—",
             "amount": float(item.deposit_amount or 0),
-            "status": _map_status(item.payment_status),
+            "status": "Completed",
+            "paid_at": item.paid_at,
+        })
+
+    # ── Transactions (buyer) — Purchase (COMPLETED pekee) ──
+    qs = (
+        Transaction.objects
+        .filter(buyer=user, status=Transaction.Status.COMPLETED)
+        .select_related("listing", "seller")
+        .order_by("-completed_at", "-created_at")
+    )
+    if start:
+        qs = qs.filter(completed_at__gte=start)
+    for item in qs:
+        records.append({
+            "date": item.completed_at or item.created_at,
+            "ref": f"TXN-{item.pk}",
+            "type": "Ununuzi" if _is_sw() else "Purchase",
+            "title": item.listing.title if item.listing else "—",
+            "amount": float(item.agreed_price or 0),
+            "status": "Completed",
+            "paid_at": item.completed_at,
+        })
+
+    # ── Transactions (seller) — Sale (COMPLETED pekee) ──
+    qs = (
+        Transaction.objects
+        .filter(seller=user, status=Transaction.Status.COMPLETED)
+        .select_related("listing", "buyer")
+        .order_by("-completed_at", "-created_at")
+    )
+    if start:
+        qs = qs.filter(completed_at__gte=start)
+    for item in qs:
+        records.append({
+            "date": item.completed_at or item.created_at,
+            "ref": f"TXN-{item.pk}",
+            "type": "Mauzo" if _is_sw() else "Sale",
+            "title": item.listing.title if item.listing else "—",
+            "amount": float(item.agreed_price or 0),
+            "status": "Completed",
+            "paid_at": item.completed_at,
+        })
+
+    # ── Success Fee Payments (PAID pekee) ──
+    qs = (
+        SuccessFeePayment.objects
+        .filter(
+            user=user,
+            payment_status=SuccessFeePayment.PaymentStatus.PAID,
+        )
+        .order_by("-created_at")
+    )
+    if start:
+        qs = qs.filter(created_at__gte=start)
+    for item in qs:
+        records.append({
+            "date": item.paid_at or item.created_at,
+            "ref": item.payment_reference or f"SFE-{item.pk}",
+            "type": "Ada ya Mafanikio" if _is_sw() else "Success Fee",
+            "title": item.purpose or "Download report",
+            "amount": float(item.amount or 0),
+            "status": "Completed",
+            "paid_at": item.paid_at,
+        })
+
+    # ── Bundle Purchases (PAID pekee) ──
+    qs = (
+        BundlePurchase.objects
+        .filter(user=user, status=BundlePurchase.Status.PAID)
+        .select_related("bundle")
+        .order_by("-created_at")
+    )
+    if start:
+        qs = qs.filter(created_at__gte=start)
+    for item in qs:
+        bundle_code = (
+            getattr(item.bundle, "code", "Bundle") if item.bundle else "Bundle"
+        )
+        records.append({
+            "date": item.paid_at or item.created_at,
+            "ref": item.payment_reference or f"BP-{item.pk}",
+            "type": "Vifurushi" if _is_sw() else "Bundle",
+            "title": bundle_code,
+            "amount": float(item.amount or 0),
+            "status": "Completed",
             "paid_at": item.paid_at,
         })
 
@@ -133,7 +277,6 @@ class SuccessFeeView(APIView):
     def post(self, request):
         config = _get_success_fee_config()
 
-        # Fee disabled by admin -> nothing to pay (same rule as boosts).
         if not config.is_enabled:
             return Response(
                 {"detail": "Ada ya mafanikio imezimwa. Hakuna malipo yanayohitajika."},
@@ -143,8 +286,6 @@ class SuccessFeeView(APIView):
         purpose = (request.data.get("purpose") or DEFAULT_PURPOSE)
         purpose = str(purpose).strip() or DEFAULT_PURPOSE
 
-        # The amount is decided by the server. Any "amount" sent by the
-        # client is ignored.
         payment = create_success_fee_payment(
             user=request.user,
             purpose=purpose,
@@ -160,13 +301,9 @@ class SuccessFeeView(APIView):
 
 
 # ============================================================
-# NEW — Status
+# Status
 # ============================================================
 class SuccessFeeStatusView(APIView):
-    """
-    GET /api/finance/success-fee/status/
-    Rudisha hali ya success fee (free/paid) na fee.
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -180,25 +317,19 @@ class SuccessFeeStatusView(APIView):
             "percentage": str(config.percentage),
             "max_fee": str(config.max_fee),
             "formats": ["pdf", "csv", "doc"],
+            "periods": list(PERIOD_DAYS.keys()),
         })
 
 
 # ============================================================
-# NEW — Download
+# Download — pamoja na period
 # ============================================================
 class SuccessFeeDownloadView(APIView):
     """
-    GET /api/finance/success-fee/download/?format=pdf|csv|doc
+    GET /api/finance/success-fee/download/?format=pdf&period=month
 
-    - Kama success_fee.is_enabled = false → download bure
-    - Kama true → 402 Payment Required (frontend inaomba malipo kwanza)
-
-    Baada ya malipo (kupitia POST /api/finance/success-fee/), user anaweza
-    kupakua kwa kuita endpoint hii tena. Malipo yanathibitishwa na
-    backend (webhook / FimiPay), si na client; yanatumika kwa saa 24.
-
-    NOTE: requires REST_FRAMEWORK["URL_FORMAT_OVERRIDE"] = None in settings,
-    otherwise DRF intercepts ?format= and returns 404.
+    period: today | week | two_weeks | month | year | all (default: all)
+    Inarudisha completed/paid pekee.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -210,9 +341,12 @@ class SuccessFeeDownloadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        period = (request.query_params.get("period") or "all").lower()
+        if period not in PERIOD_DAYS:
+            period = "all"
+
         config = _get_success_fee_config()
 
-        # ── Check payment ──
         if config.is_enabled and not has_valid_success_fee_payment(request.user):
             return Response(
                 {
@@ -223,28 +357,24 @@ class SuccessFeeDownloadView(APIView):
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
 
-        # ── Chukua miamala ──
-        records = _get_user_transactions(request.user)
+        records = _get_user_transactions(request.user, period=period)
         if not records:
-            # FIX: empty history is not an error (was 404).
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        # ── Generate file ──
         timestamp = timezone.now().strftime("%Y%m%d")
 
         if fmt == "csv":
-            return self._generate_csv(records, timestamp)
+            return self._generate_csv(records, timestamp, period)
         if fmt == "pdf":
-            return self._generate_pdf(records, timestamp)
-        return self._generate_doc(records, timestamp)
+            return self._generate_pdf(records, timestamp, period)
+        return self._generate_doc(records, timestamp, period)
 
     # ── CSV ──
-    def _generate_csv(self, records, timestamp):
+    def _generate_csv(self, records, timestamp, period):
         response = HttpResponse(content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = (
-            f'attachment; filename="miamala_{timestamp}.csv"'
+            f'attachment; filename="miamala_{period}_{timestamp}.csv"'
         )
-        # BOM kwa Excel (Kiswahili)
         response.write("\ufeff")
 
         writer = csv.writer(response)
@@ -265,7 +395,7 @@ class SuccessFeeDownloadView(APIView):
         return response
 
     # ── PDF ──
-    def _generate_pdf(self, records, timestamp):
+    def _generate_pdf(self, records, timestamp, period):
         try:
             from reportlab.lib import colors
             from reportlab.lib.pagesizes import A4
@@ -293,7 +423,6 @@ class SuccessFeeDownloadView(APIView):
         styles = getSampleStyleSheet()
         elements = []
 
-        # Title
         title = Paragraph(
             "<b>SokoMkononi — Miamala Yangu</b>",
             styles["Title"],
@@ -301,15 +430,22 @@ class SuccessFeeDownloadView(APIView):
         elements.append(title)
         elements.append(Spacer(1, 0.3 * cm))
 
-        # Subtitle
+        period_label = {
+            "today": "Leo",
+            "week": "Wiki Hii",
+            "two_weeks": "Wiki Mbili",
+            "month": "Mwezi Huu",
+            "year": "Mwaka Huu",
+            "all": "Zote",
+        }.get(period, "Zote")
+
         subtitle = Paragraph(
-            f"Ripoti ya miamala · {len(records)} rekodi",
+            f"Ripoti ya miamala iliyokamilika · Kipindi: {period_label} · {len(records)} rekodi",
             styles["Normal"],
         )
         elements.append(subtitle)
         elements.append(Spacer(1, 0.5 * cm))
 
-        # Table
         header = [
             "Tarehe", "Kumbukumbu", "Aina", "Kichwa",
             "Kiasi (TZS)", "Hali",
@@ -350,12 +486,12 @@ class SuccessFeeDownloadView(APIView):
             content_type="application/pdf",
         )
         response["Content-Disposition"] = (
-            f'attachment; filename="miamala_{timestamp}.pdf"'
+            f'attachment; filename="miamala_{period}_{timestamp}.pdf"'
         )
         return response
 
-    # ── DOC (real .docx so Word opens it without a warning) ──
-    def _generate_doc(self, records, timestamp):
+    # ── DOC ──
+    def _generate_doc(self, records, timestamp, period):
         try:
             from docx import Document
             from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -369,17 +505,25 @@ class SuccessFeeDownloadView(APIView):
 
         doc = Document()
 
-        # Title
         heading = doc.add_heading("SokoMkononi — Miamala Yangu", 0)
         heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # Subtitle
-        subtitle = doc.add_paragraph(f"Ripoti ya miamala · {len(records)} rekodi")
+        period_label = {
+            "today": "Leo",
+            "week": "Wiki Hii",
+            "two_weeks": "Wiki Mbili",
+            "month": "Mwezi Huu",
+            "year": "Mwaka Huu",
+            "all": "Zote",
+        }.get(period, "Zote")
+
+        subtitle = doc.add_paragraph(
+            f"Ripoti ya miamala iliyokamilika · Kipindi: {period_label} · {len(records)} rekodi"
+        )
         subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         doc.add_paragraph()
 
-        # Table
         table = doc.add_table(rows=1, cols=6)
         table.style = "Light Grid Accent 1"
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -418,6 +562,6 @@ class SuccessFeeDownloadView(APIView):
             ),
         )
         response["Content-Disposition"] = (
-            f'attachment; filename="miamala_{timestamp}.docx"'
+            f'attachment; filename="miamala_{period}_{timestamp}.docx"'
         )
         return response

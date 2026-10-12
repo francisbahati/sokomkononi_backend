@@ -11,6 +11,7 @@ SASISHO:
     • Transaction (buyer + seller) — sale, purchase
     • SuccessFeePayment
     • BundlePurchase
+    • ✅ BannerAd (advertising)
   - ✅ Inarudisha COMPLETED/PAID pekee (pending/failed hazionekani)
 """
 import csv
@@ -28,6 +29,7 @@ from apps.listings.models import ListingFee
 from apps.boosting.models import ListingBoost
 from apps.transactions.models import Reservation, Transaction
 from apps.bundles.models import BundlePurchase
+from apps.banners.models import BannerAd   # ⬅️ ONGEZA HII
 
 from .models import SuccessFeeConfig, SuccessFeePayment
 from .services_success_fee import (
@@ -53,7 +55,6 @@ PERIOD_DAYS = {
 
 
 def get_period_start(period):
-    """Rudisha datetime ya mwanzo wa period, au None kwa 'all'."""
     period = (period or "all").lower().strip()
     if period not in PERIOD_DAYS:
         period = "all"
@@ -89,18 +90,6 @@ def _get_success_fee_config():
     return obj
 
 
-def _map_status(payment_status):
-    mapping = {
-        "PAID": "Completed",
-        "PENDING": "Pending",
-        "FAILED": "Failed",
-        "REFUNDED": "Refunded",
-        "COMPLETED": "Completed",
-        "CANCELLED": "Cancelled",
-    }
-    return mapping.get(str(payment_status).upper(), "Pending")
-
-
 def _is_sw():
     return True
 
@@ -114,6 +103,7 @@ def _get_user_transactions(user, period="all"):
     - Transaction (buyer + seller) — status = COMPLETED
     - SuccessFeePayment — payment_status = PAID
     - BundlePurchase — status = PAID
+    - BannerAd (advertising) — payment_status = PAID
     """
     records = []
     start = get_period_start(period)
@@ -264,6 +254,32 @@ def _get_user_transactions(user, period="all"):
             "paid_at": item.paid_at,
         })
 
+    # ── Banner Ads / Advertising (PAID pekee) ──
+    qs = (
+        BannerAd.objects
+        .filter(seller=user, payment_status="PAID")
+        .select_related("listing")
+        .order_by("-created_at")
+    )
+    if start:
+        qs = qs.filter(created_at__gte=start)
+    for item in qs:
+        # BannerAd inaweza kuwa na `listing_title` field au `listing.title`
+        title = (
+            getattr(item, "listing_title", "")
+            or (item.listing.title if item.listing else "")
+            or "—"
+        )
+        records.append({
+            "date": item.paid_at or item.created_at,
+            "ref": item.payment_reference or f"AD-{item.pk}",
+            "type": "Matangazo" if _is_sw() else "Ads",
+            "title": title,
+            "amount": float(item.amount or 0),
+            "status": "Completed",
+            "paid_at": item.paid_at,
+        })
+
     records.sort(key=lambda r: r["date"], reverse=True)
     return records
 
@@ -325,12 +341,6 @@ class SuccessFeeStatusView(APIView):
 # Download — pamoja na period
 # ============================================================
 class SuccessFeeDownloadView(APIView):
-    """
-    GET /api/finance/success-fee/download/?format=pdf&period=month
-
-    period: today | week | two_weeks | month | year | all (default: all)
-    Inarudisha completed/paid pekee.
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):

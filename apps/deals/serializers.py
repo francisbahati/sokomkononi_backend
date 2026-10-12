@@ -7,7 +7,7 @@ from rest_framework import serializers
 from apps.accounts.models import User
 from apps.listings.models import Listing
 
-from .models import DealRoom, NegotiationOffer
+from .models import DealMessage, DealRoom, NegotiationOffer
 
 
 # ============================================================
@@ -263,6 +263,20 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
         return attrs
 
 
+class DealMessageSerializer(serializers.ModelSerializer):
+    """Ujumbe wa chat ndani ya Deal Room (hauhusiani na Messaging app)."""
+    sender_id = serializers.IntegerField(read_only=True)
+    sender_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DealMessage
+        fields = ["id", "sender_id", "sender_name", "text", "created_at"]
+        read_only_fields = fields
+
+    def get_sender_name(self, obj):
+        return getattr(obj.sender, "name", "")
+
+
 class DealMessageCreateSerializer(serializers.Serializer):
     text = serializers.CharField(
         required=True, allow_blank=False, trim_whitespace=True,
@@ -371,6 +385,7 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     buyer = DealUserSerializer(read_only=True)
     seller = DealUserSerializer(read_only=True)
     offers = NegotiationOfferSerializer(many=True, read_only=True)
+    messages = serializers.SerializerMethodField()
     offer_count = serializers.SerializerMethodField()
     latest_offer = serializers.SerializerMethodField()
     deal_room_id = serializers.IntegerField(source="id", read_only=True)
@@ -391,7 +406,7 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             "listing", "buyer", "seller",
             "category", "location",
             "status", "agreed_price", "agreed_at",
-            "offers", "offer_count", "latest_offer",
+            "offers", "messages", "offer_count", "latest_offer",
             "transaction_id", "payment_proof",
             "reservation_fee", "reservation_hours",
             "reservation_method", "reservation_expires_at",
@@ -470,6 +485,10 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
         if not txn:
             return ""
         return txn.cancellation_reason or ""
+
+    def get_messages(self, obj):
+        qs = obj.messages.select_related("sender").order_by("created_at")
+        return DealMessageSerializer(qs, many=True).data
 
     def get_offer_count(self, obj):
         try:

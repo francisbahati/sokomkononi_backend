@@ -11,8 +11,9 @@ SASISHO:
     • Transaction (buyer + seller) — sale, purchase
     • SuccessFeePayment
     • BundlePurchase
-    • ✅ BannerAd (advertising)
+    • BannerAd (advertising)
   - ✅ Inarudisha COMPLETED/PAID pekee (pending/failed hazionekani)
+  - ✅ Inaita sync_user_pending() kabla ya kuhesabu (FimiPay fallback)
 """
 import csv
 from datetime import timedelta
@@ -29,7 +30,8 @@ from apps.listings.models import ListingFee
 from apps.boosting.models import ListingBoost
 from apps.transactions.models import Reservation, Transaction
 from apps.bundles.models import BundlePurchase
-from apps.banners.models import BannerAd   # ⬅️ ONGEZA HII
+from apps.banners.models import BannerAd
+from apps.payments.services.status_sync import sync_user_pending
 
 from .models import SuccessFeeConfig, SuccessFeePayment
 from .services_success_fee import (
@@ -96,15 +98,23 @@ def _is_sw():
 
 def _get_user_transactions(user, period="all"):
     """
-    Chukua miamala ILIYOKAMILIKA (completed/paid) pekee:
-    - ListingFee (seller) — payment_status = PAID
-    - ListingBoost (seller) — payment_status = PAID
-    - Reservation (buyer) — payment_status = PAID
-    - Transaction (buyer + seller) — status = COMPLETED
-    - SuccessFeePayment — payment_status = PAID
-    - BundlePurchase — status = PAID
-    - BannerAd (advertising) — payment_status = PAID
+    Chukua miamala ILIYOKAMILIKA (completed/paid) pekee.
+    Inaita sync_user_pending() kwanza ili FimiPay fallback ifanye kazi.
     """
+    # ⬇️ SYNC kabla ya kuhesabu (manual: sync zote PENDING)
+    try:
+        sync_user_pending(
+            user,
+            since_hours=720,
+            dry_run=False,
+            no_time_filter=True,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "[success_fee] sync_user_pending failed"
+        )
+
     records = []
     start = get_period_start(period)
 
@@ -264,7 +274,6 @@ def _get_user_transactions(user, period="all"):
     if start:
         qs = qs.filter(created_at__gte=start)
     for item in qs:
-        # BannerAd inaweza kuwa na `listing_title` field au `listing.title`
         title = (
             getattr(item, "listing_title", "")
             or (item.listing.title if item.listing else "")

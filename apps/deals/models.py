@@ -218,3 +218,41 @@ class NegotiationOffer(models.Model):
             f"{self.amount} - "
             f"{self.offered_by.name}"
         )
+
+    # ============================================================
+# Ongeza mwishoni mwa apps/deals/models.py (baada ya NegotiationOffer)
+# Kisha: python manage.py makemigrations deals && python manage.py migrate
+# ============================================================
+class DealMessage(models.Model):
+    """
+    Chat ndani ya Deal Room. Imejitegemea — haihusiani na
+    Conversation/Message za apps.messaging (Direct Messages).
+    """
+
+    deal_room = models.ForeignKey(
+        DealRoom,
+        on_delete=models.CASCADE,
+        related_name="messages",
+        verbose_name="Deal Room",
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="deal_messages",
+        verbose_name="Mtumaji",
+    )
+    text = models.TextField(verbose_name="Ujumbe")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "deal_messages"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(
+                fields=["deal_room", "created_at"],
+                name="dealmsg_room_created_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"DealMsg #{self.pk} — room {self.deal_room_id}"

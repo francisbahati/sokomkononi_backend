@@ -18,6 +18,11 @@ from .views_success_fee import (
     SuccessFeeDownloadView,
 )
 from .views_receipt import TransactionReceiptView
+from .views_sync import (
+    SyncAllPendingView,
+    SyncUserPendingView,
+    SyncMeView,
+)
 
 
 router = DefaultRouter()
@@ -99,6 +104,25 @@ urlpatterns = [
         "revenue-overview/",
         RevenueOverviewView.as_view(),
         name="revenue-overview",
+    ),
+
+    # ═══════════════════════════════════════════════════════════
+    # Manual FimiPay sync
+    # ═══════════════════════════════════════════════════════════
+    path(
+        "sync/all/",
+        SyncAllPendingView.as_view(),
+        name="sync-all",
+    ),
+    path(
+        "sync/me/",
+        SyncMeView.as_view(),
+        name="sync-me",
+    ),
+    path(
+        "sync/user/<int:user_id>/",
+        SyncUserPendingView.as_view(),
+        name="sync-user",
     ),
 
     # ═══════════════════════════════════════════════════════════

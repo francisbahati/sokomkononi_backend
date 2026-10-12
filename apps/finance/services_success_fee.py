@@ -9,6 +9,10 @@ Flow:
 
 The amount is always computed here on the server; the client never
 chooses what it pays.
+
+SASISHO:
+  - mark_success_fee_paid() HAIBADILISHI `payment_reference`.
+    Inaiacha kama order_id (SFE-...) ili get_order_status() ifanye kazi.
 """
 import logging
 from datetime import timedelta
@@ -39,8 +43,7 @@ DOWNLOAD_VALID_HOURS = 24
 def compute_download_fee(config):
     """
     Fee shown by /success-fee/status/ is config.min_fee, so that is what
-    is charged. (config.percentage / max_fee are not applied to report
-    downloads.)
+    is charged.
     """
     fee = Decimal(str(config.min_fee))
     if fee <= Decimal("0"):
@@ -83,27 +86,30 @@ def initiate_success_fee_payment(*, payment, user, payment_method="mobile", phon
 
 @transaction.atomic
 def mark_success_fee_paid(*, payment_id, payment_reference):
+    """
+    Mark payment as PAID.
+
+    ✅ HAIBADILISHI `payment_reference` — inaiacha kama order_id (SFE-...)
+    ili `get_order_status()` ifanye kazi baadaye (sync/receipt).
+    """
     payment = SuccessFeePayment.objects.select_for_update().get(pk=payment_id)
 
     # Idempotent: webhook retries and the status-check fallback can race.
     if payment.payment_status == SuccessFeePayment.PaymentStatus.PAID:
         return payment
 
-    reference = (str(payment_reference or "").strip()) or payment.payment_reference
-    if (
-        reference
-        and reference != payment.payment_reference
-        and SuccessFeePayment.objects
-        .filter(payment_reference=reference).exclude(pk=payment.pk).exists()
-    ):
-        reference = payment.payment_reference  # keep ours; unique column
-
+    # ✅ payment_reference inabaki kama ilivyo (order_id yetu: SFE-...)
+    # transid inaachwa kama metadata tu (haijahifadhiwa kwenye DB)
     payment.payment_status = SuccessFeePayment.PaymentStatus.PAID
-    payment.payment_reference = reference
     payment.paid_at = timezone.now()
     payment.save(update_fields=[
-        "payment_status", "payment_reference", "paid_at", "updated_at",
+        "payment_status", "paid_at", "updated_at",
     ])
+
+    logger.info(
+        f"[success_fee] Payment #{payment.pk} marked PAID "
+        f"(ref={payment.payment_reference}, transid={payment_reference})"
+    )
     return payment
 
 
@@ -124,9 +130,7 @@ def has_valid_success_fee_payment(user):
     ).exists():
         return True
 
-    # The webhook may not have arrived yet (the frontend often sees
-    # SUCCESS first). Ask FimiPay directly - this is server-to-server,
-    # so it cannot be forged by the client.
+    # The webhook may not have arrived yet. Ask FimiPay directly.
     pending = (
         SuccessFeePayment.objects
         .filter(

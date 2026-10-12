@@ -29,21 +29,20 @@ from apps.listings.models import ListingFee
 from apps.boosting.models import ListingBoost
 from apps.transactions.models import Reservation, Transaction
 from apps.bundles.models import BundlePurchase
+from apps.payments.services.status_sync import sync_user_pending
 
 from .models import SuccessFeePayment
 
 
 # ============================================================
-# STATUS MAPPING (kwa kuonyesha kwenye PDF — hali inayosomeka)
+# STATUS MAPPING
 # ============================================================
 def _map_status(raw):
     mapping = {
-        # Payment statuses
         "PAID": "Imelipwa",
         "PENDING": "Inasubiri",
         "FAILED": "Imeshindikana",
         "REFUNDED": "Imerejeshwa",
-        # Transaction statuses
         "COMPLETED": "Imekamilika",
         "CANCELLED": "Imeghairiwa",
         "RESERVATION_PENDING": "Inasubiri Uhifadhi",
@@ -56,26 +55,16 @@ def _map_status(raw):
 
 
 # ============================================================
-# FIND TRANSACTION — tafuta muamala COMPLETED pekee
+# FIND TRANSACTION
 # ============================================================
 def _find_transaction(pk, user):
-    """
-    Tafuta muamala kwa pk, kuhakikisha:
-      - ni wa user
-      - umeCOMPLETED/PAID
-
-    Rudisha dict au None.
-    """
-    # ── 1. ListingFee (seller, PAID pekee) ──
+    """Tafuta muamala COMPLETED/PAID pekee."""
+    # ── 1. ListingFee ──
     try:
         obj = (
             ListingFee.objects
             .select_related("listing")
-            .get(
-                pk=pk,
-                seller=user,
-                payment_status="PAID",
-            )
+            .get(pk=pk, seller=user, payment_status="PAID")
         )
         return {
             "kind": "listing_fee",
@@ -93,16 +82,12 @@ def _find_transaction(pk, user):
     except ListingFee.DoesNotExist:
         pass
 
-    # ── 2. ListingBoost (seller, PAID pekee) ──
+    # ── 2. ListingBoost ──
     try:
         obj = (
             ListingBoost.objects
             .select_related("listing", "package")
-            .get(
-                pk=pk,
-                seller=user,
-                payment_status="PAID",
-            )
+            .get(pk=pk, seller=user, payment_status="PAID")
         )
         return {
             "kind": "boost",
@@ -120,16 +105,12 @@ def _find_transaction(pk, user):
     except ListingBoost.DoesNotExist:
         pass
 
-    # ── 3. Reservation (buyer, PAID pekee) ──
+    # ── 3. Reservation ──
     try:
         obj = (
             Reservation.objects
             .select_related("transaction", "transaction__listing")
-            .get(
-                pk=pk,
-                transaction__buyer=user,
-                payment_status="PAID",
-            )
+            .get(pk=pk, transaction__buyer=user, payment_status="PAID")
         )
         listing = obj.transaction.listing if obj.transaction else None
         return {
@@ -148,15 +129,12 @@ def _find_transaction(pk, user):
     except Reservation.DoesNotExist:
         pass
 
-    # ── 4. Transaction (buyer au seller, COMPLETED pekee) ──
+    # ── 4. Transaction ──
     try:
         obj = (
             Transaction.objects
             .select_related("listing", "buyer", "seller")
-            .get(
-                pk=pk,
-                status=Transaction.Status.COMPLETED,
-            )
+            .get(pk=pk, status=Transaction.Status.COMPLETED)
         )
         if user.id not in [obj.buyer_id, obj.seller_id]:
             raise Transaction.DoesNotExist
@@ -178,7 +156,7 @@ def _find_transaction(pk, user):
     except Transaction.DoesNotExist:
         pass
 
-    # ── 5. SuccessFeePayment (PAID pekee) ──
+    # ── 5. SuccessFeePayment ──
     try:
         obj = SuccessFeePayment.objects.get(
             pk=pk,
@@ -201,16 +179,12 @@ def _find_transaction(pk, user):
     except SuccessFeePayment.DoesNotExist:
         pass
 
-    # ── 6. BundlePurchase (PAID pekee) ──
+    # ── 6. BundlePurchase ──
     try:
         obj = (
             BundlePurchase.objects
             .select_related("bundle")
-            .get(
-                pk=pk,
-                user=user,
-                status=BundlePurchase.Status.PAID,
-            )
+            .get(pk=pk, user=user, status=BundlePurchase.Status.PAID)
         )
         return {
             "kind": "bundle",
@@ -235,14 +209,23 @@ def _find_transaction(pk, user):
 # RECEIPT VIEW
 # ============================================================
 class TransactionReceiptView(APIView):
-    """
-    GET /api/finance/transactions/<int:pk>/receipt/
-
-    Inarudisha PDF ya receipt kwa muamala mmoja COMPLETED/PAID.
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
+        # ⬇️ SYNC kabla ya receipt (manual: sync zote PENDING)
+        try:
+            sync_user_pending(
+                request.user,
+                since_hours=720,
+                dry_run=False,
+                no_time_filter=True,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "[receipt] sync_user_pending failed"
+            )
+
         txn = _find_transaction(pk, request.user)
         if not txn:
             return Response(
@@ -285,7 +268,6 @@ class TransactionReceiptView(APIView):
         styles = getSampleStyleSheet()
         elements = []
 
-        # ── Header ──
         title = Paragraph(
             "<b>SokoMkononi — Risiti</b>",
             styles["Title"],
@@ -300,7 +282,6 @@ class TransactionReceiptView(APIView):
         elements.append(subtitle)
         elements.append(Spacer(1, 0.8 * cm))
 
-        # ── Info table ──
         amount_str = f"TZS {float(txn['amount']):,.0f}"
         date_str = (
             txn["date"].strftime("%Y-%m-%d %H:%M") if txn["date"] else "—"
@@ -337,7 +318,6 @@ class TransactionReceiptView(APIView):
         elements.append(info_table)
         elements.append(Spacer(1, 1 * cm))
 
-        # ── Customer info ──
         customer_name = getattr(user, "name", "") or "—"
         customer_email = getattr(user, "email", "") or "—"
         customer_phone = getattr(user, "phone", "") or "—"
@@ -359,7 +339,6 @@ class TransactionReceiptView(APIView):
         elements.append(cust_table)
         elements.append(Spacer(1, 1 * cm))
 
-        # ── Footer ──
         footer = Paragraph(
             "Asante kwa kutumia SokoMkononi.<br/>"
             "Hii ni risiti ya kielektroniki — hakuna sahihi inayohitajika.",

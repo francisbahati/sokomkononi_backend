@@ -1,3 +1,4 @@
+from django.db.models import Q
 from rest_framework import serializers
 
 from apps.categories.models import Category
@@ -13,6 +14,48 @@ from .models import (
     VehicleDetails,
 )
 from .services.listing_fee import calculate_listing_fee
+
+
+# ============================================================================
+# RESERVATION COUNT — mara ambazo tangazo limewekewa reservation
+# ============================================================================
+
+def _reserved_times(obj):
+    """
+    Idadi ya mara tangazo hili limewekewa reservation (zilizolipwa au
+    kuwashwa; pending-bila-malipo hazihesabiwi).
+
+    Kwa orodha kubwa, annotate kwenye queryset ya view ili kuepuka
+    query moja kwa kila tangazo:
+        .annotate(reserved_times_annot=Count(
+            "transactions__reservation",
+            filter=Q(transactions__reservation__payment_status__in=["PAID", "REFUNDED"])
+                 | Q(transactions__reservation__status__in=["ACTIVE", "EXPIRED", "COMPLETED"]),
+            distinct=True,
+        ))
+    """
+    cached = getattr(obj, "reserved_times_annot", None)
+    if cached is not None:
+        return cached
+
+    from apps.transactions.models import Reservation
+
+    return (
+        Reservation.objects
+        .filter(transaction__listing_id=obj.pk)
+        .filter(
+            Q(payment_status__in=[
+                Reservation.PaymentStatus.PAID,
+                Reservation.PaymentStatus.REFUNDED,
+            ])
+            | Q(status__in=[
+                Reservation.Status.ACTIVE,
+                Reservation.Status.EXPIRED,
+                Reservation.Status.COMPLETED,
+            ])
+        )
+        .count()
+    )
 
 
 # ============================================================================
@@ -143,6 +186,7 @@ class ListingListSerializer(serializers.ModelSerializer):
     leading_expires_at = serializers.DateTimeField(
         source="leading_until", read_only=True,
     )
+    reservation_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
@@ -163,6 +207,7 @@ class ListingListSerializer(serializers.ModelSerializer):
             "is_featured",
             "is_boosted",
             "views_count",
+            "reservation_count",
             "seller_name",
             "seller_phone",
             "seller_email",
@@ -170,6 +215,9 @@ class ListingListSerializer(serializers.ModelSerializer):
             "primary_image",
             "created_at",
         ]
+
+    def get_reservation_count(self, obj):
+        return _reserved_times(obj)
 
     def get_seller_phone(self, obj):
         request = self.context.get("request")
@@ -434,6 +482,7 @@ class ListingDetailSerializer(serializers.ModelSerializer):
     leading_expires_at = serializers.DateTimeField(
         source="leading_until", read_only=True,
     )
+    reservation_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
@@ -461,6 +510,7 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "is_boosted",
             "boosted_until",
             "views_count",
+            "reservation_count",
             "approved_by",
             "approved_at",
             "rejected_by",
@@ -502,6 +552,9 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_reservation_count(self, obj):
+        return _reserved_times(obj)
 
     def get_seller_phone(self, obj):
         request = self.context.get("request")

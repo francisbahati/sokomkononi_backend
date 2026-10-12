@@ -466,10 +466,17 @@ CELERY_BEAT_SCHEDULE = {
         "task": "payments.refresh_pending_payouts",
         "schedule": crontab(minute="*/10"),
     },
-        "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
+    "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
     "cleanup-otp": {"task": "accounts.cleanup_old_otps", "schedule": crontab(hour=2, minute=15)},
     "cleanup-outstanding-tokens": {"task": "accounts.cleanup_expired_tokens", "schedule": crontab(hour=2, minute=25)},
     "announcements-flush-scheduled": {"task": "announcements.flush_scheduled", "schedule": crontab(minute="*/5")},
+
+    # ⬇️ MPYA — FimiPay status sync (orders: ListingFee, Boost, Bundle, Ads, SuccessFee, Leading)
+    "sync-pending-fimipay-statuses": {
+        "task": "payments.sync_pending_fimipay_statuses",
+        "schedule": crontab(minute="*/5"),
+        "kwargs": {"since_hours": 720},
+    },
 }
 
 # ---------------- SECURITY (prod) ----------------

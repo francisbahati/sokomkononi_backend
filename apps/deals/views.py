@@ -19,11 +19,12 @@ from drf_spectacular.utils import (
 
 from apps.listings.models import Listing
 
-from .models import DealRoom, NegotiationOffer
+from .models import DealMessage, DealRoom, NegotiationOffer
 from .permissions import IsDealParticipant, IsVerifiedDealUser
 from .serializers_admin import AdminDealRoomSerializer
 from .serializers import (
     DealMessageCreateSerializer,
+    DealMessageSerializer,
     DealRoomAcceptOfferSerializer,
     DealRoomCancelSerializer,
     DealRoomCreateSerializer,
@@ -221,56 +222,13 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     )
     def messages_list(self, request, pk=None):
         deal_room = self.get_object()
-
-        try:
-            from apps.messaging.models import Conversation, Message
-            conv = (
-                Conversation.objects
-                .filter(
-                    listing=deal_room.listing,
-                    buyer=deal_room.buyer,
-                    seller=deal_room.seller,
-                )
-                .first()
-            )
-            if conv:
-                msgs = (
-                    Message.objects
-                    .filter(conversation=conv)
-                    .select_related("sender")
-                    .order_by("created_at")
-                )
-                return Response([
-                    {
-                        "id": m.id,
-                        "sender_id": m.sender_id,
-                        "sender_name": getattr(m.sender, "name", ""),
-                        "text": m.text,
-                        "created_at": m.created_at,
-                    }
-                    for m in msgs
-                ])
-        except Exception:
-            pass
-
-        offers = (
-            NegotiationOffer.objects
+        qs = (
+            DealMessage.objects
             .filter(deal_room=deal_room)
-            .select_related("offered_by")
+            .select_related("sender")
             .order_by("created_at")
         )
-        return Response([
-            {
-                "id": f"offer-{o.id}",
-                "sender_id": o.offered_by_id,
-                "sender_name": getattr(o.offered_by, "name", ""),
-                "text": o.message or f"Offer: {o.amount}",
-                "amount": str(o.amount),
-                "status": o.status,
-                "created_at": o.created_at,
-            }
-            for o in offers
-        ])
+        return Response(DealMessageSerializer(qs, many=True).data)
 
     @extend_schema(
         request=DealMessageCreateSerializer,
@@ -288,48 +246,19 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             context={"request": request, "deal_room": deal_room},
         )
         serializer.is_valid(raise_exception=True)
-        text = serializer.validated_data["text"]
 
-        try:
-            from apps.messaging.models import Conversation, Message
-        except ImportError:
-            return Response(
-                {"detail": "Messaging app haipatikani."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        with transaction.atomic():
-            conv = (
-                Conversation.objects
-                .select_for_update(of=("self",))
-                .filter(
-                    listing=deal_room.listing,
-                    buyer=deal_room.buyer,
-                    seller=deal_room.seller,
-                )
-                .first()
-            )
-            if not conv:
-                conv = Conversation.objects.create(
-                    listing=deal_room.listing,
-                    buyer=deal_room.buyer,
-                    seller=deal_room.seller,
-                )
-
-            msg = Message.objects.create(
-                conversation=conv,
-                sender=request.user,
-                text=text,
-            )
+        # Deal Room ina chat yake — HAIGUSI Conversation/Message za Messaging.
+        msg = DealMessage.objects.create(
+            deal_room=deal_room,
+            sender=request.user,
+            text=serializer.validated_data["text"],
+        )
+        DealRoom.objects.filter(pk=deal_room.pk).update(
+            updated_at=timezone.now()
+        )
 
         return Response(
-            {
-                "id": msg.id,
-                "sender_id": msg.sender_id,
-                "sender_name": getattr(request.user, "name", ""),
-                "text": msg.text,
-                "created_at": msg.created_at,
-            },
+            DealMessageSerializer(msg).data,
             status=status.HTTP_201_CREATED,
         )
 

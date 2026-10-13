@@ -165,18 +165,27 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
 
         payment_reference = (request.data.get("payment_reference") or "").strip()
 
-        # Free path — only valid when the leading fee is disabled by admin.
-        if payment_reference == "free":
-            try:
-                from .models import LeadingFeeConfig
-                cfg = LeadingFeeConfig.get_solo()
-                if cfg.is_enabled:
-                    return Response(
-                        {"detail": "Ada ya leading bado inatumika. Tumia malipo."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-            except Exception:
-                pass
+        # ── Resolve the current fee state once, for both branches. ──
+        try:
+            from .models import LeadingFeeConfig
+            _leading_fee_enabled = LeadingFeeConfig.get_solo().is_enabled
+        except Exception:
+            _leading_fee_enabled = True  # fail closed: assume paid
+
+        # Free path: either an explicit "free" reference, OR an empty
+        # body while the fee is disabled. The frontend sends `{}` now;
+        # the "free" sentinel is kept for backwards compatibility.
+        _wants_free = (
+            payment_reference == "free"
+            or (not payment_reference and not _leading_fee_enabled)
+        )
+
+        if _wants_free:
+            if _leading_fee_enabled and payment_reference == "free":
+                return Response(
+                    {"detail": "Ada ya leading bado inatumika. Tumia malipo."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             import uuid
             from django.db import transaction

@@ -5,7 +5,10 @@ from rest_framework.response import Response
 from apps.core.mixins import SoftDeleteViewSetMixin
 
 from .models import Notification
-from .serializers import NotificationSerializer
+from .serializers import (
+    NotificationCreateSerializer,
+    NotificationSerializer,
+)
 from .services.notification import (
     get_unread_notification_count,
     mark_all_notifications_as_read,
@@ -60,6 +63,39 @@ class NotificationViewSet(
         # Admins needing global views must use Django admin or a dedicated
         # audit endpoint.
         return self.queryset.filter(recipient=user)
+
+    def create(self, request, *args, **kwargs):
+        """
+        POST /api/notifications/
+
+        Create a notification for the CALLING user. Used by the frontend
+        for admin-deletion alerts, price-drop alerts, and search alerts.
+
+        Security:
+          - `recipient` is forced to `request.user`.
+          - `audience="admin"` is downgraded to "user" for non-staff.
+        """
+        serializer = NotificationCreateSerializer(
+            data=request.data, context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+
+        obj = Notification.objects.create(
+            recipient=request.user,
+            notification_type=d["notification_type"],
+            title=d["title"],
+            message=d["message"],
+            priority=d["priority"],
+            audience=d["audience"],
+            related_object_type=d.get("related_object_type", ""),
+            related_object_id=d.get("related_object_id"),
+            action_url=d.get("action_url", ""),
+        )
+        return Response(
+            NotificationSerializer(obj).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     def list(self, request, *args, **kwargs):
         notifications = self.get_queryset()

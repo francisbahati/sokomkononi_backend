@@ -74,11 +74,11 @@ class BundleSerializer(serializers.ModelSerializer):
                         or item.get("service_key")
                         or item.get("key")
                     )
-                    count = (
-                        item.get("count")
-                        or item.get("amount")
-                        or 1
-                    )
+                    count = item.get("count")
+                    if count is None:
+                        count = item.get("amount")
+                    if count is None:
+                        count = 1
                     if key:
                         normalized[str(key)] = int(count)
             data["credits"] = normalized

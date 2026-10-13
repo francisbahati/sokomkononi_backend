@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from django.db import transaction as db_transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -128,11 +130,13 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
         listing = Listing.objects.select_for_update().get(
             pk=transaction.listing_id,
         )
+        listing_reopened = False
         if listing.status in [
             Listing.Status.RESERVED, Listing.Status.SOLD,
         ]:
             listing.status = Listing.Status.LIVE
             listing.save(update_fields=["status", "updated_at"])
+            listing_reopened = True
 
     transaction.save(update_fields=[
         "buyer_decision", "buyer_decision_note", "buyer_decision_at",
@@ -141,6 +145,9 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
     db_transaction.on_commit(
         lambda: notify_buyer_decision(transaction=transaction)
     )
+    if listing_reopened:
+        from apps.waiting_list.services.notifications import notify_waiting_buyers
+        db_transaction.on_commit(lambda: notify_waiting_buyers(listing=listing))
     return transaction
 
 
@@ -250,10 +257,6 @@ def seller_confirm_final_payment(*, transaction, seller):
         transaction=transaction, listing=listing,
     ))
     return transaction
-
-
-import logging
-logger = logging.getLogger(__name__)
 
 
 def _fire_completion_side_effects(*, transaction, listing):

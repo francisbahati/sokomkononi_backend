@@ -470,6 +470,9 @@ def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
     )
     if boost.payment_status == ListingBoost.PaymentStatus.PAID:
         return boost
+    ref = str(payment_reference or "").strip()
+    if ref and ListingBoost.objects.filter(payment_reference=ref).exclude(pk=boost.pk).exists():
+        raise ValidationError("Payment reference hii tayari imetumika.")
     boost.payment_status = ListingBoost.PaymentStatus.PAID
     boost.payment_reference = payment_reference
     boost.paid_at = timezone.now()

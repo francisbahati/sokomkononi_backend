@@ -135,8 +135,11 @@ def warn_expiring_reservations():
     )
 
     warned = 0
+    from django.core.cache import cache
 
     for reservation in reservations:
+        if not cache.add(f"warn_resv_{reservation.id}", "1", timeout=7200):
+            continue
         transaction = reservation.transaction
 
         already_warned = Notification.objects.filter(
@@ -196,10 +199,16 @@ def expire_unpaid_reservations():
     )
     cancelled = 0
     failed = 0
+    from django.db import transaction as db_transaction
     for rid in reservation_ids:
         try:
-            reservation = Reservation.objects.get(pk=rid)
-            transaction = reservation.transaction
+            with db_transaction.atomic():
+                reservation = (Reservation.objects.select_for_update()
+                    .select_related("transaction","transaction__listing")
+                    .get(pk=rid))
+                if reservation.status != Reservation.Status.PENDING_PAYMENT:
+                    continue
+                transaction = reservation.transaction
 
             reservation.status = Reservation.Status.CANCELLED
             reservation.save(update_fields=["status", "updated_at"])

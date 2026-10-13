@@ -750,7 +750,7 @@ class MeActivitiesView(APIView):
                         "sw": "Kwenye orodha yako ya kuhifadhi",
                         "en": "In your saved list",
                     },
-                    "created_at": s.created_at,
+                    "created_at": getattr(s, "saved_at", None) or getattr(s, "created_at", None),
                 })
         except Exception:
             logger.exception("MeActivitiesView: saved failed")

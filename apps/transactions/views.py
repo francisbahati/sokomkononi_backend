@@ -49,6 +49,15 @@ from .services.transaction import (
 # PERMISSION
 # ============================================================================
 
+def _log(request, action, target="", target_id=None, details=""):
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(request=request, action=action, target=target,
+                   target_id=target_id, details=details)
+    except Exception:
+        import logging; logging.getLogger(__name__).exception("audit failed: %s", action)
+
+
 class IsVerifiedTransactionUser(permissions.BasePermission):
     message = (
         "Akaunti yako lazima iwe active na imethibitishwa "
@@ -401,11 +410,11 @@ class TransactionViewSet(viewsets.GenericViewSet):
         note = request.data.get("note", "")
 
         transaction = resolve_dispute(
-            transaction=transaction,
-            admin_user=request.user,
-            resolution=resolution,
-            note=note,
+            transaction=transaction, admin_user=request.user,
+            resolution=resolution, note=note,
         )
+        _log(request, "transaction.dispute_resolved", "Transaction",
+             transaction.id, f"resolution={resolution} note={(note or '')[:200]}")
 
         return Response(
             TransactionDetailSerializer(
@@ -428,6 +437,8 @@ class TransactionViewSet(viewsets.GenericViewSet):
             raise ValidationError("Transaction hii haina Reservation.")
 
         reservation = expire_reservation(reservation=reservation)
+        _log(request, "reservation.expired", "Reservation",
+             reservation.id, f"Transaction #{transaction.id}")
 
         return Response(
             ReservationSerializer(
@@ -450,6 +461,8 @@ class TransactionViewSet(viewsets.GenericViewSet):
             raise ValidationError("Transaction hii haina Inspection Period.")
 
         inspection = expire_inspection_period(inspection=inspection)
+        _log(request, "inspection.expired", "InspectionPeriod",
+             inspection.id, f"Transaction #{transaction.id}")
 
         return Response(
             InspectionPeriodSerializer(

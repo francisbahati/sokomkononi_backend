@@ -16,6 +16,15 @@ class Webhook(models.Model):
 
 
 class AppStoreLinks(models.Model):
+    def save(self, *a, **k):
+        self.pk = 1
+        super().save(*a, **k)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
     """
     Singleton (only one row). Enforced via `pk=1` convention.
     """
@@ -31,6 +40,15 @@ class AppStoreLinks(models.Model):
 
 
 class PlatformPolicy(models.Model):
+    def save(self, *a, **k):
+        self.pk = 1
+        super().save(*a, **k)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
     """
     Singleton (only one row). Enforced via `pk=1` convention.
     """

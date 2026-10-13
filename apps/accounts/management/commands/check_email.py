@@ -69,7 +69,7 @@ class Command(BaseCommand):
         from apps.accounts.services import _dispatch_email
         try:
             _dispatch_email(
-                "send_email_otp_task", send_email_otp, recipient, "654321",
+                "send_otp_email_task", send_email_otp, recipient, "654321",
             )
             self.stdout.write(
                 self.style.SUCCESS("  dispatch OK — check inbox")

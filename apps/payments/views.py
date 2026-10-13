@@ -113,7 +113,7 @@ def _lookup_expected_amount(prefix, ref_id_int):
     try:
         if prefix == "LSF":
             from apps.listings.models import ListingFee
-            return ListingFee.objects.get(listing_id=ref_id_int).amount
+            return ListingFee.objects.get(pk=ref_id_int).amount
         if prefix == "BST":
             from apps.boosting.models import ListingBoost
             return ListingBoost.objects.get(pk=ref_id_int).amount
@@ -178,11 +178,12 @@ def _route_success(order_id, event):
             ref_id=ref_id_int,
             payment_reference=event.get("transid") or order_id,
         )
-    except (ObjectDoesNotExist, ValidationError):
-        logger.exception(
-            "Webhook rejected for order_id=%s (needs manual review)", order_id,
-        )
+    except ObjectDoesNotExist:
+        logger.exception("Webhook: record missing for %s", order_id)
         return IGNORED
+    except ValidationError:
+        logger.exception("Webhook: retryable error for %s", order_id)
+        return RETRY
     except Exception:
         logger.exception(
             "Webhook routing failed for order_id=%s (will retry)", order_id,

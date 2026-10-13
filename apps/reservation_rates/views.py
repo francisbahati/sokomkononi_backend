@@ -5,6 +5,16 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser, AllowAny
 
 from .models import ReservationSettings, ReservationTier
+def _log(request, action, target="", target_id=None, details=""):
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(request=request, action=action, target=target,
+                   target_id=target_id, details=details)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("audit failed")
+
+
 from .serializers import (
     ReservationSettingsSerializer,
     ReservationTierSerializer,
@@ -64,6 +74,13 @@ class ReservationTierViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ReservationTierSerializer
     queryset = ReservationTier.objects.all()
+
+    def get_queryset(self):
+        qs = ReservationTier.objects.all()
+        u = self.request.user
+        if u.is_authenticated and u.is_staff:
+            return qs
+        return qs.filter(is_active=True)
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):

@@ -877,6 +877,10 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
             "primary_image",
             "fee_status",
             "fee_amount",
+            "status_label",
+            "payment_status",
+            "payment_label",
+            "is_paid",
             "created_at",
             "updated_at",
         ]

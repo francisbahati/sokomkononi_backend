@@ -1,33 +1,17 @@
 from rest_framework import serializers
-
 from apps.listings.models import Listing
-
 from .models import WaitingListEntry
 
 
 class WaitingListListingSerializer(serializers.ModelSerializer):
     category = serializers.SerializerMethodField()
-
     class Meta:
         model = Listing
-        fields = [
-            "id",
-            "title",
-            "price",
-            "location",
-            "status",
-            "category",
-            "is_featured",
-            "is_boosted",
-            "created_at",
-        ]
-
+        fields = ["id","title","price","location","status","category","is_featured","is_boosted","created_at"]
+        read_only_fields = fields
     def get_category(self, obj):
         c = getattr(obj, "category", None)
-        if not c:
-            return None
-        return {"id": c.id, "name": c.name, "slug": c.slug}
-        read_only_fields = fields
+        return {"id": c.id, "name": c.name, "slug": c.slug} if c else None
 
 
 class WaitingListBuyerSerializer(serializers.Serializer):
@@ -39,93 +23,29 @@ class WaitingListBuyerSerializer(serializers.Serializer):
 class WaitingListEntrySerializer(serializers.ModelSerializer):
     listing = WaitingListListingSerializer(read_only=True)
     buyer = WaitingListBuyerSerializer(read_only=True)
-
-    respond_by = serializers.SerializerMethodField()
-
     class Meta:
         model = WaitingListEntry
-        fields = [
-            "id",
-            "listing",
-            "buyer",
-            "status",
-            "position",
-            "notified_at",
-            "respond_by",
-            "joined_at",
-            "updated_at",
-        ]
+        fields = ["id","listing","buyer","status","position","notified_at","respond_by","joined_at","updated_at"]
         read_only_fields = fields
-
-    def get_respond_by(self, obj):
-        # 48 hours after notification is the response deadline.
-        if not obj.notified_at:
-            return None
-        from datetime import timedelta
-        return obj.notified_at + timedelta(hours=48)
 
 
 class WaitingListCreateSerializer(serializers.Serializer):
-    listing = serializers.PrimaryKeyRelatedField(
-        queryset=Listing.objects.all(),
-        write_only=True,
-    )
-
+    listing = serializers.PrimaryKeyRelatedField(queryset=Listing.objects.all(), write_only=True)
     def validate_listing(self, listing):
-        request = self.context.get("request")
-
-        if not request or not request.user.is_authenticated:
-            raise serializers.ValidationError(
-                "Lazima uwe umeingia kwenye akaunti."
-            )
-
-        user = request.user
-
-        if not user.is_active:
-            raise serializers.ValidationError(
-                "Akaunti yako haijawezeshwa."
-            )
-
-        if not user.is_verified:
-            raise serializers.ValidationError(
-                "Akaunti yako lazima iwe imethibitishwa."
-            )
-
-        if listing.seller_id == user.id:
-            raise serializers.ValidationError(
-                "Huwezi kujiunga kwenye waiting list ya tangazo lako."
-            )
-
-        if listing.status != Listing.Status.RESERVED:
-            raise serializers.ValidationError(
-                "Waiting list inapatikana kwa matangazo "
-                "yaliyo kwenye hali ya RESERVED pekee."
-            )
-
+        req = self.context.get("request")
+        if not req or not req.user.is_authenticated: raise serializers.ValidationError("Login required.")
+        u = req.user
+        if not u.is_active: raise serializers.ValidationError("Akaunti haijawezeshwa.")
+        if not u.is_verified: raise serializers.ValidationError("Akaunti lazima iwe imethibitishwa.")
+        if listing.seller_id == u.id: raise serializers.ValidationError("Huwezi kujiunga kwenye tangazo lako.")
+        if listing.status != Listing.Status.RESERVED: raise serializers.ValidationError("Tangazo lazima liwe RESERVED.")
         return listing
-
-    def validate(self, attrs):
-        request = self.context.get("request")
-        listing = attrs["listing"]
-
-        if WaitingListEntry.objects.filter(
-            listing=listing,
-            buyer=request.user,
-            status__in=[
-                WaitingListEntry.Status.WAITING,
-                WaitingListEntry.Status.NOTIFIED,
-            ],
-        ).exists():
-            raise serializers.ValidationError(
-                {
-                    "listing": (
-                        "Tayari umejiunga kwenye waiting list "
-                        "ya tangazo hili."
-                    )
-                }
-            )
-
-        return attrs
+    def validate(self, a):
+        req = self.context.get("request"); l = a["listing"]
+        if WaitingListEntry.objects.filter(listing=l, buyer=req.user,
+                status__in=[WaitingListEntry.Status.WAITING, WaitingListEntry.Status.NOTIFIED]).exists():
+            raise serializers.ValidationError({"listing":"Tayari umejiunga."})
+        return a
 
 
 class WaitingListCancelSerializer(serializers.Serializer):

@@ -29,6 +29,8 @@ class FeedbackViewSet(viewsets.GenericViewSet):
     serializer_class = FeedbackSerializer
 
     def get_permissions(self):
+        if self.action == "respond":
+            return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):

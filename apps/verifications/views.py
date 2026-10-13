@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 
 from .models import VerificationDocument, VerificationRequest
+from .notify import notify_approved, notify_rejected, notify_documents_requested
 from .serializers import (
     VerificationCreateSerializer,
     VerificationRejectSerializer,
@@ -49,6 +50,13 @@ class VerificationViewSet(viewsets.GenericViewSet):
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
+    def get_throttles(self):
+        if self.action == "create":
+            self.throttle_scope = "verification_request"
+        else:
+            self.throttle_scope = None
+        return super().get_throttles()
+
     def get_queryset(self):
         user = self.request.user
         qs = (
@@ -80,10 +88,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
 
     def retrieve(self, request, pk=None):
         obj = get_object_or_404(self.get_queryset(), pk=pk)
+        notify_approved(obj)
         return Response(
-            VerificationRequestSerializer(
-                obj, context={"request": request},
-            ).data,
+            VerificationRequestSerializer(obj, context={"request": request}).data,
         )
 
     @extend_schema(
@@ -267,6 +274,8 @@ class VerificationViewSet(viewsets.GenericViewSet):
     )
     def upload_document(self, request, pk=None):
         obj = get_object_or_404(self.get_queryset(), pk=pk)
+        if obj.status != VerificationRequest.Status.PENDING:
+            return Response({"detail": "Ombi hili halipokei nyaraka mpya."}, status=400)
         f = request.FILES.get("file")
         if not f:
             return Response(

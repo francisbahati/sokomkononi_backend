@@ -74,7 +74,7 @@ def _user_owns_order(user, prefix, ref_id):
 # ============================================================
 
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAdminUser])
 def create_order_view(request):
     serializer = CreateOrderSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)

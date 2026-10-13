@@ -33,11 +33,18 @@ class SavedListingListingSerializer(serializers.ModelSerializer):
         image = obj.images.filter(is_primary=True).first()
         if not image:
             image = obj.images.order_by("ordering", "created_at").first()
-        if not image or not image.image:
+        if not image:
             return None
         request = self.context.get("request")
-        url = image.image.url
-        return request.build_absolute_uri(url) if request else url
+        for attr in ("card", "detail", "image"):
+            f = getattr(image, attr, None)
+            if f:
+                try:
+                    url = f.url
+                    return request.build_absolute_uri(url) if request else url
+                except Exception:
+                    continue
+        return None
 
 
 class SavedListingSerializer(serializers.ModelSerializer):
@@ -55,7 +62,10 @@ class SavedListingSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+from apps.listings.ownership import PUBLIC_STATUSES
+
+
 class SavedListingCreateSerializer(serializers.Serializer):
     listing = serializers.PrimaryKeyRelatedField(
-        queryset=Listing.objects.all(),
+        queryset=Listing.objects.filter(status__in=PUBLIC_STATUSES),
     )

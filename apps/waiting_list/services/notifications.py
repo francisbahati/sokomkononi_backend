@@ -38,12 +38,12 @@ def notify_waiting_buyers(*, listing):
 
     now = timezone.now()
 
+    from datetime import timedelta
     for entry in entries:
         entry.status = WaitingListEntry.Status.NOTIFIED
         entry.notified_at = now
-        entry.save(
-            update_fields=["status", "notified_at", "updated_at"]
-        )
+        entry.respond_by = now + timedelta(hours=48)
+        entry.save(update_fields=["status","notified_at","respond_by","updated_at"])
 
         try:
             create_notification(

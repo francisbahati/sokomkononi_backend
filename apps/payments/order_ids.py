@@ -11,7 +11,7 @@ the id so the webhook can find the record:
 import re
 import uuid
 
-_ORDER_ID_RE = re.compile(r"^([A-Z]+)-(\d+)(?:-[A-Za-z0-9]+)?$")
+_ORDER_ID_RE = re.compile(r"^([A-Z]+)-(\d{1,18})(?:-[A-Za-z0-9]+)?$")
 
 
 def make_order_id(prefix, pk):

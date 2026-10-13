@@ -23,6 +23,13 @@ class ContactViewSet(viewsets.GenericViewSet):
 
     serializer_class = ContactMessageSerializer
 
+    def get_throttles(self):
+        if self.action == "create":
+            self.throttle_scope = "contact"
+            return super().get_throttles()
+        self.throttle_scope = None
+        return super().get_throttles()
+
     def get_permissions(self):
         if self.action == "create":
             return [permissions.AllowAny()]

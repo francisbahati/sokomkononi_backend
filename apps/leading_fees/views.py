@@ -111,6 +111,10 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
     queryset = ListingLeading.objects.select_related("listing", "seller", "package")
     serializer_class = ListingLeadingSerializer
     permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({"detail": "Rekodi hazifutwi."}, status=405)
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):

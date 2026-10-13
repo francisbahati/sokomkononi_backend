@@ -122,6 +122,7 @@ def _activate(leading):
 
 
 @transaction.atomic
+@transaction.atomic
 def expire_stale_leading():
     now = timezone.now()
     qs = ListingLeading.objects.select_for_update().filter(
@@ -201,6 +202,10 @@ def mark_leading_paid_from_webhook(*, ref_id, payment_reference):
     )
     if leading.payment_status == ListingLeading.PaymentStatus.PAID:
         return leading
+
+    ref = (payment_reference or "").strip()
+    if ref and ListingLeading.objects.filter(payment_reference=ref).exclude(pk=leading.pk).exists():
+        raise ValidationError("Payment reference hii tayari imetumika.")
 
     leading.payment_status = ListingLeading.PaymentStatus.PAID
     leading.payment_reference = payment_reference

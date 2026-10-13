@@ -99,7 +99,7 @@ class UserCreditViewSet(viewsets.GenericViewSet):
             if cached:
                 return Response(cached, status=status.HTTP_200_OK)
 
-        ok = consume_credit(request.user, service_key, amount)
+        ok = consume_credit(user=request.user, service_key=service_key, required=amount)
         if not ok:
             return Response(
                 {

@@ -469,6 +469,10 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
     "cleanup-otp": {"task": "accounts.cleanup_old_otps", "schedule": crontab(hour=2, minute=15)},
     "cleanup-outstanding-tokens": {"task": "accounts.cleanup_expired_tokens", "schedule": crontab(hour=2, minute=25)},
+    "expire-stale-success-fee": {
+        "task": "finance.expire_stale_success_fee",
+        "schedule": crontab(hour=3, minute=15),
+    },
     "announcements-flush-scheduled": {"task": "announcements.flush_scheduled", "schedule": crontab(minute="*/5")},
 
     # ⬇️ MPYA — FimiPay status sync (orders: ListingFee, Boost, Bundle, Ads, SuccessFee, Leading)

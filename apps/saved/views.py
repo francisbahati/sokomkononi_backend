@@ -88,7 +88,7 @@ class SavedListingViewSet(viewsets.GenericViewSet):
     @action(
         detail=False,
         methods=["delete"],
-        url_path=r"listing/(?P<listing_id>\d+)",
+        url_path="listing/<int:listing_id>",
     )
     def remove_by_listing(self, request, listing_id=None):
         qs = self.get_queryset().filter(listing_id=listing_id)
@@ -120,17 +120,8 @@ class SavedListingViewSet(viewsets.GenericViewSet):
 
         if existing:
             existing.delete()
-            saved_ids = list(
-                SavedListing.objects
-                .filter(user=request.user)
-                .values_list("listing_id", flat=True)
-            )
             return Response(
-                {
-                    "saved": False,
-                    "listing_id": listing.id,
-                    "saved_ids": saved_ids,
-                },
+                {"saved": False, "listing_id": listing.id},
                 status=status.HTTP_200_OK,
             )
 

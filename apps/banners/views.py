@@ -51,6 +51,14 @@ class BannerAdViewSet(viewsets.ModelViewSet):
         if user.is_staff:
             return qs
 
+        if self.action in ("destroy", "partial_update", "update"):
+            if not user.is_authenticated:
+                return BannerAd.objects.none()
+            return qs.filter(seller=user)
+
+        if not user.is_authenticated:
+            return qs.filter(active=True, expires_at__gt=timezone.now())
+
         return qs.filter(
             Q(seller=user) | Q(active=True, expires_at__gt=timezone.now())
         ).distinct()
@@ -102,7 +110,7 @@ class BannerAdViewSet(viewsets.ModelViewSet):
                 from apps.advertisement_fees.models import (
                     AdvertisementFeeConfig,
                 )
-                cfg = AdvertisementFeeConfig.objects.first()
+                cfg = AdvertisementFeeConfig.get_solo()
                 if cfg and cfg.is_enabled:
                     return Response(
                         {

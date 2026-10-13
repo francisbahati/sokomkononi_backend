@@ -173,12 +173,14 @@ def _resolve_as_cancelled(*, transaction, note, now, admin_user=None):
     listing = Listing.objects.select_for_update().get(
         pk=transaction.listing_id
     )
+    listing_reopened = False
     if listing.status in [
         Listing.Status.RESERVED,
         Listing.Status.SOLD,
     ]:
         listing.status = Listing.Status.LIVE
         listing.save(update_fields=["status", "updated_at"])
+        listing_reopened = True
 
     deal_room = DealRoom.objects.select_for_update().get(
         pk=transaction.deal_room_id
@@ -220,3 +222,7 @@ def _resolve_as_cancelled(*, transaction, note, now, admin_user=None):
             related_object_id=transaction.id,
             action_url=f"/transactions/{transaction.id}",
         )
+
+    if listing_reopened:
+        from apps.waiting_list.services.notifications import notify_waiting_buyers
+        db_transaction.on_commit(lambda: notify_waiting_buyers(listing=listing))

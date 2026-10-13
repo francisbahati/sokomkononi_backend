@@ -297,7 +297,7 @@ class NotificationViewSet(
     @action(
         detail=False,
         methods=["get"],
-        url_path="priority/(?P<priority>[^/.]+)",
+        url_path="priority/<str:priority>",
     )
     def by_priority(self, request, priority=None):
         valid_priorities = {

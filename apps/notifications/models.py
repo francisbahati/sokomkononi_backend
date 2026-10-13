@@ -227,9 +227,21 @@ class Notification(SoftDeleteModel):
         # (kutoka urls.py za app husika — zilizothibitishwa)
         mapping = {
             "listings.Listing": "listing-detail",
+            "Listing": "listing-detail",
             "leads.Lead": "lead-detail",
+            "Lead": "lead-detail",
             "transactions.Transaction": "transaction-detail",
+            "Transaction": "transaction-detail",
+            "transactions.Reservation": "transaction-detail",
+            "Reservation": "transaction-detail",
+            "transactions.InspectionPeriod": "transaction-detail",
+            "InspectionPeriod": "transaction-detail",
             "verifications.VerificationRequest": "verification-detail",
+            "VerificationRequest": "verification-detail",
+            "DealRoom": "deal-room-detail",
+            "deal": "deal-room-detail",
+            "Conversation": "conversation-detail",
+            "conversation": "conversation-detail",
         }
 
         url_name = mapping.get(self.related_object_type)

@@ -56,8 +56,9 @@ def join_waiting_list(*, listing, buyer):
         existing.status = WaitingListEntry.Status.WAITING
         existing.position = get_next_waiting_position(listing)
         existing.notified_at = None
+        existing.respond_by = None
         existing.save(update_fields=[
-            "status", "position", "notified_at", "updated_at",
+            "status", "position", "notified_at", "respond_by", "updated_at",
         ])
         return existing
 
@@ -123,3 +124,28 @@ def fulfil_waiting_entry(*, entry):
     entry.status = WaitingListEntry.Status.FULFILLED
     entry.save(update_fields=["status", "updated_at"])
     return entry
+
+@transaction.atomic
+def claim_waitlist_entry(*, entry, user):
+    entry = (WaitingListEntry.objects.select_for_update()
+             .select_related("listing", "buyer").get(pk=entry.pk))
+    if entry.buyer_id != user.id: raise ValidationError("Huna ruhusa.")
+    if entry.status != WaitingListEntry.Status.NOTIFIED:
+        raise ValidationError("Nafasi yako bado haijafunguliwa.")
+    if entry.respond_by and entry.respond_by <= timezone.now():
+        raise ValidationError("Muda wa kuchukua nafasi umepita.")
+    if entry.listing.status != Listing.Status.LIVE:
+        raise ValidationError("Tangazo halipo tena.")
+    from apps.deals.models import DealRoom
+    from apps.transactions.models import Transaction
+    from apps.transactions.services.reservation import create_reservation
+    dr = DealRoom.objects.filter(listing=entry.listing, buyer=user).order_by("-created_at").first()
+    if not dr: raise ValidationError("Anzisha Deal Room kwanza.")
+    txn, _ = Transaction.objects.get_or_create(deal_room=dr, defaults={
+        "listing": entry.listing, "buyer": user, "seller": entry.listing.seller,
+        "agreed_price": dr.agreed_price or entry.listing.price,
+        "status": Transaction.Status.RESERVATION_PENDING})
+    res = create_reservation(transaction=txn, user=user, duration_hours=24)
+    entry.status = WaitingListEntry.Status.FULFILLED
+    entry.save(update_fields=["status", "updated_at"])
+    return {"entry": entry, "transaction": txn, "reservation": res}

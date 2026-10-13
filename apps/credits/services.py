@@ -113,11 +113,17 @@ def grant_bundle_credits(
         if qty <= 0:
             continue
 
-        uc, _ = UserCredit.objects.select_for_update().get_or_create(
-            user=user,
-            service_key=key,
-            defaults={"remaining": 0, "total": 0},
-        )
+        from django.db import IntegrityError as _IE
+        try:
+            with transaction.atomic():
+                uc, _ = UserCredit.objects.select_for_update().get_or_create(
+                    user=user, service_key=key,
+                    defaults={"remaining": 0, "total": 0},
+                )
+        except _IE:
+            uc = UserCredit.objects.select_for_update().get(
+                user=user, service_key=key,
+            )
         uc.remaining += qty
         uc.total += qty
         if expires_at:

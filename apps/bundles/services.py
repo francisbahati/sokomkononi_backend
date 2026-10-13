@@ -154,6 +154,10 @@ def mark_purchase_paid_from_webhook(*, ref_id, payment_reference):
     if purchase.status == BundlePurchase.Status.PAID:
         return purchase
 
+    ref = (payment_reference or "").strip()
+    if ref and BundlePurchase.objects.filter(payment_reference=ref).exclude(pk=purchase.pk).exists():
+        raise ValidationError("Payment reference hii tayari imetumika.")
+
     now = timezone.now()
     expires_at = now + timedelta(days=purchase.bundle.validity_days)
     purchase.status = BundlePurchase.Status.PAID

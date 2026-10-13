@@ -41,6 +41,8 @@ def generate_webp_variants(source_file, quality=DEFAULT_QUALITY):
     Raises ValueError if the file is not a valid image or is too large.
     """
     source_file.seek(0)
+    if hasattr(source_file, "size") and source_file.size > 10*1024*1024:
+        raise ValueError("Picha ni kubwa mno.")
     try:
         img = Image.open(source_file)
         img.load()  # force decode now so errors surface immediately

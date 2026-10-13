@@ -36,6 +36,11 @@ class RoleViewSet(viewsets.GenericViewSet):
     serializer_class = RoleSerializer
     permission_classes = [IsAdminUser]
 
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [IsAdminUser()]
+        return [IsSuperUser()]
+
     def get_queryset(self):
         return Role.objects.all()
 
@@ -115,7 +120,11 @@ class RoleViewSet(viewsets.GenericViewSet):
                 {"detail": "Role za mfumo haziwezi kufutwa."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        obj.delete()
+        from django.db.models import ProtectedError
+        try:
+            obj.delete()
+        except ProtectedError:
+            return Response({"detail": "Role hii inatumika na staff."}, status=409)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

@@ -66,6 +66,15 @@ class SuccessFeeConfig(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def save(self, *a, **k):
+        self.pk = 1
+        super().save(*a, **k)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
     class Meta:
         db_table = "success_fee_config"
         verbose_name = "Ada ya Mafanikio"

@@ -98,6 +98,12 @@ class Category(SoftDeleteModel):
         if not self.is_deleted:
             return
 
+        if self.name and Category.all_objects.filter(
+            name__iexact=self.name, is_deleted=False,
+        ).exclude(pk=self.pk).exists():
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError(
+                f"Kundi lingine lenye jina '{self.name}' lipo.")
         if self.slug and Category.all_objects.filter(
             slug=self.slug, is_deleted=False,
         ).exclude(pk=self.pk).exists():

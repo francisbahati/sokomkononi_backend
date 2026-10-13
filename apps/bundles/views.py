@@ -47,6 +47,13 @@ class BundleViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
+    def destroy(self, request, *args, **kwargs):
+        from django.db.models import ProtectedError
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response({"detail": "Kifurushi kinatumika."}, status=409)
+
     @action(detail=True, methods=["post"], url_path="toggle")
     def toggle(self, request, pk=None):
         obj = self.get_object()

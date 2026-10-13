@@ -55,7 +55,7 @@ class SoftDeleteModel(models.Model):
             "is_deleted", "deleted_at", "deleted_by", "deletion_reason",
         ])
 
-        return (0, {})
+        return (1, {self._meta.label: 1})
 
     def hard_delete(self, using=None, keep_parents=False):
         return super().delete(using=using, keep_parents=keep_parents)

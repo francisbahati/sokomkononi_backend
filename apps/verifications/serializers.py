@@ -72,7 +72,7 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
 
 
 class VerificationCreateSerializer(serializers.Serializer):
-    type = serializers.ChoiceField(choices=VerificationRequest.Type.choices)
+    type = serializers.ChoiceField(choices=[("SELLER","Seller"),("BUYER","Buyer")])
     subject = serializers.CharField(max_length=255)
     subject_id = serializers.IntegerField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)

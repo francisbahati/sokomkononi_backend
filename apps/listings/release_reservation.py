@@ -29,7 +29,7 @@ RESPONSE_WINDOW_HOURS = 24
 
 
 class ReleaseReservationView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, pk=None):
         # Owner or staff only (release is safe to allow anyone who owns

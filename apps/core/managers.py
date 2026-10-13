@@ -11,7 +11,7 @@ class SoftDeleteQuerySet(models.QuerySet):
             deleted_by=by,
             deletion_reason=reason or "",
         )
-        return (count, {})
+        return (count, {self.model._meta.label: count})
 
     def hard_delete(self):
         return super().delete()

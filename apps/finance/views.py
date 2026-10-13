@@ -24,6 +24,12 @@ from .services.revenue import (
 from .services.user_stats import calculate_user_stats
 
 
+def _parse_bool(v):
+    if isinstance(v, bool): return v
+    if isinstance(v, str): return v.strip().lower() in ("1","true","yes","on")
+    return bool(v)
+
+
 class IsAdminUser(permissions.BasePermission):
     def has_permission(self, request, view):
         return bool(
@@ -401,7 +407,7 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
         old_state = bool(toggle.is_enabled)
 
         if "is_enabled" in request.data:
-            toggle.is_enabled = bool(request.data["is_enabled"])
+            toggle.is_enabled = _parse_bool(request.data["is_enabled"])
             toggle.save(update_fields=["is_enabled", "updated_at"])
 
         new_state = bool(toggle.is_enabled)
@@ -425,7 +431,7 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
         old_state = bool(toggle.is_enabled)
 
         if "is_enabled" in request.data:
-            toggle.is_enabled = bool(request.data["is_enabled"])
+            toggle.is_enabled = _parse_bool(request.data["is_enabled"])
         else:
             toggle.is_enabled = not toggle.is_enabled
         toggle.save(update_fields=["is_enabled", "updated_at"])
@@ -459,7 +465,7 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
             try:
                 toggle = SystemFeatureToggle.objects.get(key=key)
                 old_state = bool(toggle.is_enabled)
-                toggle.is_enabled = bool(value)
+                toggle.is_enabled = _parse_bool(value)
                 toggle.save(update_fields=["is_enabled", "updated_at"])
                 new_state = bool(toggle.is_enabled)
 

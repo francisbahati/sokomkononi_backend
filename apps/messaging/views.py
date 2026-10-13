@@ -145,10 +145,7 @@ class ConversationViewSet(viewsets.GenericViewSet):
         conv.last_message_at = message.created_at
         conv.save(update_fields=["last_message", "last_message_at", "updated_at"])
 
-        from .services import notify_new_message
-        db_transaction.on_commit(
-            lambda: notify_new_message(conversation=conv, message=message)
-        )
+        # handled by apps.notifications.signals.on_message_sent
 
         return Response(
             MessageSerializer(message).data,

@@ -24,15 +24,7 @@ from .serializers import (
 )
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
-
-
+from apps.core.permissions import IsAdminUser  # noqa: E402
 def generate_ticket_code():
     return f"TKT-{secrets.token_hex(5).upper()}"
 
@@ -68,8 +60,11 @@ class TicketViewSet(viewsets.GenericViewSet):
         qs = self.get_queryset()
         status_filter = request.query_params.get("status")
         category_filter = request.query_params.get("category")
+        _ALIASES = {"CLOSED": "COMPLETED"}
         if status_filter:
-            qs = qs.filter(status=status_filter.upper())
+            sf = status_filter.upper()
+            sf = _ALIASES.get(sf, sf)
+            qs = qs.filter(status=sf)
         if category_filter:
             qs = qs.filter(category=category_filter.upper())
         page = self.paginate_queryset(qs)
@@ -170,6 +165,22 @@ class TicketViewSet(viewsets.GenericViewSet):
         if ticket.status == Ticket.Status.RESOLVED and not ticket.resolved_at:
             ticket.resolved_at = timezone.now()
         ticket.save(update_fields=["status", "resolved_at", "updated_at"])
+        try:
+            from apps.notifications.services.notification import create_notification
+            from apps.notifications.models import Notification
+            create_notification(
+                recipient=ticket.user,
+                notification_type=Notification.NotificationType.GENERAL,
+                title=f"Ticket {ticket.code} imeshughulikiwa",
+                message=f"Hali mpya: {ticket.get_status_display()}",
+                priority=Notification.Priority.HIGH,
+                related_object_type="ticket",
+                related_object_id=ticket.id,
+                action_url=f"/dashboard/support/{ticket.id}",
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("ticket notify failed")
         return Response(TicketSerializer(ticket).data)
 
     @extend_schema(

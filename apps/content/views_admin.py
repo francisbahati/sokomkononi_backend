@@ -48,7 +48,9 @@ class AdminContentViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAdminUser]
 
     def get_permissions(self):
-        # Reads for staff only. Public reads live under /api/content/.
+        if (self.action in ("list_content", "detail_content")
+                and self.request.method == "GET"):
+            return [permissions.AllowAny()]
         return [IsAdminUser()]
 
     def _resolve(self, kind):
@@ -189,10 +191,11 @@ class ContentImageUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        content_type = getattr(f, "content_type", "") or ""
-        if content_type not in self.ALLOWED_TYPES:
+        from apps.core.image_utils import validate_image, MAX_CATEGORY_IMAGE_BYTES
+        ok, err = validate_image(f, max_bytes=MAX_CATEGORY_IMAGE_BYTES, field="image")
+        if not ok:
             return Response(
-                {"detail": "Tumia JPG, PNG au WEBP pekee."},
+                {"detail": err},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

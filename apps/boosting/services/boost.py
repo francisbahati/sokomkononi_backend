@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.db import models
 from django.db import transaction as db_transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -9,6 +10,7 @@ from rest_framework.exceptions import ValidationError
 from apps.listings.models import Listing
 
 
+from decimal import Decimal
 try:
     from apps.notifications.services.notification import create_notification
 except (ImportError, LookupError):
@@ -68,12 +70,13 @@ def validate_boost_request(*, listing, user, package):
         raise ValidationError("Boost package hii haipo active.")
 
     now = timezone.now()
-    if ListingBoost.objects.filter(
-        listing=listing,
-        status=ListingBoost.BoostStatus.ACTIVE,
-        expires_at__gt=now,
+    if ListingBoost.objects.filter(listing=listing).filter(
+        models.Q(status=ListingBoost.BoostStatus.ACTIVE, expires_at__gt=now)
+        | models.Q(payment_status=ListingBoost.PaymentStatus.PENDING)
     ).exists():
-        raise ValidationError("Tangazo hili tayari lina boost active.")
+        raise ValidationError(
+            "Tangazo hili tayari lina boost active au inayosubiri malipo."
+        )
 
 
 @db_transaction.atomic
@@ -411,33 +414,41 @@ from apps.payments.fimipay import (
 )
 
 
-@db_transaction.atomic
 def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
-    boost = (
-        ListingBoost.objects
-        .select_for_update(of=("self",))
-        .select_related("listing", "seller", "package")
-        .get(pk=boost.pk)
-    )
-    if boost.seller_id != user.id:
-        raise ValidationError("Huruhusiwi kulipia boost hii.")
-    if boost.payment_status == ListingBoost.PaymentStatus.PAID:
-        raise ValidationError("Boost hii tayari imelipiwa.")
-
-    if not is_boost_fee_enabled():
-        raise ValidationError(
-            "Ada ya boost imezimwa. Hakuna malipo yanayohitajika."
-        )
-
-    # Boost may have been created while the fee was off (amount 0).
-    # Re-price it now that the fee is on.
-    if boost.amount <= Decimal("0.00"):
-        boost.amount = calculate_boost_fee(package=boost.package)
-        boost.save(update_fields=["amount", "updated_at"])
-
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
-    existing_ref = (boost.payment_reference or "").strip()
+    # ── Phase 1: lock, validate, snapshot (short transaction) ──
+    with db_transaction.atomic():
+        boost = (
+            ListingBoost.objects
+            .select_for_update(of=("self",))
+            .select_related("listing", "seller", "package")
+            .get(pk=boost.pk)
+        )
+        if boost.seller_id != user.id:
+            raise ValidationError("Huruhusiwi kulipia boost hii.")
+        if boost.payment_status == ListingBoost.PaymentStatus.PAID:
+            raise ValidationError("Boost hii tayari imelipiwa.")
+
+        if not is_boost_fee_enabled():
+            raise ValidationError(
+                "Ada ya boost imezimwa. Hakuna malipo yanayohitajika."
+            )
+
+        if boost.amount <= Decimal("0.00"):
+            boost.amount = calculate_boost_fee(package=boost.package)
+            boost.save(update_fields=["amount", "updated_at"])
+
+        existing_ref = (boost.payment_reference or "").strip()
+        _snapshot = {
+            "pk": boost.pk,
+            "amount": boost.amount,
+            "phone": phone or user.phone or "",
+            "email": user.email or "",
+            "name": user.name or "",
+        }
+
+    # ── Phase 2: HTTP calls (NO lock, NO transaction) ──
     if existing_ref:
         try:
             sd = _fp_get_status(existing_ref)
@@ -446,17 +457,22 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
         except Exception:
             pass
 
-    order_id = make_order_id("BST", boost.pk)
+    order_id = make_order_id("BST", _snapshot["pk"])
     data = _fp_create_order(
         order_id=order_id,
-        amount=boost.amount,
-        buyer_phone=phone or user.phone or "",
-        buyer_email=user.email or "",
-        buyer_name=user.name or "",
+        amount=_snapshot["amount"],
+        buyer_phone=_snapshot["phone"],
+        buyer_email=_snapshot["email"],
+        buyer_name=_snapshot["name"],
         payment_method=_fp_normalize_method(payment_method),
     )
-    boost.payment_reference = data.get("order_id") or order_id
-    boost.save(update_fields=["payment_reference", "updated_at"])
+
+    # ── Phase 3: re-lock, persist reference ──
+    with db_transaction.atomic():
+        b = ListingBoost.objects.select_for_update(of=("self",)).get(pk=_snapshot["pk"])
+        b.payment_reference = data.get("order_id") or order_id
+        b.save(update_fields=["payment_reference", "updated_at"])
+
     return data
 
 
@@ -492,4 +508,20 @@ def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
             "Boost %s paid via webhook but could not be activated", boost.pk,
         )
 
+    return boost
+
+@db_transaction.atomic
+def mark_boost_as_refunded(*, ref_id, reason=""):
+    boost = ListingBoost.objects.select_for_update().get(pk=ref_id)
+    if boost.payment_status == ListingBoost.PaymentStatus.REFUNDED:
+        return boost
+
+    boost.payment_status = ListingBoost.PaymentStatus.REFUNDED
+    boost.status = ListingBoost.BoostStatus.CANCELLED
+    boost.save(update_fields=["payment_status", "status", "updated_at"])
+
+    if boost.listing_id:
+        Listing.objects.filter(pk=boost.listing_id).update(
+            is_boosted=False, boosted_until=None,
+        )
     return boost

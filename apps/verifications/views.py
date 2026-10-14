@@ -21,15 +21,7 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
-
-
+from apps.core.permissions import IsAdminUser  # noqa: E402
 class VerificationViewSet(viewsets.GenericViewSet):
     """
     Verification requests.
@@ -88,7 +80,6 @@ class VerificationViewSet(viewsets.GenericViewSet):
 
     def retrieve(self, request, pk=None):
         obj = get_object_or_404(self.get_queryset(), pk=pk)
-        notify_approved(obj)
         return Response(
             VerificationRequestSerializer(obj, context={"request": request}).data,
         )
@@ -171,6 +162,11 @@ class VerificationViewSet(viewsets.GenericViewSet):
             )
         except Exception:
             pass
+
+        try:
+            notify_approved(obj)
+        except Exception:
+            logger.exception("notify_approved failed for %s", obj.id)
 
         return Response(
             VerificationRequestSerializer(
@@ -283,19 +279,18 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        allowed = {
-            "image/jpeg", "image/png", "image/webp", "application/pdf",
-        }
-        if f.content_type not in allowed:
-            return Response(
-                {"detail": "Aina ya faili hairuhusiwi. Tumia JPG, PNG, WEBP au PDF."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if f.size > 10 * 1024 * 1024:
-            return Response(
-                {"detail": "Faili haliwezi kuzidi 10 MB."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        from apps.core.image_utils import validate_image, MAX_LISTING_IMAGE_BYTES
+        if f.content_type == "application/pdf":
+            if f.size > 10 * 1024 * 1024:
+                return Response({"detail": "Faili haiwezi kuzidi 10MB."}, status=400)
+            if not (f.read(5) == b"%PDF-"):
+                f.seek(0)
+                return Response({"detail": "Faili si PDF halali."}, status=400)
+            f.seek(0)
+        else:
+            ok, err = validate_image(f, max_bytes=10 * 1024 * 1024, field="file")
+            if not ok:
+                return Response({"detail": err}, status=400)
 
         doc = VerificationDocument.objects.create(
             request=obj,

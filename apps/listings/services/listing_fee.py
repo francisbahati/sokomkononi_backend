@@ -1,3 +1,4 @@
+from decimal import Decimal
 # apps/listings/services/listing_fee.py
 """
 Listing fee computation + persistence.

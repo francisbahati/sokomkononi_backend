@@ -28,6 +28,16 @@ class UserQuerySet(models.QuerySet):
 
 
 class UserManager(BaseUserManager.from_queryset(UserQuerySet)):
+    def __init__(self, *args, include_deleted=False, **kwargs):
+        self.include_deleted = include_deleted
+        super().__init__(*args, **kwargs)
+
+    def deconstruct(self):
+        as_manager, manager_path, qs_path, args, kwargs = super().deconstruct()
+        if self.include_deleted:
+            kwargs["include_deleted"] = True
+        return as_manager, manager_path, qs_path, args, kwargs
+
     """
     Default manager for the custom User model.
 
@@ -42,7 +52,10 @@ class UserManager(BaseUserManager.from_queryset(UserQuerySet)):
     # ------------------------------------------------------------------
 
     def get_queryset(self):
-        return super().get_queryset().filter(is_deleted=False)
+        qs = super().get_queryset()
+        if self.include_deleted:
+            return qs
+        return qs.filter(is_deleted=False)
 
     def hard_queryset(self):
         return super().get_queryset()

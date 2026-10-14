@@ -163,6 +163,15 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
         if leading.seller_id != request.user.id and not request.user.is_staff:
             return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
 
+        if leading.payment_status == ListingLeading.PaymentStatus.PAID:
+            return Response({
+                "payment_status": "SUCCESS",
+                "via": "already_paid",
+                "purchase": ListingLeadingSerializer(
+                    leading, context={"request": request}
+                ).data,
+            }, status=status.HTTP_200_OK)
+
         payment_reference = (request.data.get("payment_reference") or "").strip()
 
         # ── Resolve the current fee state once, for both branches. ──

@@ -39,10 +39,11 @@ def notify_waiting_buyers(*, listing):
     now = timezone.now()
 
     from datetime import timedelta
+    from .constants import RESPONSE_WINDOW_HOURS
     for entry in entries:
         entry.status = WaitingListEntry.Status.NOTIFIED
         entry.notified_at = now
-        entry.respond_by = now + timedelta(hours=48)
+        entry.respond_by = now + timedelta(hours=RESPONSE_WINDOW_HOURS)
         entry.save(update_fields=["status","notified_at","respond_by","updated_at"])
 
         try:

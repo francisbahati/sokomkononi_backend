@@ -62,7 +62,47 @@ IGNORED = "ignored"   # permanent: retrying will not help
 RETRY = "retry"       # transient: ask FimiPay to send it again
 
 
-def _verify_amount(prefix, ref_id_int, reported_amount, order_id):
+
+
+# Refund handlers — route FimiPay refund events to the right service
+_REFUND_HANDLERS = {
+    "LSF": ("apps.listings.services.listing_payment", "mark_listing_fee_as_refunded"),
+    "BST": ("apps.boosting.services.boost", "mark_boost_as_refunded"),
+    "LDS": ("apps.leading_fees.services.leading", "mark_leading_as_refunded"),
+    "BND": ("apps.bundles.services", "mark_purchase_as_refunded"),
+    "ADV": ("apps.banners.services", "mark_banner_as_refunded"),
+    "SFE": ("apps.finance.services_success_fee", "mark_success_fee_as_refunded"),
+    "RSV": ("apps.transactions.services.reservation", "mark_reservation_as_refunded"),
+}
+
+
+def _route_refund(order_id, event):
+    if not order_id:
+        return IGNORED
+    try:
+        prefix, ref_id_int = parse_order_id(order_id)
+    except (ValueError, TypeError):
+        return IGNORED
+    if ref_id_int is None:
+        return IGNORED
+    target = _REFUND_HANDLERS.get(prefix)
+    if not target:
+        logger.warning("Refund for unknown prefix %r order=%s", prefix, order_id)
+        return IGNORED
+    module_path, func_name = target
+    try:
+        handler = getattr(importlib.import_module(module_path), func_name)
+        handler(ref_id=ref_id_int, reason=event.get("reason", ""))
+    except ObjectDoesNotExist:
+        return IGNORED
+    except Exception:
+        logger.exception("Refund routing failed for %s", order_id)
+        return RETRY
+    return OK
+
+
+def _verify_amount(prefix, ref_id_int, reported_amount, order_id, event=None):
+    from .models import WebhookDiscrepancy
     """
     Compare FimiPay-reported amount against the DB-stored amount.
 
@@ -70,6 +110,10 @@ def _verify_amount(prefix, ref_id_int, reported_amount, order_id):
     Over- and under-payments both return False and are logged loudly.
     """
     if reported_amount is None:
+        WebhookDiscrepancy.objects.create(
+            order_id=order_id, prefix=prefix, ref_id=ref_id_int,
+            reason="missing_amount", raw_payload=event or {},
+        )
         logger.error("Webhook missing amount for order_id=%s", order_id)
         return False
 
@@ -84,7 +128,10 @@ def _verify_amount(prefix, ref_id_int, reported_amount, order_id):
 
     expected = _lookup_expected_amount(prefix, ref_id_int)
     if expected is None:
-        # No record — reject; the router will treat it as IGNORED.
+        WebhookDiscrepancy.objects.create(
+            order_id=order_id, prefix=prefix, ref_id=ref_id_int,
+            reason="no_db_record", raw_payload=event or {},
+        )
         logger.error(
             "Webhook: no DB record for order_id=%s (prefix=%s, ref=%s)",
             order_id, prefix, ref_id_int,
@@ -95,6 +142,11 @@ def _verify_amount(prefix, ref_id_int, reported_amount, order_id):
 
     if reported != expected:
         direction = "UNDERPAYMENT" if reported < expected else "OVERPAYMENT"
+        WebhookDiscrepancy.objects.create(
+            order_id=order_id, prefix=prefix, ref_id=ref_id_int,
+            expected_amount=expected, reported_amount=reported,
+            reason="amount_mismatch", raw_payload=event or {},
+        )
         logger.error(
             "%s order_id=%s expected=%s reported=%s",
             direction, order_id, expected, reported,
@@ -222,6 +274,12 @@ def fimipay_webhook(request):
         "FimiPay webhook: event=%s order_id=%s status=%s",
         event, order_id, payment_status,
     )
+
+    if event == "payment.refunded" or payment_status == "REFUNDED":
+        result = _route_refund(order_id, {"reason": payload.get("reason", "")})
+        if result == RETRY:
+            return JsonResponse({"detail": "Retry"}, status=500)
+        return JsonResponse({"received": True}, status=200)
 
     success = event == "payment.success" or payment_status == "SUCCESS"
     if success and order_id:

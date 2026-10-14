@@ -25,7 +25,7 @@ from apps.listings.models import Listing
 
 logger = logging.getLogger(__name__)
 
-RESPONSE_WINDOW_HOURS = 24
+from apps.waiting_list.constants import RESPONSE_WINDOW_HOURS
 
 
 class ReleaseReservationView(APIView):

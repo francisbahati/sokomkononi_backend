@@ -327,9 +327,9 @@ def confirm_reservation_payment(*, reservation, payment_reference, user=None):
         raise ValidationError("Payment reference inahitajika.")
 
     if payment_reference == "credits":
+        if user is None or user.id != transaction.buyer_id:
+            raise ValidationError("Ni mnunuzi pekee anayeweza kutumia credits.")
         from apps.credits.services import consume_credit
-        # Runs inside this atomic block: if activation fails below, the
-        # credit is rolled back instead of being lost.
         if not consume_credit(user=transaction.buyer, service_key="reservation"):
             raise ValidationError(
                 "Hakuna reservation credits za kutosha."
@@ -380,17 +380,12 @@ def initiate_reservation_payment(*, reservation, user, payment_method="mobile", 
             "Reservation hii haipo kwenye hatua ya kusubiri malipo."
         )
 
-    # Re-price: the admin may have changed (or disabled) the fee since
-    # the reservation was created. Fee is per-tier, based on the
-    # reservation's duration_hours.
-    fee = calculate_reservation_fee(reservation.duration_hours)
+    # Use the STORED amount — do NOT re-price (avoids orphaned FimiPay orders).
+    fee = reservation.deposit_amount
     if fee <= Decimal("0.00"):
         raise ValidationError(
-            "Ada ya reservation imezimwa. Hakuna malipo yanayohitajika."
+            "Ada ya reservation si sahihi. Wasiliana na admin."
         )
-    if reservation.deposit_amount != fee:
-        reservation.deposit_amount = fee
-        reservation.save(update_fields=["deposit_amount", "updated_at"])
 
     # Unique per attempt ("RSV-<pk>-<hex>"), parsed by the webhook.
     order_id = make_order_id("RSV", reservation.pk)
@@ -666,3 +661,16 @@ def expire_inspection_period(*, inspection):
         lambda: notify_inspection_completed(inspection=inspection)
     )
     return inspection
+
+@db_transaction.atomic
+def mark_reservation_as_refunded(*, ref_id, reason=""):
+    reservation = Reservation.objects.select_for_update().get(pk=ref_id)
+    if reservation.payment_status == Reservation.PaymentStatus.REFUNDED:
+        return reservation
+    reservation.payment_status = Reservation.PaymentStatus.REFUNDED
+    reservation.refunded_at = timezone.now()
+    reservation.refund_reference = reason or ""
+    reservation.save(update_fields=[
+        "payment_status", "refunded_at", "refund_reference", "updated_at",
+    ])
+    return reservation

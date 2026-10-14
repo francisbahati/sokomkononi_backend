@@ -1,3 +1,4 @@
+from decimal import Decimal
 # apps/boosting/serializers.py
 from rest_framework import serializers
 
@@ -68,7 +69,7 @@ class ListingBoostSerializer(serializers.ModelSerializer):
 
 
 class BoostCreateSerializer(serializers.Serializer):
-    listing = serializers.IntegerField(min_value=1)
+    listing = serializers.IntegerField(min_value=Decimal("1"))
 
     package = serializers.PrimaryKeyRelatedField(
         queryset=BoostPackage.all_objects.all(),

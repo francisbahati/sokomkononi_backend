@@ -214,3 +214,15 @@ def mark_leading_paid_from_webhook(*, ref_id, payment_reference):
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
     return _activate(leading)
+
+@transaction.atomic
+def mark_leading_as_refunded(*, ref_id, reason=""):
+    leading = ListingLeading.objects.select_for_update().get(pk=ref_id)
+    if leading.payment_status == ListingLeading.PaymentStatus.REFUNDED:
+        return leading
+    leading.payment_status = ListingLeading.PaymentStatus.REFUNDED
+    leading.status = ListingLeading.Status.CANCELLED
+    leading.save(update_fields=["payment_status", "status", "updated_at"])
+    if leading.listing_id:
+        Listing.objects.filter(pk=leading.listing_id).update(leading_until=None)
+    return leading

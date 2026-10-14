@@ -92,6 +92,7 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
     )
 
     objects = UserManager()
+    all_objects = UserManager(include_deleted=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["name"]

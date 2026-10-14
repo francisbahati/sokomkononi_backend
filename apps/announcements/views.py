@@ -3,15 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
-
-
+from apps.core.permissions import IsAdminUser  # noqa: E402
 from .models import Announcement
 from .serializers import (
     AnnouncementCreateSerializer,

@@ -53,6 +53,9 @@ _NOTIFICATION_TYPE_MAP = {
     "WAITING_LIST_JOINED":    ("email", "deals"),
     "WAITING_LIST_AVAILABLE": ("push",  "deals"),
 
+    # ── Messaging — messages ─────────────────────────────
+    "MESSAGE_RECEIVED":    ("push",  "messages"),
+
     # ── Boost — promotions ────────────────────────────────
     "BOOST_ACTIVATED": ("email", "promotions"),
 
@@ -90,7 +93,7 @@ def _should_send_via_channel(recipient, notification_type, channel):
         return True
 
     if nt not in _NOTIFICATION_TYPE_MAP:
-        return True  # Haijulikani — tuma
+        return False  # Fail-closed
 
     mapped_channel, category = _NOTIFICATION_TYPE_MAP[nt]
 
@@ -216,14 +219,25 @@ def _send_via_channel(*, channel, recipient, title, message, **kwargs):
     logger = logging.getLogger(__name__)
 
     if channel == "email":
-        # TODO: integrate email service
-        # from .email_service import send_email
-        # send_email(recipient.email, title, message)
-        logger.info(
-            "[notif:email] Would send to %s: %s — %s",
-            recipient.email, title, message,
-        )
-        return True
+        if not recipient.email:
+            return False
+        try:
+            from apps.accounts.email_service import _send as _email_send
+            result = _email_send(
+                to_email=recipient.email,
+                subject=title,
+                template_base="notification",
+                context={
+                    "title": title,
+                    "message": message,
+                    "name": recipient.name or "mteja",
+                    "action_url": kwargs.get("action_url", ""),
+                },
+            )
+            return result.ok
+        except Exception:
+            logger.exception("[notif:email] send failed")
+            return False
 
     if channel == "sms":
         # TODO: integrate SMS service (FimiPay/Beem)

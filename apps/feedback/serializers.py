@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import Feedback
 
 
+from decimal import Decimal
 class FeedbackSerializer(serializers.ModelSerializer):
     """
     Output shape matches the frontend `norm()` in feedbackStore.js.
@@ -48,7 +49,7 @@ class FeedbackCreateSerializer(serializers.Serializer):
     subject = serializers.CharField(max_length=255)
     message = serializers.CharField()
     rating = serializers.IntegerField(
-        required=False, allow_null=True, min_value=1, max_value=5,
+        required=False, allow_null=True, min_value=Decimal("1"), max_value=Decimal("5"),
     )
     listing_id = serializers.IntegerField(required=False, allow_null=True)
     author_side = serializers.ChoiceField(

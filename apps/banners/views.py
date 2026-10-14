@@ -96,6 +96,15 @@ class BannerAdViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if banner.payment_status == "PAID":
+            return Response({
+                "payment_status": "SUCCESS",
+                "via": "already_paid",
+                "banner": BannerAdSerializer(
+                    banner, context={"request": request}
+                ).data,
+            }, status=status.HTTP_200_OK)
+
         payment_reference = (request.data.get("payment_reference") or "").strip()
 
         # ============================================================
@@ -107,24 +116,23 @@ class BannerAdViewSet(viewsets.ModelViewSet):
             # Angalia kama advertisement fee imezimwa.
             # Kama bado inatumika, kataa — mtu asitumie "free" kudanganya.
             try:
-                from apps.advertisement_fees.models import (
-                    AdvertisementFeeConfig,
-                )
+                from apps.advertisement_fees.models import AdvertisementFeeConfig
                 cfg = AdvertisementFeeConfig.get_solo()
-                if cfg and cfg.is_enabled:
-                    return Response(
-                        {
-                            "detail": (
-                                "Advertisement fee bado inatumika. "
-                                "Hauwezi kutumia 'free'."
-                            ),
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
             except Exception:
-                # Kama app haipo, tunaendelea — kwa sababu mfumo
-                # hauwezi kuangalia. Bora kuruhusu kuliko kukataa.
-                pass
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Advertisement fee lookup failed — refusing free"
+                )
+                return Response(
+                    {"detail": "Imeshindwa kuthibitisha ada. Jaribu tena."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+            if cfg is None or cfg.is_enabled:
+                return Response(
+                    {"detail": "Advertisement fee bado inatumika. Tumia malipo."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             import uuid
 

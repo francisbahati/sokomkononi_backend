@@ -30,15 +30,7 @@ def _parse_bool(v):
     return bool(v)
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
-
-
+from apps.core.permissions import IsAdminUser  # noqa: E402
 # ============================================================
 # AUDIT LOG HELPER
 # ============================================================

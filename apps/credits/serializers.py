@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import UserCredit, UserService
 
 
+from decimal import Decimal
 class UserCreditSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserCredit
@@ -23,4 +24,4 @@ class UserServiceSerializer(serializers.ModelSerializer):
 
 class ConsumeCreditSerializer(serializers.Serializer):
     service_key = serializers.CharField(max_length=50)
-    amount = serializers.IntegerField(min_value=1, default=1)
+    amount = serializers.IntegerField(min_value=Decimal("1"), default=1)

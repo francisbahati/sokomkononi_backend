@@ -144,3 +144,16 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
         updated_at=timezone.now(),
     )
     return listing_fee
+
+
+@transaction.atomic
+def mark_listing_fee_as_refunded(*, ref_id, reason=""):
+    try:
+        fee = ListingFee.objects.select_for_update().get(listing_id=ref_id)
+    except ListingFee.DoesNotExist:
+        return None
+    if fee.payment_status == ListingFee.PaymentStatus.REFUNDED:
+        return fee
+    fee.payment_status = ListingFee.PaymentStatus.REFUNDED
+    fee.save(update_fields=["payment_status", "updated_at"])
+    return fee

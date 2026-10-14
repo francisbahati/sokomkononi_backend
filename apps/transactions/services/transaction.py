@@ -115,8 +115,15 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
     transaction.buyer_decision_note = note
     transaction.buyer_decision_at = now
 
+    listing_reopened = False
+
     if decision == Transaction.BuyerDecision.READY_FOR_FINAL_PAYMENT:
         transaction.status = Transaction.Status.READY_FOR_FINAL_PAYMENT
+        inspection = getattr(transaction, "inspection_period", None)
+        if inspection and inspection.status == InspectionPeriod.Status.ACTIVE:
+            inspection.status = InspectionPeriod.Status.COMPLETED
+            inspection.completed_at = now
+            inspection.save(update_fields=["status", "completed_at", "updated_at"])
     elif decision in {
         Transaction.BuyerDecision.NOT_AS_DESCRIBED,
         Transaction.BuyerDecision.REQUEST_NEGOTIATION,
@@ -130,7 +137,6 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
         listing = Listing.objects.select_for_update().get(
             pk=transaction.listing_id,
         )
-        listing_reopened = False
         if listing.status in [
             Listing.Status.RESERVED, Listing.Status.SOLD,
         ]:
@@ -290,6 +296,11 @@ def cancel_transaction(*, transaction, user, reason):
         Transaction.Status.COMPLETED, Transaction.Status.CANCELLED,
     ]:
         raise ValidationError("Transaction hii haiwezi kughairiwa tena.")
+
+    if transaction.status == Transaction.Status.DISPUTED and not user.is_staff:
+        raise ValidationError(
+            "Transaction iliyo kwenye mgogoro inaweza kufungwa na admin pekee."
+        )
 
     reason = (reason or "").strip()
     if not reason:

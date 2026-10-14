@@ -177,3 +177,12 @@ def mark_purchase_paid_from_webhook(*, ref_id, payment_reference):
         bundle_name=purchase.bundle.name_sw,
     )
     return purchase
+
+@transaction.atomic
+def mark_purchase_as_refunded(*, ref_id, reason=""):
+    purchase = BundlePurchase.objects.select_for_update().get(pk=ref_id)
+    if purchase.status == BundlePurchase.Status.REFUNDED:
+        return purchase
+    purchase.status = BundlePurchase.Status.REFUNDED
+    purchase.save(update_fields=["status"])
+    return purchase

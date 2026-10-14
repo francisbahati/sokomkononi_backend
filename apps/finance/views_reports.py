@@ -2,6 +2,7 @@
 from collections import defaultdict
 from datetime import timedelta
 
+from dateutil.relativedelta import relativedelta
 from django.db.models import Count, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
@@ -29,8 +30,6 @@ class IsAdminUser(permissions.BasePermission):
 # ============================================================
 # HELPERS
 # ============================================================
-# Statuses ambazo zinahesabiwa kama "listing halisi" (hai/active)
-# DRAFT hazijachapishwa — hazipaswi kuhesabiwa kwenye reports.
 VISIBLE_LISTING_STATUSES = [
     Listing.Status.LIVE,
     Listing.Status.RESERVED,
@@ -63,15 +62,8 @@ class ReportsView(APIView):
 
     def get(self, request):
         now = timezone.now()
-        thirty_days_ago = now - timedelta(days=30)
-        six_months_ago = now - timedelta(days=180)
 
         # ---------- Users ----------
-        # ⬇️ MUHIMU: Tumia calculate_user_stats() — inaheshimu:
-        #   - Admin HAhesabiwi kama seller/buyer
-        #   - Seller = ana listing angalau moja
-        #   - Buyer  = ana DealRoom angalau moja (kama buyer)
-        #   - bothRoles / neitherRole / totalAdmins
         user_stats = calculate_user_stats()
 
         total_users = user_stats["totalUsers"]
@@ -79,7 +71,6 @@ class ReportsView(APIView):
         total_buyers = user_stats["totalBuyers"]
 
         # Growth: cumulative users per day for last 30 days
-        # (bila admin, ili iendane na totalUsers)
         start_day = (now - timedelta(days=29)).date()
         growth_rows = dict(
             User.objects
@@ -134,7 +125,7 @@ class ReportsView(APIView):
             status=DealRoom.Status.COMPLETED,
         ).count()
         disputed_deals = DealRoom.objects.filter(
-            status=DealRoom.Status.CANCELLED,
+            status=DealRoom.Status.DISPUTED,
         ).count()
 
         deals_by_status = dict(
@@ -142,7 +133,8 @@ class ReportsView(APIView):
             .annotate(c=Count("id"))
             .values_list("status", "c")
         )
-        for k in ["OPEN", "NEGOTIATING", "ACCEPTED", "CANCELLED", "COMPLETED"]:
+        for k in ["OPEN", "NEGOTIATING", "ACCEPTED",
+                  "CANCELLED", "COMPLETED", "DISPUTED"]:
             deals_by_status.setdefault(k, 0)
 
         deals_by_status_frontend = {
@@ -150,7 +142,7 @@ class ReportsView(APIView):
             "accepted": deals_by_status.get("ACCEPTED", 0),
             "reserved": 0,
             "completed": deals_by_status.get("COMPLETED", 0),
-            "disputed": 0,
+            "disputed": deals_by_status.get("DISPUTED", 0),
             "cancelled": deals_by_status.get("CANCELLED", 0),
         }
 
@@ -158,13 +150,23 @@ class ReportsView(APIView):
         revenue_qs = Transaction.objects.filter(
             status=Transaction.Status.COMPLETED,
         )
-        total_revenue = (
+        total_gmv = (
             revenue_qs.aggregate(s=Sum("agreed_price"))["s"] or 0
         )
 
-        from dateutil.relativedelta import relativedelta
+        # Actual revenue = fees only (from fee tables)
+        try:
+            from .services.revenue import calculate_financial_dashboard
+            fees_data = calculate_financial_dashboard("all")
+            total_revenue = float(fees_data["total_revenue"])
+        except Exception:
+            total_revenue = 0.0
+
+        # Revenue by month (GMV)
         revenue_by_month = []
-        _anchor = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        _anchor = now.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0,
+        )
         for i in range(5, -1, -1):
             month_start = _anchor - relativedelta(months=i)
             month_end = month_start + relativedelta(months=1)
@@ -184,7 +186,6 @@ class ReportsView(APIView):
         )
 
         # ---------- Top sellers (by views) ----------
-        # ⬇️ Chuja pia seller__is_staff=False (admin haonekani)
         top_sellers_qs = (
             visible_qs
             .filter(seller__is_staff=False, seller__is_deleted=False)
@@ -250,7 +251,7 @@ class ReportsView(APIView):
         ]
 
         return Response({
-            # ── User stats (kutoka calculate_user_stats) ──
+            # ── User stats ──
             "totalUsers": total_users,
             "totalSellers": total_sellers,
             "totalBuyers": total_buyers,
@@ -272,7 +273,8 @@ class ReportsView(APIView):
             "dealsByStatus": deals_by_status_frontend,
 
             # ── Revenue ──
-            "totalRevenue": float(total_revenue),
+            "totalGMV": float(total_gmv),
+            "totalRevenue": total_revenue,
             "revenueByMonth": revenue_by_month,
             "conversionRate": round(conversion_rate, 2),
 

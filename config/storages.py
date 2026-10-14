@@ -36,3 +36,19 @@ class CloudflareR2MediaStorage(S3Boto3Storage):
     object_parameters = {
         "CacheControl": "public, max-age=31536000, immutable",
     }
+
+
+class PrivateR2Storage(S3Boto3Storage):
+    """R2 storage that generates signed URLs. Use for sensitive files."""
+    bucket_name = getattr(settings, "R2_BUCKET_NAME", None)
+    location = getattr(settings, "R2_PRIVATE_LOCATION", "private")
+    endpoint_url = getattr(settings, "R2_ENDPOINT_URL", None)
+    access_key = getattr(settings, "R2_ACCESS_KEY_ID", None)
+    secret_key = getattr(settings, "R2_SECRET_ACCESS_KEY", None)
+    region_name = "auto"
+    signature_version = "s3v4"
+    querystring_auth = True
+    querystring_expire = 300
+    default_acl = None
+    custom_domain = None
+    file_overwrite = False

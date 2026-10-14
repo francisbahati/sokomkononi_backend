@@ -102,3 +102,29 @@ class Payout(models.Model):
 
     def __str__(self):
         return f"Payout #{self.pk} — {self.amount} — {self.status}"
+
+
+class WebhookDiscrepancy(models.Model):
+    """Records webhook events that fail verification (for reconciliation)."""
+    order_id = models.CharField(max_length=64, db_index=True)
+    prefix = models.CharField(max_length=10, blank=True)
+    ref_id = models.IntegerField(null=True, blank=True)
+    expected_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+    )
+    reported_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+    )
+    transid = models.CharField(max_length=128, blank=True)
+    reason = models.CharField(max_length=64)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    resolved = models.BooleanField(default=False)
+    resolution_note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "webhook_discrepancies"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["resolved", "created_at"]),
+        ]

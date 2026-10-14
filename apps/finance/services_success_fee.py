@@ -155,3 +155,12 @@ def has_valid_success_fee_payment(user):
             return True
 
     return False
+
+@transaction.atomic
+def mark_success_fee_as_refunded(*, ref_id, reason=""):
+    payment = SuccessFeePayment.objects.select_for_update().get(pk=ref_id)
+    if payment.payment_status == "REFUNDED":
+        return payment
+    payment.payment_status = "REFUNDED"
+    payment.save(update_fields=["payment_status", "updated_at"])
+    return payment

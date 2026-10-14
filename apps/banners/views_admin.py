@@ -11,15 +11,7 @@ from apps.boosting.models import ListingBoost
 from apps.listings.models import Listing
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
-
-
+from apps.core.permissions import IsAdminUser  # noqa: E402
 class AdminPromotionsView(APIView):
     """
     GET /api/admin/promotions/

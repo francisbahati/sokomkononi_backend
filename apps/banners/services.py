@@ -1,3 +1,4 @@
+from decimal import Decimal
 # apps/banners/services.py
 """
 Banner ad creation + activation + campaign pricing.
@@ -46,15 +47,14 @@ def create_banner_ad(*, listing_id, seller, package, payment_reference=""):
     if listing.status != Listing.Status.LIVE:
         raise ValidationError({"listing": "Tangazo lazima liwe AVAILABLE."})
 
-    existing = BannerAd.objects.filter(
-        listing=listing,
-        active=True,
-        expires_at__gt=timezone.now(),
+    existing = BannerAd.objects.filter(listing=listing).filter(
+        models.Q(active=True, expires_at__gt=timezone.now())
+        | models.Q(payment_status="PENDING")
     ).exists()
     if existing:
-        raise ValidationError(
-            {"listing": "Tangazo hili tayari lina banner inayotumika."}
-        )
+        raise ValidationError({
+            "listing": "Tangazo hili tayari lina banner inayotumika au inayosubiri malipo."
+        })
 
     now = timezone.now()
     banner = BannerAd.objects.create(
@@ -183,13 +183,15 @@ def mark_banner_paid_from_webhook(*, ref_id, payment_reference):
 # ============================================================================
 
 def get_active_campaign(applies_to):
-    """
-    Rudisha campaign iliyo hai kwa aina fulani.
-    Kama `applies_to` = "BOOST", inarudisha campaign ya BOOST au ALL.
-    Kama zipo nyingi, chukua ile yenye discount kubwa zaidi.
-    """
+    """Return the live campaign, cached for 60s."""
+    from django.core.cache import cache
+    cache_key = f"active_campaign:{applies_to}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached or None
+
     now = timezone.now()
-    return (
+    campaign = (
         Campaign.objects
         .filter(
             active=True,
@@ -204,6 +206,8 @@ def get_active_campaign(applies_to):
         .order_by("-discount_percent")
         .first()
     )
+    cache.set(cache_key, campaign or False, 60)
+    return campaign
 
 
 def calculate_promotion_price(base_price, applies_to):
@@ -253,3 +257,13 @@ def calculate_promotion_price(base_price, applies_to):
         "campaign_name": None,
         "campaign_end_date": None,
     }
+
+@transaction.atomic
+def mark_banner_as_refunded(*, ref_id, reason=""):
+    banner = BannerAd.objects.select_for_update().get(pk=ref_id)
+    if banner.payment_status == "REFUNDED":
+        return banner
+    banner.payment_status = "REFUNDED"
+    banner.active = False
+    banner.save(update_fields=["payment_status", "active"])
+    return banner

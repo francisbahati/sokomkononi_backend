@@ -329,6 +329,15 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
     def pay(self, request, pk=None):
         boost = get_object_or_404(self.get_queryset(), pk=pk)
 
+        if boost.payment_status == ListingBoost.PaymentStatus.PAID:
+            return Response({
+                "payment_status": "SUCCESS",
+                "via": "already_paid",
+                "boost": ListingBoostSerializer(
+                    boost, context={"request": request}
+                ).data,
+            }, status=status.HTTP_200_OK)
+
         # ── Free path ───────────────────────────────────────────
         if not is_boost_fee_enabled():
             boost = pay_boost_free(boost=boost, user=request.user)

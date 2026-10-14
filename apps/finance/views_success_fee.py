@@ -65,11 +65,12 @@ def get_period_start(period):
     if days is None:
         return None
 
-    now = timezone.now()
+    now_local = timezone.localtime()
     if days == 0:
-        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+        midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        return midnight_local.astimezone(timezone.utc)
 
-    return now - timedelta(days=days)
+    return timezone.now() - timedelta(days=days)
 
 
 # ============================================================
@@ -103,16 +104,12 @@ def _get_user_transactions(user, period="all"):
     """
     # ⬇️ SYNC kabla ya kuhesabu (manual: sync zote PENDING)
     try:
-        sync_user_pending(
-            user,
-            since_hours=720,
-            dry_run=False,
-            no_time_filter=True,
-        )
+        from apps.payments.tasks import sync_user_pending_task
+        sync_user_pending_task.delay(user.id, since_hours=720)
     except Exception:
         import logging
         logging.getLogger(__name__).exception(
-            "[success_fee] sync_user_pending failed"
+            "[success_fee] sync dispatch failed"
         )
 
     records = []

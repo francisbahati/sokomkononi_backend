@@ -169,6 +169,7 @@ R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 R2_MEDIA_LOCATION = os.environ.get("R2_MEDIA_LOCATION", "media")
+R2_PRIVATE_LOCATION = os.environ.get("R2_PRIVATE_LOCATION", "private")
 
 _raw_domain = (os.environ.get("R2_CUSTOM_DOMAIN", "") or "").strip().rstrip("/")
 _raw_domain = _raw_domain.replace("https//", "https://").replace("http//", "http://")
@@ -414,6 +415,7 @@ if not DEBUG and not EMAIL_HOST:
     raise ImproperlyConfigured("EMAIL_HOST must be set when DEBUG=False.")
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "info@sokomkononi.co.tz")
+TRUSTED_PROXY_CIDRS = env_list("TRUSTED_PROXY_CIDRS", "")
 ADMINS = [("SokoMkononi Admin", ADMIN_EMAIL)]
 MANAGERS = ADMINS
 
@@ -472,6 +474,10 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-success-fee": {
         "task": "finance.expire_stale_success_fee",
         "schedule": crontab(hour=3, minute=15),
+    },
+    "waiting-list-expire-notified": {
+        "task": "waiting_list.expire_notified",
+        "schedule": crontab(minute="*/15"),
     },
     "announcements-flush-scheduled": {"task": "announcements.flush_scheduled", "schedule": crontab(minute="*/5")},
 

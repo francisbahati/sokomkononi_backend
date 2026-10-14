@@ -52,26 +52,40 @@ class AdminUserViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
+        from django.db.models import Exists, OuterRef, Q as DQ
+        from apps.listings.models import Listing
+        from apps.deals.models import DealRoom
+
         qs = User.all_objects.all().order_by("-created_at")
+
+        has_listings = Listing.objects.filter(seller=OuterRef("pk"), is_deleted=False)
+        has_deals = DealRoom.objects.filter(buyer=OuterRef("pk"))
+        qs = qs.annotate(
+            _has_listings=Exists(has_listings),
+            _has_deals=Exists(has_deals),
+        )
+
         q = self.request.query_params.get("q")
         role = self.request.query_params.get("role")
         status_filter = self.request.query_params.get("status")
 
         if q:
             qs = qs.filter(
-                Q(name__icontains=q)
-                | Q(email__icontains=q)
-                | Q(phone__icontains=q)
+                DQ(name__icontains=q) | DQ(email__icontains=q) | DQ(phone__icontains=q)
             )
 
-        # Role filter — inatumia helper ya pamoja
         if role and role.lower() != "all":
             target = role.lower()
-            user_ids = []
-            for u in qs.only("id", "is_staff", "is_superuser"):
-                if get_user_role(u).lower() == target:
-                    user_ids.append(u.id)
-            qs = qs.filter(id__in=user_ids)
+            if target == "admin":
+                qs = qs.filter(DQ(is_staff=True) | DQ(is_superuser=True))
+            elif target == "seller":
+                qs = qs.filter(_has_listings=True, _has_deals=False)
+            elif target == "buyer":
+                qs = qs.filter(_has_listings=False, _has_deals=True)
+            elif target == "both":
+                qs = qs.filter(_has_listings=True, _has_deals=True)
+            elif target == "neither":
+                qs = qs.filter(_has_listings=False, _has_deals=False)
 
         if status_filter == "active":
             qs = qs.filter(is_active=True)

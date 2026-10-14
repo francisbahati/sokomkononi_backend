@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from .models import Payout
@@ -6,11 +8,13 @@ from .models import Payout
 class CreateOrderSerializer(serializers.Serializer):
     order_id = serializers.CharField(max_length=64)
     amount = serializers.DecimalField(
-        max_digits=15, decimal_places=2, min_value=1,
+        max_digits=15, decimal_places=2, min_value=Decimal("1"),
     )
     buyer_phone = serializers.CharField(max_length=20)
     buyer_email = serializers.EmailField(required=False, allow_blank=True)
-    buyer_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    buyer_name = serializers.CharField(
+        max_length=150, required=False, allow_blank=True,
+    )
     payment_method = serializers.ChoiceField(
         choices=["mobile", "card", "bank"], default="mobile",
     )
@@ -22,8 +26,8 @@ class OrderStatusSerializer(serializers.Serializer):
 
 
 class PayoutCreateSerializer(serializers.Serializer):
-    MIN = 1000
-    MAX = 100_000_000
+    MIN = Decimal("1000")
+    MAX = Decimal("100000000")
     amount = serializers.DecimalField(
         max_digits=15, decimal_places=2,
         min_value=MIN, max_value=MAX,

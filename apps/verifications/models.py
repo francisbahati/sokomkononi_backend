@@ -130,6 +130,34 @@ class VerificationRequest(SoftDeleteModel):
         return f"{self.type} — {self.subject} ({self.status})"
 
 
+
+_private_storage_instance = None
+
+
+def _private_storage():
+    """Lazy singleton. Works even before settings are fully loaded."""
+    global _private_storage_instance
+    if _private_storage_instance is not None:
+        return _private_storage_instance
+    try:
+        from django.conf import settings
+        if getattr(settings, "R2_ENABLED", False):
+            from config.storages import PrivateR2Storage
+            _private_storage_instance = PrivateR2Storage()
+        else:
+            from django.core.files.storage import FileSystemStorage
+            root = getattr(settings, "MEDIA_ROOT", None)
+            if root is None:
+                from pathlib import Path as _P
+                root = _P("media")
+            _private_storage_instance = FileSystemStorage(location=str(root) + "/private")
+    except Exception:
+        # Fallback: default storage so the app doesn't crash
+        from django.core.files.storage import default_storage
+        _private_storage_instance = default_storage
+    return _private_storage_instance
+
+
 class VerificationDocument(models.Model):
     """
     A file attached to a verification request.
@@ -142,6 +170,7 @@ class VerificationDocument(models.Model):
         verbose_name="Ombi",
     )
     file = models.FileField(
+        storage=_private_storage,
         upload_to="verifications/",
         verbose_name="Faili",
     )

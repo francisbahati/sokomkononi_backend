@@ -201,16 +201,11 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        allowed_types = ["image/jpeg", "image/png", "image/webp"]
-        if f.content_type not in allowed_types:
+        from apps.core.image_utils import validate_image, MAX_CATEGORY_IMAGE_BYTES
+        ok, err = validate_image(f, max_bytes=MAX_CATEGORY_IMAGE_BYTES, field="image")
+        if not ok:
             return Response(
-                {"detail": "Aina ya picha hairuhusiwi. Tumia JPG, PNG au WEBP."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if f.size > 5 * 1024 * 1024:
-            return Response(
-                {"detail": "Picha haiwezi kuzidi 5 MB."},
+                {"detail": err},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

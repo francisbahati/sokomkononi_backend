@@ -245,9 +245,21 @@ _cors_default = (
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", _cors_default)
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
 CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
+
 CORS_ALLOW_HEADERS = [
-    "accept", "accept-encoding", "authorization", "content-type", "dnt",
-    "origin", "user-agent", "x-csrftoken", "x-requested-with", "x-access-token",
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+    "x-access-token",
+    "idempotency-key",          
+    "x-idempotency-key",        
+    "x-request-id",             
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
 

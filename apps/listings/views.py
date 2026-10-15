@@ -835,42 +835,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         "[listings] deals app not available, skipping"
                     )
 
-                # 5. Conversations + Messages
-                # Msg.conversation ni PROTECT, hivyo LAZIMA
-                # tufute messages kwanza, kisha conversations.
-                try:
-                    from apps.messaging.models import Conversation, Message
-
-                    conv_ids = list(
-                        Conversation._base_manager
-                        .filter(listing=listing)
-                        .values_list("id", flat=True)
-                    )
-
-                    if conv_ids:
-                        for msg in Message._base_manager.filter(
-                            conversation_id__in=conv_ids
-                        ):
-                            if hasattr(msg, "hard_delete"):
-                                msg.hard_delete()
-                            else:
-                                Message._base_manager.filter(
-                                    pk=msg.pk
-                                ).delete()
-
-                        for conv in Conversation._base_manager.filter(
-                            id__in=conv_ids
-                        ):
-                            if hasattr(conv, "hard_delete"):
-                                conv.hard_delete()
-                            else:
-                                Conversation._base_manager.filter(
-                                    pk=conv.pk
-                                ).delete()
-                except ImportError:
-                    logger.warning(
-                        "[listings] messaging app not available, skipping"
-                    )
 
                 # 6. Related models zingine
                 related_fields = [

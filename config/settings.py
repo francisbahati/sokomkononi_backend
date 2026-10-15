@@ -65,7 +65,7 @@ INSTALLED_APPS = [
     "apps.payments", "apps.contact", "apps.accounts", "apps.categories", "apps.listings",
     "apps.boosting", "apps.deals", "apps.transactions", "apps.finance",
     "apps.notifications", "apps.waiting_list", "apps.saved", "apps.searches",
-    "apps.leads", "apps.messaging", "apps.verifications", "apps.tickets",
+    "apps.leads", "apps.verifications", "apps.tickets",
     "apps.audit", "apps.feedback", "apps.announcements", "apps.content", "apps.rbac",
     "apps.system_settings", "apps.bundles", "apps.credits", "apps.banners",
     "apps.leading_fees", "apps.advertisement_fees", "apps.reservation_rates",

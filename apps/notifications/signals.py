@@ -72,43 +72,6 @@ def _notify_admin(ntype, title, message="", **extra):
     return None
 
 
-# ── Listing events ──────────────────────────────────────────
-
-
-@receiver(post_save, sender="messaging.Message")
-def on_message_sent(sender, instance, created, **kwargs):
-    if not created:
-        return
-    convo = getattr(instance, "conversation", None)
-    if convo is None:
-        return
-    sender_id = instance.sender_id
-    recipient = (
-        convo.seller if sender_id == convo.buyer_id else convo.buyer
-    )
-    if recipient is None:
-        return
-
-    sender_name = "—"
-    try:
-        sender_name = (
-            getattr(instance.sender, "name", "")
-            or getattr(instance.sender, "email", "")
-        )
-    except Exception:
-        pass
-
-    _notify(
-        recipient,
-        "MESSAGE_RECEIVED",
-        f"Ujumbe mpya kutoka {sender_name}",
-        (instance.text or "")[:120],
-        related_object_type="conversation",
-        related_object_id=convo.id,
-        action_url=f"/dashboard/messages?c={convo.id}",
-    )
-
-
 # ── Waiting list events ─────────────────────────────────────
 
 @receiver(post_save, sender="waiting_list.WaitingListEntry")

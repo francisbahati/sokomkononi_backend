@@ -45,6 +45,8 @@ CACHES = {
 
 # Remove django_ratelimit from INSTALLED_APPS if it got added by settings.py
 INSTALLED_APPS = [a for a in INSTALLED_APPS if a != "django_ratelimit"]
+# Remove messaging app — it has been deleted from the project.
+INSTALLED_APPS = [a for a in INSTALLED_APPS if a != "apps.messaging"]
 
 # Keep CSRF/CORS permissive locally
 CORS_ALLOW_CREDENTIALS = True

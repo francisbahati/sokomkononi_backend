@@ -53,9 +53,6 @@ _NOTIFICATION_TYPE_MAP = {
     "WAITING_LIST_JOINED":    ("email", "deals"),
     "WAITING_LIST_AVAILABLE": ("push",  "deals"),
 
-    # ── Messaging — messages ─────────────────────────────
-    "MESSAGE_RECEIVED":    ("push",  "messages"),
-
     # ── Boost — promotions ────────────────────────────────
     "BOOST_ACTIVATED": ("email", "promotions"),
 
@@ -86,14 +83,14 @@ def _should_send_via_channel(recipient, notification_type, channel):
     try:
         prefs = recipient.notification_preferences
     except Exception:
-        return True  # Hakuna prefs — tuma
+        return True 
 
     nt = str(notification_type or "").strip().upper()
     if not nt:
         return True
 
     if nt not in _NOTIFICATION_TYPE_MAP:
-        return False  # Fail-closed
+        return False
 
     mapped_channel, category = _NOTIFICATION_TYPE_MAP[nt]
 
@@ -102,7 +99,6 @@ def _should_send_via_channel(recipient, notification_type, channel):
         return True
 
     # Kama channel iliyotolewa ni tofauti na mapping, tuma
-    # (mfano: unaweza kutaka kutuma via email hata kama mapping ni push)
     if channel != mapped_channel:
         # Angalia prefs field kwa channel iliyotolewa
         field = f"{channel}_{category}"

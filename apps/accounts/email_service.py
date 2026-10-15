@@ -106,3 +106,38 @@ def send_welcome_email(*, user):
         template_base="welcome",
         context={"name": name},
     )
+
+def send_account_deleted_email(*, to_email, name="mteja", reason=""):
+    """
+    Send account-deleted notification.
+    Called BEFORE the user record is hard-deleted, so the email
+    address is still valid at this point.
+    """
+    if not to_email:
+        return EmailResult(False, "no email")
+
+    return _send(
+        to_email=to_email,
+        subject="SokoMkononi — Akaunti yako imefutwa",
+        template_base="account_deleted",
+        context={
+            "name": name or "mteja",
+            "reason": reason or "—",
+        },
+    )
+
+
+def send_account_suspended_email(*, to_email, name="mteja", reason=""):
+    """Send account-suspended notification."""
+    if not to_email:
+        return EmailResult(False, "no email")
+
+    return _send(
+        to_email=to_email,
+        subject="SokoMkononi — Akaunti yako imesimamishwa",
+        template_base="account_suspended",
+        context={
+            "name": name or "mteja",
+            "reason": reason or "—",
+        },
+    )

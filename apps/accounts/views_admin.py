@@ -1,3 +1,10 @@
+# ============================================================
+# apps/accounts/views_admin.py
+# Admin user management — list, retrieve, patch, soft delete,
+# suspend, activate, verify, permanent delete.
+# ============================================================
+import logging
+
 from django.db.models import Q
 
 from rest_framework import permissions, status, viewsets
@@ -7,6 +14,9 @@ from rest_framework.response import Response
 from .models import User
 from .serializers import AdminUserSerializer, ProfileSerializer
 from .services import get_user_role
+
+
+logger = logging.getLogger(__name__)
 
 
 class IsAdminUser(permissions.BasePermission):
@@ -30,10 +40,7 @@ def _log(request, action, target="", target_id=None, details=""):
             details=details,
         )
     except Exception:
-        import logging
-        logging.getLogger(__name__).exception(
-            "Failed to write audit log: %s", action,
-        )
+        logger.exception("Failed to write audit log: %s", action)
 
 
 class AdminUserViewSet(viewsets.GenericViewSet):
@@ -186,6 +193,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
+    # ========================================================
+    # SUSPEND — inahitaji sababu
+    # ========================================================
     @action(detail=True, methods=["post"], url_path="suspend")
     def suspend(self, request, pk=None):
         user = self._get_user(pk)
@@ -194,19 +204,57 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 {"detail": "Haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        if user.is_staff or user.is_superuser:
+            return Response(
+                {"detail": "Hauwezi kumsimamisha admin."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if user.id == request.user.id:
+            return Response(
+                {"detail": "Huwezi kujisimamisha mwenyewe."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = (request.data.get("reason") or "").strip()
+        if len(reason) < 5:
+            return Response(
+                {"detail": "Sababu ya kusimamisha inahitajika (herufi 5+)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         user.is_active = False
         user.save(update_fields=["is_active", "updated_at"])
 
+        # ── Email ───────────────────────────────────────────
+        try:
+            from apps.accounts.email_service import send_account_suspended_email
+            send_account_suspended_email(
+                to_email=user.email or user.deleted_email,
+                name=user.name,
+                reason=reason,
+            )
+        except Exception:
+            logger.exception("Failed to send suspension email to %s", user.id)
+
+        # ── Audit log ───────────────────────────────────────
         _log(
             request,
             action="user.suspended",
             target="User",
             target_id=user.id,
-            details=f"Suspended user: {user.name} ({user.email or '—'})",
+            details=(
+                f"Suspended user: {user.name} "
+                f"({user.email or '—'}) | Reason: {reason}"
+            ),
         )
 
         return Response({"detail": "Mtumiaji amesimamishwa."})
 
+    # ========================================================
+    # ACTIVATE
+    # ========================================================
     @action(detail=True, methods=["post"], url_path="activate")
     def activate(self, request, pk=None):
         user = self._get_user(pk)
@@ -228,6 +276,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
         return Response({"detail": "Mtumiaji amewashwa."})
 
+    # ========================================================
+    # VERIFY
+    # ========================================================
     @action(detail=True, methods=["post"], url_path="verify")
     def verify(self, request, pk=None):
         user = self._get_user(pk)
@@ -249,6 +300,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
         return Response({"detail": "Mtumiaji amethibitishwa."})
 
+    # ========================================================
+    # PERMANENT DELETE — inahitaji reason + confirm_text
+    # ========================================================
     @action(
         detail=True,
         methods=["delete"],
@@ -258,6 +312,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
     def permanent_delete(self, request, pk=None):
         """
         Hard delete user — HAIRUDISHWI.
+
+        Body (JSON):
+            { "reason": "...", "confirm_text": "DELETE" }
         """
         user = self._get_user(pk)
         if not user:
@@ -268,12 +325,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
         if user.is_staff or user.is_superuser:
             return Response(
-                {
-                    "detail": (
-                        "Hauwezi kumfuta admin. "
-                        "Wasiliana na Super Admin."
-                    )
-                },
+                {"detail": "Hauwezi kumfuta admin. Wasiliana na Super Admin."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -283,32 +335,60 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # ── Validate reason + confirm_text ──────────────────
+        data = request.data or {}
+        reason = (data.get("reason") or "").strip()
+        confirm_text = (data.get("confirm_text") or "").strip()
+
+        if len(reason) < 5:
+            return Response(
+                {"detail": "Sababu ya kufuta inahitajika (herufi 5+)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if confirm_text != "DELETE":
+            return Response(
+                {"detail": 'Lazima uandike "DELETE" kuthibitisha.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Capture data kabla ya kufuta ────────────────────
         user_id = user.id
         user_email = user.email or user.deleted_email or "—"
         user_name = user.name
 
+        # ── Send email (kabla ya kufuta — email inahitajika) ─
+        try:
+            from apps.accounts.email_service import send_account_deleted_email
+            send_account_deleted_email(
+                to_email=user_email if user_email != "—" else None,
+                name=user_name,
+                reason=reason,
+            )
+        except Exception:
+            logger.exception("Failed to send deletion email to %s", user_id)
+
+        # ── Hard delete ─────────────────────────────────────
         try:
             user.hard_delete()
         except AttributeError:
-            user.delete(
-                by=request.user,
-                reason="Admin permanent delete (fallback)",
-            )
+            user.delete(by=request.user, reason=reason)
 
+        # ── Audit log ───────────────────────────────────────
         _log(
             request,
             action="user.permanent_deleted",
             target="User",
             target_id=user_id,
-            details=f"Permanently deleted user: {user_name} ({user_email})",
+            details=(
+                f"Permanently deleted user: {user_name} ({user_email}) "
+                f"| Reason: {reason}"
+            ),
         )
 
         return Response(
             {
-                "detail": (
-                    f"Mtumiaji {user_name} ({user_email}) "
-                    f"amefutwa kabisa."
-                ),
+                "detail": f"Mtumiaji {user_name} amefutwa kabisa.",
                 "deleted_id": user_id,
             },
             status=status.HTTP_200_OK,

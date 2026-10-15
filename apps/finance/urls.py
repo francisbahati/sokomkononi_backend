@@ -1,6 +1,7 @@
 # apps/finance/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from .views_reports import ReportsView, ReportsExportView
 
 from .views import (
     FinancialDashboardView,
@@ -39,6 +40,11 @@ urlpatterns = [
     # Reports
     # ═══════════════════════════════════════════════════════════
     path("reports/", ReportsView.as_view(), name="reports"),
+    path(
+    "reports/export/",
+    ReportsExportView.as_view(),
+    name="reports-export",
+        ),
     path(
         "dashboard/",
         FinancialDashboardView.as_view(),

@@ -1,10 +1,12 @@
 # apps/finance/views_reports.py
 from collections import defaultdict
 from datetime import timedelta
+from io import BytesIO
 
 from dateutil.relativedelta import relativedelta
 from django.db.models import Count, Sum
 from django.db.models.functions import Coalesce, TruncDate
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.response import Response
@@ -30,47 +32,50 @@ class IsAdminUser(permissions.BasePermission):
 # ============================================================
 # HELPERS
 # ============================================================
-VISIBLE_LISTING_STATUSES = [
-    Listing.Status.LIVE,
-    Listing.Status.RESERVED,
-    Listing.Status.SOLD,
-]
-
-
 def _visible_listings_qs():
-    """
-    Listings zinazohesabiwa kwenye Reports:
-    - Hazijafutwa (is_deleted=False)
-    - Sio DRAFT
-    """
-    return Listing.objects.filter(
-        is_deleted=False,
-    ).exclude(
+    return Listing.objects.filter(is_deleted=False).exclude(
         status=Listing.Status.DRAFT,
     )
+
+
+def _period_range(period):
+    """Rudisha (start, end) kutoka period string."""
+    now = timezone.localtime()
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, now
+    if period == "week":
+        start = (now - timedelta(days=7))
+        return start, now
+    if period == "month":
+        start = (now - relativedelta(months=1))
+        return start, now
+    if period == "year":
+        start = (now - relativedelta(years=1))
+        return start, now
+    return None, None  # all
 
 
 # ============================================================
 # REPORTS VIEW
 # ============================================================
 class ReportsView(APIView):
-    """
-    GET /api/finance/reports/
-    Returns dashboard aggregates for ReportsSection.jsx
-    """
     permission_classes = [IsAdminUser]
 
     def get(self, request):
         now = timezone.now()
 
-        # ---------- Users ----------
+        # ── USER STATS — TUMA BACKEND PEKEE (sawa na Overview) ──
         user_stats = calculate_user_stats()
 
         total_users = user_stats["totalUsers"]
         total_sellers = user_stats["totalSellers"]
         total_buyers = user_stats["totalBuyers"]
+        both_roles = user_stats["bothRoles"]
+        neither_role = user_stats["neitherRole"]
+        total_admins = user_stats["totalAdmins"]
 
-        # Growth: cumulative users per day for last 30 days
+        # ── USERS GROWTH (cumulative, siku 30) ──
         start_day = (now - timedelta(days=29)).date()
         growth_rows = dict(
             User.objects
@@ -99,7 +104,7 @@ class ReportsView(APIView):
                 "cumulative": running,
             })
 
-        # ---------- Listings ----------
+        # ── LISTINGS ──
         visible_qs = _visible_listings_qs()
 
         total_listings = visible_qs.count()
@@ -119,7 +124,7 @@ class ReportsView(APIView):
                 "count": count,
             })
 
-        # ---------- Deals ----------
+        # ── DEALS ──
         total_deals = DealRoom.objects.count()
         completed_deals = DealRoom.objects.filter(
             status=DealRoom.Status.COMPLETED,
@@ -133,8 +138,10 @@ class ReportsView(APIView):
             .annotate(c=Count("id"))
             .values_list("status", "c")
         )
-        for k in ["OPEN", "NEGOTIATING", "ACCEPTED",
-                  "CANCELLED", "COMPLETED", "DISPUTED"]:
+        for k in [
+            "OPEN", "NEGOTIATING", "ACCEPTED",
+            "CANCELLED", "COMPLETED", "DISPUTED",
+        ]:
             deals_by_status.setdefault(k, 0)
 
         deals_by_status_frontend = {
@@ -146,7 +153,7 @@ class ReportsView(APIView):
             "cancelled": deals_by_status.get("CANCELLED", 0),
         }
 
-        # ---------- Revenue ----------
+        # ── REVENUE ──
         revenue_qs = Transaction.objects.filter(
             status=Transaction.Status.COMPLETED,
         )
@@ -154,7 +161,6 @@ class ReportsView(APIView):
             revenue_qs.aggregate(s=Sum("agreed_price"))["s"] or 0
         )
 
-        # Actual revenue = fees only (from fee tables)
         try:
             from .services.revenue import calculate_financial_dashboard
             fees_data = calculate_financial_dashboard("all")
@@ -162,7 +168,6 @@ class ReportsView(APIView):
         except Exception:
             total_revenue = 0.0
 
-        # Revenue by month (GMV)
         revenue_by_month = []
         _anchor = now.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0,
@@ -185,7 +190,7 @@ class ReportsView(APIView):
             (completed_deals / total_deals) * 100 if total_deals else 0
         )
 
-        # ---------- Top sellers (by views) ----------
+        # ── TOP SELLERS ──
         top_sellers_qs = (
             visible_qs
             .filter(seller__is_staff=False, seller__is_deleted=False)
@@ -205,7 +210,7 @@ class ReportsView(APIView):
             for s in top_sellers_qs
         ]
 
-        # ---------- Most viewed listings ----------
+        # ── MOST VIEWED ──
         most_viewed_qs = visible_qs.order_by("-views_count")[:5]
         most_viewed = [
             {
@@ -217,7 +222,7 @@ class ReportsView(APIView):
             for l in most_viewed_qs
         ]
 
-        # ---------- Top categories ----------
+        # ── TOP CATEGORIES ──
         cat_qs = (
             visible_qs
             .values("category__slug", "category__name")
@@ -234,7 +239,7 @@ class ReportsView(APIView):
             for c in cat_qs
         ]
 
-        # ---------- Top locations ----------
+        # ── TOP LOCATIONS ──
         loc_qs = (
             visible_qs
             .values("location")
@@ -255,9 +260,9 @@ class ReportsView(APIView):
             "totalUsers": total_users,
             "totalSellers": total_sellers,
             "totalBuyers": total_buyers,
-            "bothRoles": user_stats["bothRoles"],
-            "neitherRole": user_stats["neitherRole"],
-            "totalAdmins": user_stats["totalAdmins"],
+            "bothRoles": both_roles,
+            "neitherRole": neither_role,
+            "totalAdmins": total_admins,
             "usersGrowth": users_growth,
 
             # ── Listings ──
@@ -284,3 +289,358 @@ class ReportsView(APIView):
             "topCategories": top_categories,
             "topLocations": top_locations,
         })
+
+
+# ============================================================
+# EXPORT REPORT — CSV / PDF / DOC kwa period
+# ============================================================
+class ReportsExportView(APIView):
+    """
+    GET /api/finance/reports/export/?format=csv&period=week
+
+    Period: today | week | month | year | all
+    Format: csv | pdf | doc
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        fmt = (request.query_params.get("format") or "csv").lower()
+        period = (request.query_params.get("period") or "month").lower()
+        if fmt not in ("csv", "pdf", "doc"):
+            return Response(
+                {"detail": "Format si sahihi. Tumia csv, pdf, au doc."},
+                status=400,
+            )
+        if period not in ("today", "week", "month", "year", "all"):
+            return Response(
+                {"detail": "Period si sahihi. Tumia today, week, month, year, all."},
+                status=400,
+            )
+
+        # Chukua data kutoka ReportsView
+        data = ReportsView().get(request).data
+
+        # Chukua data ya revenue ya period
+        from .services.revenue import (
+            calculate_financial_dashboard,
+            get_revenue_records,
+        )
+        period_map = {
+            "today": "today",
+            "week": "week",
+            "month": "month",
+            "year": "all",  # mfumo hauna "year" — tumia "all"
+            "all": "all",
+        }
+        api_period = period_map.get(period, "all")
+
+        try:
+            fees_data = calculate_financial_dashboard(api_period)
+        except Exception:
+            fees_data = {}
+
+        try:
+            records = get_revenue_records(period=api_period, source="all")
+        except Exception:
+            records = []
+
+        timestamp = timezone.now().strftime("%Y%m%d_%H%M")
+
+        if fmt == "csv":
+            return self._csv(data, records, period, timestamp)
+        if fmt == "pdf":
+            return self._pdf(data, records, period, timestamp)
+        return self._doc(data, records, period, timestamp)
+
+    # ── CSV ──
+    def _csv(self, data, records, period, timestamp):
+        import csv
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = (
+            f'attachment; filename="ripoti_{period}_{timestamp}.csv"'
+        )
+        response.write("\ufeff")
+        writer = csv.writer(response)
+
+        writer.writerow(["SokoMkononi — Ripoti ya Mfumo"])
+        writer.writerow([f"Kipindi: {period}"])
+        writer.writerow([f"Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}"])
+        writer.writerow([])
+
+        # ── Users ──
+        writer.writerow(["=== WATUMIAJI ==="])
+        writer.writerow(["Jumla ya Watumiaji", data.get("totalUsers", 0)])
+        writer.writerow(["Wauzaji Pekee", data.get("totalSellers", 0)])
+        writer.writerow(["Wanunuzi Pekee", data.get("totalBuyers", 0)])
+        writer.writerow(["Wote Wawili", data.get("bothRoles", 0)])
+        writer.writerow(["Wapya", data.get("neitherRole", 0)])
+        writer.writerow(["Admins", data.get("totalAdmins", 0)])
+        writer.writerow([])
+
+        # ── Listings ──
+        writer.writerow(["=== MALI ==="])
+        writer.writerow(["Jumla ya Mali", data.get("totalListings", 0)])
+        writer.writerow(["Mali Hai", data.get("liveListings", 0)])
+        writer.writerow(["Zimeuzwa", data.get("soldListings", 0)])
+        writer.writerow([])
+
+        # ── Deals ──
+        writer.writerow(["=== DEALS ==="])
+        writer.writerow(["Jumla ya Deals", data.get("totalDeals", 0)])
+        writer.writerow(["Zimekamilika", data.get("completedDeals", 0)])
+        writer.writerow(["Migogoro", data.get("disputedDeals", 0)])
+        for k, v in (data.get("dealsByStatus") or {}).items():
+            writer.writerow([f"  {k}", v])
+        writer.writerow([])
+
+        # ── Revenue ──
+        writer.writerow(["=== MAPATO ==="])
+        writer.writerow([
+            "Jumla ya Mapato",
+            f"TZS {float(data.get('totalRevenue', 0)):,.0f}",
+        ])
+        writer.writerow([
+            "Jumla ya GMV",
+            f"TZS {float(data.get('totalGMV', 0)):,.0f}",
+        ])
+        writer.writerow([
+            "Conversion Rate",
+            f"{float(data.get('conversionRate', 0)):.2f}%",
+        ])
+        writer.writerow([])
+
+        # ── Top Sellers ──
+        writer.writerow(["=== WAUZAJI BORA ==="])
+        writer.writerow(["#", "Jina", "Mali", "Views"])
+        for i, s in enumerate(data.get("topSellers", []), 1):
+            writer.writerow([i, s.get("name"), s.get("listings", 0), s.get("views", 0)])
+        writer.writerow([])
+
+        # ── Most Viewed ──
+        writer.writerow(["=== MALI ZINAZOONEKANA ZAIDI ==="])
+        writer.writerow(["#", "Jina", "Views", "Bei"])
+        for i, l in enumerate(data.get("mostViewedListings", []), 1):
+            writer.writerow([
+                i, l.get("title"), l.get("views", 0),
+                f"TZS {float(l.get('price', 0)):,.0f}",
+            ])
+        writer.writerow([])
+
+        # ── Top Categories ──
+        writer.writerow(["=== KATEGORIA ZINAZOONEKANA ZAIDI ==="])
+        writer.writerow(["#", "Kategoria", "Mali", "Views"])
+        for i, c in enumerate(data.get("topCategories", []), 1):
+            writer.writerow([
+                i, c.get("name") or c.get("key"), c.get("count", 0), c.get("views", 0),
+            ])
+        writer.writerow([])
+
+        # ── Top Locations ──
+        writer.writerow(["=== MAENEO YANAYOONEKANA ZAIDI ==="])
+        writer.writerow(["#", "Eneo", "Mali", "Views"])
+        for i, l in enumerate(data.get("topLocations", []), 1):
+            writer.writerow([i, l.get("name"), l.get("count", 0), l.get("views", 0)])
+        writer.writerow([])
+
+        # ── Detailed records ──
+        writer.writerow(["=== MIAMALA ILIYOKAMILIKA ==="])
+        writer.writerow(["Tarehe", "Kumbukumbu", "Aina", "Kichwa", "Kiasi (TZS)", "Hali"])
+        for r in records:
+            date_val = r.get("paid_at") or r.get("created_at")
+            date_str = date_val.strftime("%Y-%m-%d") if date_val else ""
+            writer.writerow([
+                date_str,
+                str(r.get("payment_reference") or "—")[:20],
+                r.get("source_label") or "—",
+                (r.get("listing_title") or "")[:40],
+                f"{float(r.get('amount', 0)):,.0f}",
+                r.get("payment_status") or "—",
+            ])
+
+        return response
+
+    # ── PDF ──
+    def _pdf(self, data, records, period, timestamp):
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib.units import cm
+            from reportlab.platypus import (
+                PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+            )
+        except ImportError:
+            return Response(
+                {"detail": "reportlab haipo. Wasiliana na admin."},
+                status=500,
+            )
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer, pagesize=A4,
+            rightMargin=1.5 * cm, leftMargin=1.5 * cm,
+            topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+        )
+        styles = getSampleStyleSheet()
+        elements = []
+
+        elements.append(Paragraph(
+            "<b>SokoMkononi — Ripoti ya Mfumo</b>", styles["Title"],
+        ))
+        elements.append(Spacer(1, 0.3 * cm))
+        elements.append(Paragraph(
+            f"Kipindi: <b>{period}</b> · Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}",
+            styles["Normal"],
+        ))
+        elements.append(Spacer(1, 0.5 * cm))
+
+        def make_table(rows, headers):
+            tbl_data = [headers] + rows
+            t = Table(tbl_data, repeatRows=1)
+            t.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#101A2E")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E6E2D6")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F3EC")]),
+            ]))
+            return t
+
+        elements.append(Paragraph("<b>1. Watumiaji</b>", styles["Heading2"]))
+        elements.append(make_table([
+            ["Jumla ya Watumiaji", str(data.get("totalUsers", 0))],
+            ["Wauzaji Pekee", str(data.get("totalSellers", 0))],
+            ["Wanunuzi Pekee", str(data.get("totalBuyers", 0))],
+            ["Wote Wawili", str(data.get("bothRoles", 0))],
+            ["Wapya", str(data.get("neitherRole", 0))],
+            ["Admins", str(data.get("totalAdmins", 0))],
+        ], ["Kipimo", "Thamani"]))
+        elements.append(Spacer(1, 0.5 * cm))
+
+        elements.append(Paragraph("<b>2. Mali</b>", styles["Heading2"]))
+        elements.append(make_table([
+            ["Jumla ya Mali", str(data.get("totalListings", 0))],
+            ["Mali Hai", str(data.get("liveListings", 0))],
+            ["Zimeuzwa", str(data.get("soldListings", 0))],
+        ], ["Kipimo", "Thamani"]))
+        elements.append(Spacer(1, 0.5 * cm))
+
+        elements.append(Paragraph("<b>3. Deals</b>", styles["Heading2"]))
+        elements.append(make_table([
+            ["Jumla ya Deals", str(data.get("totalDeals", 0))],
+            ["Zimekamilika", str(data.get("completedDeals", 0))],
+            ["Migogoro", str(data.get("disputedDeals", 0))],
+        ], ["Kipimo", "Thamani"]))
+        elements.append(Spacer(1, 0.5 * cm))
+
+        elements.append(Paragraph("<b>4. Mapato</b>", styles["Heading2"]))
+        elements.append(make_table([
+            ["Jumla ya Mapato", f"TZS {float(data.get('totalRevenue', 0)):,.0f}"],
+            ["Jumla ya GMV", f"TZS {float(data.get('totalGMV', 0)):,.0f}"],
+            ["Conversion Rate", f"{float(data.get('conversionRate', 0)):.2f}%"],
+        ], ["Kipimo", "Thamani"]))
+        elements.append(Spacer(1, 0.5 * cm))
+
+        if data.get("topSellers"):
+            elements.append(Paragraph("<b>5. Wauzaji Bora</b>", styles["Heading2"]))
+            elements.append(make_table([
+                [str(i), s["name"], str(s.get("listings", 0)), str(s.get("views", 0))]
+                for i, s in enumerate(data["topSellers"], 1)
+            ], ["#", "Jina", "Mali", "Views"]))
+            elements.append(Spacer(1, 0.5 * cm))
+
+        if data.get("mostViewedListings"):
+            elements.append(Paragraph("<b>6. Mali Zinazoonekana Zaidi</b>", styles["Heading2"]))
+            elements.append(make_table([
+                [str(i), l["title"][:40], str(l.get("views", 0)),
+                 f"TZS {float(l.get('price', 0)):,.0f}"]
+                for i, l in enumerate(data["mostViewedListings"], 1)
+            ], ["#", "Jina", "Views", "Bei"]))
+
+        doc.build(elements)
+        buffer.seek(0)
+        response = HttpResponse(buffer.read(), content_type="application/pdf")
+        response["Content-Disposition"] = (
+            f'attachment; filename="ripoti_{period}_{timestamp}.pdf"'
+        )
+        return response
+
+    # ── DOC ──
+    def _doc(self, data, records, period, timestamp):
+        try:
+            from docx import Document
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+        except ImportError:
+            return Response(
+                {"detail": "python-docx haipo. Wasiliana na admin."},
+                status=500,
+            )
+
+        doc = Document()
+        h = doc.add_heading("SokoMkononi — Ripoti ya Mfumo", 0)
+        h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        sub = doc.add_paragraph(
+            f"Kipindi: {period} · Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+        )
+        sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        def add_section(title, rows, headers):
+            doc.add_heading(title, level=1)
+            t = doc.add_table(rows=1, cols=len(headers))
+            t.style = "Light Grid Accent 1"
+            hdr = t.rows[0].cells
+            for i, h in enumerate(headers):
+                hdr[i].text = h
+            for r in rows:
+                cells = t.add_row().cells
+                for i, v in enumerate(r):
+                    cells[i].text = str(v)
+
+        add_section("1. Watumiaji", [
+            ["Jumla ya Watumiaji", data.get("totalUsers", 0)],
+            ["Wauzaji Pekee", data.get("totalSellers", 0)],
+            ["Wanunuzi Pekee", data.get("totalBuyers", 0)],
+            ["Wote Wawili", data.get("bothRoles", 0)],
+            ["Wapya", data.get("neitherRole", 0)],
+            ["Admins", data.get("totalAdmins", 0)],
+        ], ["Kipimo", "Thamani"])
+
+        add_section("2. Mali", [
+            ["Jumla ya Mali", data.get("totalListings", 0)],
+            ["Mali Hai", data.get("liveListings", 0)],
+            ["Zimeuzwa", data.get("soldListings", 0)],
+        ], ["Kipimo", "Thamani"])
+
+        add_section("3. Deals", [
+            ["Jumla ya Deals", data.get("totalDeals", 0)],
+            ["Zimekamilika", data.get("completedDeals", 0)],
+            ["Migogoro", data.get("disputedDeals", 0)],
+        ], ["Kipimo", "Thamani"])
+
+        add_section("4. Mapato", [
+            ["Jumla ya Mapato", f"TZS {float(data.get('totalRevenue', 0)):,.0f}"],
+            ["Jumla ya GMV", f"TZS {float(data.get('totalGMV', 0)):,.0f}"],
+            ["Conversion Rate", f"{float(data.get('conversionRate', 0)):.2f}%"],
+        ], ["Kipimo", "Thamani"])
+
+        if data.get("topSellers"):
+            add_section("5. Wauzaji Bora", [
+                [i, s["name"], s.get("listings", 0), s.get("views", 0)]
+                for i, s in enumerate(data["topSellers"], 1)
+            ], ["#", "Jina", "Mali", "Views"])
+
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        response = HttpResponse(
+            buffer.read(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="ripoti_{period}_{timestamp}.docx"'
+        )
+        return response

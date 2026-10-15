@@ -1,9 +1,21 @@
+# apps/content/serializers.py
+
 from rest_framework import serializers
 
 from .models import Banner, FAQ, SiteContent, Testimonial
 
 
 class SiteContentSerializer(serializers.ModelSerializer):
+    """
+    Serializer ya SiteContent (About, Terms, Privacy, Help).
+
+    Inashughulikia:
+    - heading (SW/EN) → heading_sw / heading_en
+    - content (SW/EN) → content_sw / content_en
+    - extra JSON field → subtext, mission, vision, values, team,
+      subtitle, sections
+    """
+
     heading = serializers.SerializerMethodField()
     content = serializers.SerializerMethodField()
 
@@ -36,6 +48,67 @@ class SiteContentSerializer(serializers.ModelSerializer):
                 if "en" in val:
                     data[f"{key}_en"] = val["en"]
         return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        """
+        Ongeza fields zilizo kwenye `extra` kwenye response:
+        subtext, mission, vision, values, team, subtitle, sections, lastUpdated.
+        """
+        rep = super().to_representation(instance)
+        extra = instance.extra or {}
+
+        # About
+        rep["subtext"] = extra.get("subtext", {"sw": "", "en": ""})
+        rep["mission"] = extra.get("mission", {"sw": "", "en": ""})
+        rep["vision"] = extra.get("vision", {"sw": "", "en": ""})
+        rep["values"] = extra.get("values", [])
+        rep["team"] = extra.get("team", [])
+
+        # Terms / Privacy
+        rep["subtitle"] = extra.get("subtitle", {"sw": "", "en": ""})
+        rep["sections"] = extra.get("sections", [])
+
+        # Help (content tayari ipo kwenye rep kupitia get_content)
+        # lastUpdated
+        rep["lastUpdated"] = instance.updated_at.isoformat() if instance.updated_at else ""
+
+        return rep
+
+    def update(self, instance, validated_data):
+        """
+        Shughulikia `extra` fields (subtext, mission, vision, values,
+        team, subtitle, sections) kwa kuwaweka kwenye `extra` JSON.
+        """
+        # Vuta data ya awali ya extra
+        extra = dict(instance.extra or {})
+
+        # About fields
+        for field in ("subtext", "mission", "vision"):
+            if field in self.initial_data:
+                extra[field] = self.initial_data[field]
+
+        # values / team (About)
+        for field in ("values", "team"):
+            if field in self.initial_data:
+                extra[field] = self.initial_data[field]
+
+        # Terms / Privacy
+        if "subtitle" in self.initial_data:
+            extra["subtitle"] = self.initial_data["subtitle"]
+        if "sections" in self.initial_data:
+            extra["sections"] = self.initial_data["sections"]
+
+        # Help: content tayari inashughulikiwa na to_internal_value
+        # (content_sw / content_en)
+
+        instance.extra = extra
+
+        # Shughulikia heading_sw / heading_en / content_sw / content_en
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.save()
+        return instance
 
 
 class BannerSerializer(serializers.ModelSerializer):
@@ -97,11 +170,12 @@ class TestimonialSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
-            "location",      # ⬅️ MPYA
+            "location",
             "quote",
             "avatar_url",
             "rating",
             "active",
+            "order",
             "created_at",
             "quote_sw",
             "quote_en",

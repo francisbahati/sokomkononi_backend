@@ -55,10 +55,8 @@ class ContentViewSet(GenericViewSet):
             )
         data = self._site_content(upper)
         if data is None:
-            return Response(
-                {"detail": "Haipo."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            obj = SiteContent(key=upper)
+            return Response(SiteContentSerializer(obj).data)
         return Response(data)
 
     def update_key(self, request, key=None):

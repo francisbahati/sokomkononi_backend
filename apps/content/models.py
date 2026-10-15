@@ -1,3 +1,5 @@
+# apps/content/models.py
+
 from django.db import models
 
 
@@ -21,7 +23,7 @@ class SiteContent(models.Model):
     content_sw = models.TextField(blank=True)
     content_en = models.TextField(blank=True)
 
-    # Extra structure for About (mission + subtext + values)
+    # Extra structure for About (mission + subtext + values), Terms/Privacy (sections)
     extra = models.JSONField(default=dict, blank=True)
 
     updated_at = models.DateTimeField(auto_now=True)
@@ -58,7 +60,6 @@ class Banner(models.Model):
 class Testimonial(models.Model):
     name = models.CharField(max_length=150)
 
-    # ⬇️ MPYA — Mahali pa mtoa ushuhuda
     location = models.CharField(
         max_length=150,
         blank=True,
@@ -71,11 +72,15 @@ class Testimonial(models.Model):
     avatar_url = models.URLField(blank=True)
     rating = models.PositiveSmallIntegerField(default=5)
     active = models.BooleanField(default=True)
+
+    # ⬇️ MPYA — Mpangilio
+    order = models.PositiveIntegerField(default=1)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "content_testimonials"
-        ordering = ["-created_at"]
+        ordering = ["order", "-created_at"]
 
     def __str__(self):
         return self.name

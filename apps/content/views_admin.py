@@ -119,9 +119,13 @@ class AdminContentViewSet(viewsets.GenericViewSet):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
+# apps/content/views_admin.py — SEHEMU YA AdminSiteContentView
+
 class AdminSiteContentView(viewsets.GenericViewSet):
     """
+    GET   /api/admin/content/{about,terms,privacy,help}/
     PATCH /api/admin/content/{about,terms,privacy,help}/
+
     Admin-only update of a SiteContent singleton row.
     """
     serializer_class = SiteContentSerializer
@@ -151,12 +155,9 @@ class AdminSiteContentView(viewsets.GenericViewSet):
             )
         obj = SiteContent.objects.filter(key=upper).first()
         if not obj:
-            return Response(
-                {"detail": "Haipo."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            # Rudisha empty structure badala ya 404
+            obj = SiteContent(key=upper)
         return Response(SiteContentSerializer(obj).data)
-
 
 # ============================================================
 # CONTENT IMAGE UPLOAD

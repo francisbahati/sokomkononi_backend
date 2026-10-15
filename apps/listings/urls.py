@@ -21,6 +21,11 @@ from .views import (
     VehicleDetailsViewSet,
 )
 from .views_fee_rules import ListingFeeRuleViewSet
+from .views_location import (
+    ListingCreateWithImagesView,
+    ListingImagesBulkUploadView,
+    ListingLocationUpdateView,
+)
 from .release_reservation import ReleaseReservationView
 from .views_duplicate import check_duplicate_listing
 
@@ -159,6 +164,22 @@ urlpatterns = [
         name="listing-release-reservation",
     ),
     path("trash/", listing_trash, name="listing-trash"),
+
+    path(
+        "<int:pk>/location/",
+        ListingLocationUpdateView.as_view(),
+        name="listing-location",
+    ),
+    path(
+        "<int:pk>/images/bulk/",
+        ListingImagesBulkUploadView.as_view(),
+        name="listing-images-bulk",
+    ),
+    path(
+        "create-with-images/",
+        ListingCreateWithImagesView.as_view(),
+        name="listing-create-with-images",
+    ),
 
     path("<int:pk>/", listing_detail, name="listing-detail"),
 

@@ -30,6 +30,9 @@ class Notification(SoftDeleteModel):
 
         INSPECTION_STARTED = "INSPECTION_STARTED", "Inspection Started"
         INSPECTION_COMPLETED = "INSPECTION_COMPLETED", "Inspection Completed"
+        LISTING_NEEDS_EDIT = "LISTING_NEEDS_EDIT", "Listing Needs Edit"
+        LISTING_PAYMENT_REQUESTED = "LISTING_PAYMENT_REQUESTED", "Listing Payment Requested"
+        LISTING_FINAL_APPROVED = "LISTING_FINAL_APPROVED", "Listing Final Approved"
 
         BUYER_DECISION = "BUYER_DECISION", "Buyer Decision"
 

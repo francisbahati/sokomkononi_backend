@@ -1,6 +1,14 @@
 # apps/listings/services/listing_payment.py
 """
 FimiPay initiation + webhook handling for listing fees.
+
+Chaguo B flow:
+  • Seller analipa (FimiPay au credits) → fee PAID
+  • Listing status inaenda PAID_PENDING_APPROVAL (sio PENDING_APPROVAL)
+  • Admin analidhinisha mwisho → LIVE
+
+Kwa credits/free paths, listing inaenda PENDING_APPROVAL moja kwa moja
+kwa sababu admin hahitaji kuona malipo (fee ni 0 au credits tayari).
 """
 import uuid
 
@@ -58,9 +66,15 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
     )
     if listing.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia ada ya tangazo hili.")
+
+    # Chaguo B: seller anaweza kulipa kama:
+    #   • DRAFT / PENDING_PAYMENT — anaunda na analipa papo (legacy)
+    #   • APPROVED_PENDING_PAYMENT — admin ameomba malipo
+    #   • REJECTED — retry baada ya kukataliwa (kama ameamua kubadilisha)
     allowed_states = (
         Listing.Status.DRAFT,
         Listing.Status.PENDING_PAYMENT,
+        Listing.Status.APPROVED_PENDING_PAYMENT,
         Listing.Status.REJECTED,
     )
     if listing.status not in allowed_states:
@@ -111,6 +125,12 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
 
 @transaction.atomic
 def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
+    """
+    Webhook handler: FimiPay inatuma hii baada ya malipo kufanikiwa.
+
+    Chaguo B: listing inaenda PAID_PENDING_APPROVAL (sio PENDING_APPROVAL)
+    kwa sababu admin bado anahitaji kuidhinisha mwisho.
+    """
     try:
         listing_fee = (
             ListingFee.objects
@@ -138,11 +158,36 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
 
-    # Advance the listing to PENDING_APPROVAL for admin review
+    # Advance the listing to PAID_PENDING_APPROVAL (Chaguo B)
+    # — admin bado anahitaji kuidhinisha mwisho.
     Listing.objects.filter(pk=ref_id).update(
-        status=Listing.Status.PENDING_APPROVAL,
+        status=Listing.Status.PAID_PENDING_APPROVAL,
         updated_at=timezone.now(),
     )
+
+    # Notify admins — fee imelipwa, listing inasubiri idhini ya mwisho
+    try:
+        from apps.notifications.models import Notification
+        from apps.notifications.services.notification import (
+            create_notification_for_admins,
+        )
+        listing = Listing.objects.get(pk=ref_id)
+        create_notification_for_admins(
+            notification_type=Notification.NotificationType.LISTING_FEE_PAID,
+            title="Ada ya tangazo imelipwa",
+            message=(
+                f'"{listing.title}" — tayari kwa idhini ya mwisho.'
+            ),
+            related_object_type="listings.Listing",
+            related_object_id=ref_id,
+            action_url="/smk-control-9x7k/moderation",
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to notify admins about paid listing fee"
+        )
+
     return listing_fee
 
 

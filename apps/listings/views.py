@@ -67,6 +67,9 @@ from .services.listing_fee import create_listing_fee
 from .services.listing_moderation import (
     approve_listing,
     reject_listing,
+    request_edit_listing,
+    request_payment_listing,
+    finalize_approval_listing,
 )
 
 from .views_helpers import require_int_listing_id
@@ -219,11 +222,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def create(self, request, *args, **kwargs):
-        """
-        Override create to return ListingDetailSerializer (with id) instead
-        of ListingWriteSerializer (no id). Frontend needs the id to
-        upload images, pay fees, etc.
-        """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -263,10 +261,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             status=Listing.Status.DRAFT,
         )
 
-        # Auto-compute the fee right now so the seller sees the real
-        # amount on the "Listing imeundwa" page. Every listing gets a
-        # positive fee — create_listing_fee() auto-creates a rule if
-        # none exists yet.
         try:
             from .services.listing_fee import create_listing_fee
 
@@ -287,8 +281,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             serializer.save()
             return
 
-        # Seller path — allow specific status transitions via PATCH,
-        # but validate them so a seller cannot jump to arbitrary states.
         new_status = None
         if hasattr(self.request, "data") and isinstance(self.request.data, dict):
             new_status = self.request.data.get("status")
@@ -312,17 +304,11 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         serializer.save(seller=instance.seller)
 
-
     def retrieve(self, request, *args, **kwargs):
-        """
-        Ongeza views_count kila listing inapotazamwa.
-        """
         instance = self.get_object()
         user = request.user
 
         should_count = True
-
-        # Usihesabu kama ni seller mwenyewe au staff
         if user.is_authenticated and (
             user.id == instance.seller_id or user.is_staff
         ):
@@ -336,8 +322,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         data = self.get_serializer(instance).data
 
-        # Inject the same payment block so any listing detail page can
-        # render the fee without a second call.
         fee = getattr(instance, "listing_fee", None)
         if fee is not None:
             data["payment"] = {
@@ -373,14 +357,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[permissions.AllowAny],
     )
     def similar(self, request, pk=None):
-        """
-        Rudisha listings zinazofanana na listing hii.
-
-        Mkakati wa hatua kwa hatua:
-        1. Category + location + price (+/- 30%)
-        2. Category + price (+/- 30%)
-        3. Category pekee (relaxed zaidi)
-        """
         listing = self.get_object()
 
         base = Listing.objects.filter(
@@ -396,7 +372,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         results = []
 
-        # 1. Category + location + price
         qs = base
         if listing.location:
             location_keyword = listing.location.split(",")[0].strip()
@@ -415,7 +390,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         results = list(qs.order_by("-is_featured", "-created_at")[:8])
 
-        # 2. Ondoa location, jaribu price pekee
         if not results and listing.price:
             try:
                 price = float(listing.price)
@@ -429,7 +403,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             except (TypeError, ValueError):
                 pass
 
-        # 3. Category pekee
         if not results:
             results = list(
                 base.order_by("-is_featured", "-created_at")[:8]
@@ -441,7 +414,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         return Response(serializer.data)
 
     # ═══════════════════════════════════════════════════════════════════
-    # B-6: CHECK DUPLICATE
+    # CHECK DUPLICATE
     # ═══════════════════════════════════════════════════════════════════
     @extend_schema(
         request=None,
@@ -452,11 +425,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def check_duplicate(self, request):
-        """
-        POST /api/listings/check-duplicate/
-        Body: { title, price, location, category, window_days }
-        Returns: { is_duplicate: bool, existing: {...} | null }
-        """
         title = (request.data.get("title") or "").strip()
         location = (request.data.get("location") or "").strip()
         category = request.data.get("category") or request.data.get("category_id")
@@ -503,10 +471,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         })
 
     # ═══════════════════════════════════════════════════════════════════
-    # B-7: PUBLISH (no-fee path)
-    # ═══════════════════════════════════════════════════════════════════
-        # ═══════════════════════════════════════════════════════════════════
-    # B-7: PUBLISH
+    # PUBLISH
     # ═══════════════════════════════════════════════════════════════════
     @action(
         detail=True,
@@ -515,11 +480,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[IsVerifiedUser, IsOwnerOrAdmin],
     )
     def publish(self, request, pk=None):
-        """
-        POST /api/listings/{id}/publish/
-        Moves a DRAFT to PENDING_APPROVAL if no fee is required,
-        otherwise to PENDING_PAYMENT.
-        """
         from .services.listing_fee import create_listing_fee
         from .services.listing_moderation import _is_listing_fee_required_for
 
@@ -529,17 +489,16 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         if listing.status not in (
             Listing.Status.DRAFT,
             Listing.Status.REJECTED,
+            Listing.Status.NEEDS_EDIT,
         ):
             return Response(
                 {"detail": f"Tangazo halipo kwenye DRAFT. Hali: {listing.status}."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Fee already created at listing-create time. Check its status.
         fee = getattr(listing, "listing_fee", None)
 
         if fee is None:
-            # Legacy listings — create on demand
             try:
                 fee = create_listing_fee(listing)
             except Exception as exc:
@@ -556,7 +515,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 )
 
         if fee.payment_status == ListingFee.PaymentStatus.PAID:
-            # Already paid — move to PENDING_APPROVAL
             listing.status = Listing.Status.PENDING_APPROVAL
             listing.save(update_fields=["status", "updated_at"])
             return Response(
@@ -566,23 +524,25 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        # Fee not paid — keep in PENDING_PAYMENT so the seller pays
-        listing.status = Listing.Status.PENDING_PAYMENT
+        # Chaguo B: seller anawasilisha kwa admin BILA ya kulipa.
+        # Admin anaona, anakagua, kisha anamwambia seller alipe.
+        listing.status = Listing.Status.PENDING_APPROVAL
         listing.save(update_fields=["status", "updated_at"])
 
         return Response(
             {
-                "detail": "Malipo ya ada yanahitajika kabla ya kuwasilisha.",
-                "payment_required": True,
-                "fee_amount": str(fee.amount),
-                "fee_currency": "TZS",
+                "detail": (
+                    "Tangazo limewasilishwa kwa admin kukagua. "
+                    "Utapata taarifa kuhusu malipo baada ya kukaguliwa."
+                ),
                 "listing_id": listing.id,
                 "status": listing.status,
             },
             status=status.HTTP_200_OK,
         )
+
     # ═══════════════════════════════════════════════════════════════════
-    # B-8: DISAPPROVE (admin only)
+    # DISAPPROVE (admin only)
     # ═══════════════════════════════════════════════════════════════════
     @extend_schema(
         request=ListingRejectionSerializer,
@@ -593,16 +553,13 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[permissions.IsAdminUser],
     )
     def disapprove(self, request, pk=None):
-        """
-        POST /api/listings/{id}/disapprove/
-        Demote a live listing back to REJECTED (admin correction).
-        """
         listing = self.get_object()
 
         if listing.status not in (
             Listing.Status.LIVE,
             Listing.Status.RESERVED,
             Listing.Status.PENDING_APPROVAL,
+            Listing.Status.PAID_PENDING_APPROVAL,
         ):
             return Response(
                 {"detail": f"Tangazo halipo kwenye hali inayoweza kukataliwa. Hali: {listing.status}."},
@@ -640,7 +597,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-
     # ═══════════════════════════════════════════════════════════════════
     # PAUSE / UNPAUSE / MARK-SOLD
     # ═══════════════════════════════════════════════════════════════════
@@ -649,7 +605,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[IsOwnerOrAdmin],
     )
     def pause(self, request, pk=None):
-        """LIVE -> PAUSED. Seller hides the listing temporarily."""
         listing = self.get_object()
         self.check_object_permissions(request, listing)
 
@@ -671,7 +626,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[IsOwnerOrAdmin],
     )
     def unpause(self, request, pk=None):
-        """PAUSED -> LIVE."""
         listing = self.get_object()
         self.check_object_permissions(request, listing)
 
@@ -693,7 +647,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[IsOwnerOrAdmin],
     )
     def mark_sold(self, request, pk=None):
-        """LIVE -> SOLD. Seller manually marks the listing as sold."""
         listing = self.get_object()
         self.check_object_permissions(request, listing)
 
@@ -719,8 +672,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
     # ========================================================================
     # DESTROY - soft delete (default) au hard delete (admin)
-    #   - Catch ProtectedError mwisho kama safety net, na
-    #     tumia transaction.atomic() kuzuia partial deletes.
     # ========================================================================
     def destroy(self, request, *args, **kwargs):
         listing = self.get_object()
@@ -729,7 +680,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             "hard", "false"
         ).lower() in ("true", "1", "yes")
 
-        # Soft delete (default)
         if not (request.user.is_staff and is_hard):
             listing.delete(
                 by=request.user,
@@ -755,11 +705,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 # 1. ListingFee (PROTECT)
                 ListingFee.objects.filter(listing=listing).delete()
 
-                # 2. Leads (PROTECT) -- HARD DELETE
-                # Lead ina Model.delete() override inayofanya
-                # soft delete. Hata queryset.delete() inaheshimu
-                # override hiyo. Kwa hivyo LAZIMA tutumie
-                # hard_delete() kwa kila lead mmoja mmoja.
+                # 2. Leads
                 try:
                     from apps.leads.models import Lead
 
@@ -781,8 +727,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     ).count()
                     if remaining:
                         raise RuntimeError(
-                            f"Leads {remaining} zinarejelea tangazo "
-                            f"hili bado."
+                            f"Leads {remaining} zinarejelea tangazo hili bado."
                         )
                 except ImportError:
                     logger.warning(
@@ -790,8 +735,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     )
 
                 # 3. Transaction chain
-                # Mpangilio: InspectionPeriod -> Reservation ->
-                # Transaction (kila moja ina PROTECT kwa iliyo juu).
                 try:
                     from apps.transactions.models import (
                         Transaction,
@@ -819,11 +762,10 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         ).delete()
                 except ImportError:
                     logger.warning(
-                        "[listings] transactions app not available, "
-                        "skipping"
+                        "[listings] transactions app not available, skipping"
                     )
 
-                # 4. DealRoom (PROTECT)
+                # 4. DealRoom
                 try:
                     from apps.deals.models import DealRoom
 
@@ -835,8 +777,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         "[listings] deals app not available, skipping"
                     )
 
-
-                # 6. Related models zingine
+                # 5. Related models
                 related_fields = [
                     "images",
                     "boosts",
@@ -859,13 +800,12 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                                 obj.delete()
                     except Exception as exc:
                         logger.warning(
-                            "[listings] delete %s for listing %s "
-                            "failed: %s",
+                            "[listings] delete %s for listing %s failed: %s",
                             field_name, listing.id, exc,
                         )
                         raise
 
-                # 7. Details (one-to-one)
+                # 6. Details (one-to-one)
                 detail_fields = [
                     "property_details",
                     "land_details",
@@ -881,7 +821,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                     if obj is not None:
                         obj.delete()
 
-                # 8. Hatimaye: hard delete listing
+                # 7. Hatimaye: hard delete listing
                 listing.hard_delete()
 
         except ProtectedError as exc:
@@ -894,12 +834,9 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 {
                     "detail": (
                         "Imeshindwa kufuta: kuna rekodi "
-                        f"{len(protected)} zinazorejelea tangazo "
-                        "hili."
+                        f"{len(protected)} zinazorejelea tangazo hili."
                     ),
-                    "protected_objects": [
-                        str(o) for o in protected
-                    ],
+                    "protected_objects": [str(o) for o in protected],
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -967,12 +904,9 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
     def validate_listing_category(self, listing):
         if listing.category.slug != self.required_category_slug:
             return Response(
-                {
-                    "detail": (
-                        f"Tangazo hili si la kundi "
-                        f"{self.required_category_slug}."
-                    )
-                },
+                {"detail": (
+                    f"Tangazo hili si la kundi {self.required_category_slug}."
+                )},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return None
@@ -982,12 +916,10 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
 
         if not self.check_owner(listing):
             return Response(
-                {
-                    "detail": (
-                        "Huna ruhusa ya kubadilisha "
-                        "taarifa za tangazo ambalo si lako."
-                    )
-                },
+                {"detail": (
+                    "Huna ruhusa ya kubadilisha "
+                    "taarifa za tangazo ambalo si lako."
+                )},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -1058,12 +990,10 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
 
         if not self.check_owner(listing):
             return Response(
-                {
-                    "detail": (
-                        "Huna ruhusa ya kubadilisha "
-                        "taarifa za tangazo ambalo si lako."
-                    )
-                },
+                {"detail": (
+                    "Huna ruhusa ya kubadilisha "
+                    "taarifa za tangazo ambalo si lako."
+                )},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -1082,11 +1012,7 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
 
         if not self.check_owner(listing):
             return Response(
-                {
-                    "detail": (
-                        "Huna ruhusa ya kufuta taarifa hizi."
-                    )
-                },
+                {"detail": "Huna ruhusa ya kufuta taarifa hizi."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -1098,8 +1024,9 @@ class CategoryDetailsViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+
 # ============================================================================
-# PROPERTY
+# PROPERTY / LAND / VEHICLE / BUSINESS / EQUIPMENT
 # ============================================================================
 
 class PropertyDetailsViewSet(CategoryDetailsViewSet):
@@ -1113,9 +1040,6 @@ class PropertyDetailsViewSet(CategoryDetailsViewSet):
     )
     deleted_message = "Maelezo ya nyumba/jengo yamefutwa."
 
-# ============================================================================
-# LAND
-# ============================================================================
 
 class LandDetailsViewSet(CategoryDetailsViewSet):
     detail_model = LandDetails
@@ -1128,9 +1052,6 @@ class LandDetailsViewSet(CategoryDetailsViewSet):
     )
     deleted_message = "Maelezo ya ardhi yamefutwa."
 
-# ============================================================================
-# VEHICLE
-# ============================================================================
 
 class VehicleDetailsViewSet(CategoryDetailsViewSet):
     detail_model = VehicleDetails
@@ -1143,9 +1064,6 @@ class VehicleDetailsViewSet(CategoryDetailsViewSet):
     )
     deleted_message = "Maelezo ya gari yamefutwa."
 
-# ============================================================================
-# BUSINESS
-# ============================================================================
 
 class BusinessDetailsViewSet(CategoryDetailsViewSet):
     detail_model = BusinessDetails
@@ -1158,9 +1076,6 @@ class BusinessDetailsViewSet(CategoryDetailsViewSet):
     )
     deleted_message = "Maelezo ya biashara yamefutwa."
 
-# ============================================================================
-# EQUIPMENT
-# ============================================================================
 
 class EquipmentDetailsViewSet(CategoryDetailsViewSet):
     detail_model = EquipmentDetails
@@ -1173,33 +1088,19 @@ class EquipmentDetailsViewSet(CategoryDetailsViewSet):
     )
     deleted_message = "Maelezo ya mashine yamefutwa."
 
+
 # ============================================================================
 # LISTING IMAGE VIEWSET
 # ============================================================================
 
 @extend_schema_view(
-    list=extend_schema(
-        summary="Orodha ya picha za tangazo",
-        description="Huonyesha picha zote za tangazo kwa mpangilio.",
-    ),
+    list=extend_schema(summary="Orodha ya picha za tangazo"),
     retrieve=extend_schema(summary="Angalia picha ya tangazo"),
     create=extend_schema(
         summary="Ongeza picha kwenye tangazo",
-        description=(
-            "Muuzaji anaweza kuongeza picha kwenye tangazo lake. "
-            "Admin anaweza kuongeza picha kwenye tangazo lolote."
-        ),
         request={"multipart/form-data": ListingImageSerializer},
-        responses={
-            201: ListingImageSerializer,
-            400: OpenApiResponse(description="Taarifa za picha si sahihi."),
-            403: OpenApiResponse(description="Huna ruhusa ya kuongeza picha."),
-        },
     ),
-    partial_update=extend_schema(
-        summary="Badilisha taarifa za picha",
-        description="Badilisha picha kuwa primary au badilisha mpangilio wake.",
-    ),
+    partial_update=extend_schema(summary="Badilisha taarifa za picha"),
     destroy=extend_schema(summary="Futa picha ya tangazo"),
 )
 class ListingImageViewSet(viewsets.ModelViewSet):
@@ -1259,12 +1160,10 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             and listing.seller_id != request.user.id
         ):
             return Response(
-                {
-                    "detail": (
-                        "Huna ruhusa ya kuongeza picha kwenye "
-                        "tangazo ambalo si lako."
-                    )
-                },
+                {"detail": (
+                    "Huna ruhusa ya kuongeza picha kwenye "
+                    "tangazo ambalo si lako."
+                )},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -1278,12 +1177,10 @@ class ListingImageViewSet(viewsets.ModelViewSet):
         allowed_types = ["image/jpeg", "image/png", "image/webp"]
         if image.content_type not in allowed_types:
             return Response(
-                {
-                    "detail": (
-                        "Aina ya picha hairuhusiwi. "
-                        "Tumia JPG, PNG au WEBP."
-                    )
-                },
+                {"detail": (
+                    "Aina ya picha hairuhusiwi. "
+                    "Tumia JPG, PNG au WEBP."
+                )},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1346,11 +1243,7 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             and listing.seller_id != request.user.id
         ):
             return Response(
-                {
-                    "detail": (
-                        "Huna ruhusa ya kubadilisha picha ambalo si lako."
-                    )
-                },
+                {"detail": "Huna ruhusa ya kubadilisha picha ambalo si lako."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -1411,11 +1304,7 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             and listing.seller_id != request.user.id
         ):
             return Response(
-                {
-                    "detail": (
-                        "Huna ruhusa ya kufuta picha ambalo si lako."
-                    )
-                },
+                {"detail": "Huna ruhusa ya kufuta picha ambalo si lako."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -1443,24 +1332,11 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+
 # ============================================================================
 # LISTING FEE API
 # ============================================================================
 
-@extend_schema(
-    summary="Angalia ada ya tangazo",
-    description=(
-        "Hupata ada ya tangazo iliyotengenezwa. Kama haijatengenezwa, "
-        "tumia endpoint ya payment ili kuitengeneza."
-    ),
-    responses={
-        200: ListingFeeSerializer,
-        403: OpenApiResponse(description="Huna ruhusa ya kuona ada hii."),
-        404: OpenApiResponse(
-            description="Tangazo au ada haijapatikana."
-        ),
-    },
-)
 class ListingFeeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -1471,12 +1347,10 @@ class ListingFeeView(APIView):
         listing = get_owned_or_public_listing(request.user, listing_id)
         if not listing:
             return Response(
-                {
-                    "detail": (
-                        "Tangazo halipatikani. Kama ni lako, "
-                        "fungua Mali Zangu na ujaribu tena."
-                    ),
-                },
+                {"detail": (
+                    "Tangazo halipatikani. Kama ni lako, "
+                    "fungua Mali Zangu na ujaribu tena."
+                )},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -1492,24 +1366,19 @@ class ListingFeeView(APIView):
         try:
             listing_fee = ListingFee.objects.get(listing=listing)
         except ListingFee.DoesNotExist:
-            # Auto-create the fee from the rule so the frontend always
-            # gets a real amount instead of "TZS 0 / not configured".
             try:
                 from .services.listing_fee import create_listing_fee
                 listing_fee = create_listing_fee(listing)
             except Exception as exc:
-                import logging
-                logging.getLogger(__name__).exception(
+                logger.exception(
                     "Could not compute fee for listing %s: %s",
                     listing.pk, exc,
                 )
                 return Response(
-                    {
-                        "detail": (
-                            "Imeshindwa kuhesabu ada ya tangazo. "
-                            "Wasiliana na msimamizi."
-                        )
-                    },
+                    {"detail": (
+                        "Imeshindwa kuhesabu ada ya tangazo. "
+                        "Wasiliana na msimamizi."
+                    )},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
@@ -1520,49 +1389,14 @@ class ListingFeeView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
 # ============================================================================
 # LISTING FEE PAYMENT API
 # ============================================================================
 
-@extend_schema(
-    summary="Lipa ada ya tangazo",
-    description=(
-        "Huthibitisha malipo ya ada ya tangazo. "
-        "Inaunga mkono FimiPay au credits za bundle."
-    ),
-    request=ListingFeePaymentSerializer,
-    responses={
-        200: ListingFeeSerializer,
-        400: OpenApiResponse(description="Malipo hayawezi kukamilishwa."),
-        403: OpenApiResponse(description="Huna ruhusa ya kulipia tangazo hili."),
-        404: OpenApiResponse(description="Tangazo au ada haijapatikana."),
-    },
-)
 class ListingFeePaymentView(APIView):
-    """
-    POST /api/listings/{id}/fee/pay/
-
-    Three paths, decided by the request body:
-
-    1. Free category (fee == 0):
-       Body: { "payment_reference": "free" }
-       → Fee marked PAID, listing → PENDING_APPROVAL
-
-    2. Bundle credits:
-       Body: { "payment_reference": "credits" }
-       → Credit consumed, fee PAID, listing → PENDING_APPROVAL
-
-    3. FimiPay (mobile money / card / bank):
-       Body: { "payment_method": "mpesa", "phone": "255..." }
-       → Returns { fimipay: { order_id, payment_status: "PENDING" } }
-       → Webhook flips status when the payment lands.
-
-    Permission: seller-only.
-    Allowed listing states: DRAFT, PENDING_PAYMENT, REJECTED (retry).
-    """
     permission_classes = [permissions.IsAuthenticated]
 
-    # ------------------------------------------------------------------
     def post(self, request, listing_id):
         listing_id, err = require_int_listing_id(listing_id)
         if err:
@@ -1570,12 +1404,10 @@ class ListingFeePaymentView(APIView):
         listing = get_owned_or_public_listing(request.user, listing_id)
         if not listing:
             return Response(
-                {
-                    "detail": (
-                        "Tangazo halipatikani. Kama ni lako, "
-                        "fungua Mali Zangu na ujaribu tena."
-                    ),
-                },
+                {"detail": (
+                    "Tangazo halipatikani. Kama ni lako, "
+                    "fungua Mali Zangu na ujaribu tena."
+                )},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -1585,7 +1417,6 @@ class ListingFeePaymentView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Paid already?
         existing_fee = getattr(listing, "listing_fee", None)
         if (
             existing_fee is not None
@@ -1606,7 +1437,6 @@ class ListingFeePaymentView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        # Ensure a fee row exists (auto-compute if legacy)
         if existing_fee is None:
             try:
                 from .services.listing_fee import create_listing_fee
@@ -1633,7 +1463,6 @@ class ListingFeePaymentView(APIView):
         # ============================================================
         if payment_reference == "free":
             if existing_fee.amount > 0:
-                # Seller is trying to skip a real fee — reject.
                 return Response(
                     {"detail": (
                         "Ada ya tangazo hili si sifuri. "
@@ -1652,10 +1481,10 @@ class ListingFeePaymentView(APIView):
                     "updated_at",
                 ])
 
+                # Free → admin anaona kama kawaida
                 listing.status = Listing.Status.PENDING_APPROVAL
                 listing.save(update_fields=["status", "updated_at"])
 
-            # Notify admin
             try:
                 from apps.notifications.models import Notification
                 from apps.notifications.services.notification import (
@@ -1705,10 +1534,10 @@ class ListingFeePaymentView(APIView):
                     "updated_at",
                 ])
 
-                listing.status = Listing.Status.PENDING_APPROVAL
+                # Credits → PAID_PENDING_APPROVAL (Chaguo B)
+                listing.status = Listing.Status.PAID_PENDING_APPROVAL
                 listing.save(update_fields=["status", "updated_at"])
 
-            # Notify admin
             try:
                 from apps.notifications.models import Notification
                 from apps.notifications.services.notification import (
@@ -1716,8 +1545,8 @@ class ListingFeePaymentView(APIView):
                 )
                 create_notification_for_admins(
                     notification_type=Notification.NotificationType.LISTING_CREATED,
-                    title="Listing tayari kwa idhini (credits)",
-                    message=f'"{listing.title}" imewasilishwa kwa credits.',
+                    title="Listing tayari kwa idhini ya mwisho (credits)",
+                    message=f'"{listing.title}" imelipwa kwa credits.',
                     related_object_type="listings.Listing",
                     related_object_id=listing.id,
                     action_url=f"/smk-control-9x7k/moderation",
@@ -1766,14 +1595,17 @@ class ListingFeePaymentView(APIView):
         )
 
 
+# ============================================================================
+# ADMIN — PENDING LISTINGS
+# ============================================================================
+
 class AdminPendingListingsView(GenericAPIView):
     """
     GET /api/listings/admin/pending/
 
-    Returns ONLY listings that are PENDING_APPROVAL *and* have their
-    listing fee PAID. Listings in DRAFT or PENDING_PAYMENT are
-    intentionally hidden from admins — they belong to the seller
-    until payment is confirmed.
+    Chaguo B: Inarudisha listings katika:
+      • PENDING_APPROVAL      — mpya, haijalipwa, admin anakagua kwanza
+      • PAID_PENDING_APPROVAL — imelipwa, admin anaidhinisha mwisho
     """
     permission_classes = [permissions.IsAdminUser]
     serializer_class = AdminPendingListingSerializer
@@ -1782,8 +1614,10 @@ class AdminPendingListingsView(GenericAPIView):
         listings = (
             Listing.objects
             .filter(
-                status=Listing.Status.PENDING_APPROVAL,
-                listing_fee__payment_status="PAID",
+                status__in=[
+                    Listing.Status.PENDING_APPROVAL,
+                    Listing.Status.PAID_PENDING_APPROVAL,
+                ],
             )
             .select_related("seller", "category", "listing_fee")
             .prefetch_related("images")
@@ -1804,24 +1638,11 @@ class AdminPendingListingsView(GenericAPIView):
             status=status.HTTP_200_OK,
         )
 
+
 # ============================================================================
-# ADMIN APPROVE LISTING
+# ADMIN — APPROVE
 # ============================================================================
 
-@extend_schema(
-    summary="Idhinisha tangazo",
-    description=(
-        "Humruhusu admin kuidhinisha tangazo lililo kwenye "
-        "PENDING_APPROVAL. Ada ya tangazo lazima iwe imelipwa "
-        "kabla ya tangazo kuidhinishwa."
-    ),
-    responses={
-        200: ListingDetailSerializer,
-        400: OpenApiResponse(description="Tangazo haliwezi kuidhinishwa."),
-        403: OpenApiResponse(description="Ni admin pekee."),
-        404: OpenApiResponse(description="Tangazo halijapatikana."),
-    },
-)
 class AdminApproveListingView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
@@ -1867,24 +1688,11 @@ class AdminApproveListingView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
 # ============================================================================
-# ADMIN REJECT LISTING
+# ADMIN — REJECT
 # ============================================================================
 
-@extend_schema(
-    summary="Kataa tangazo",
-    description=(
-        "Humruhusu admin kukataa tangazo lililo kwenye "
-        "PENDING_APPROVAL. Sababu ya kukataa inahitajika."
-    ),
-    request=ListingRejectionSerializer,
-    responses={
-        200: ListingDetailSerializer,
-        400: OpenApiResponse(description="Sababu haijawekwa."),
-        403: OpenApiResponse(description="Ni admin pekee."),
-        404: OpenApiResponse(description="Tangazo halijapatikana."),
-    },
-)
 class AdminRejectListingView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
@@ -1936,19 +1744,179 @@ class AdminRejectListingView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    
 
 # ============================================================================
-# CHECK DUPLICATE LISTING
+# ADMIN — REQUEST EDIT (Chaguo B)
+# ============================================================================
+
+class AdminRequestEditListingView(APIView):
+    """
+    POST /api/listings/{id}/request-edit/
+    Body: { reason }
+
+    Admin ameomba uhariri. Listing inaenda NEEDS_EDIT.
+    Seller anaona notification, anarekebisha, anawasilisha tena.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, listing_id):
+        reason = (request.data.get("reason") or "").strip()
+        try:
+            listing = request_edit_listing(
+                listing_id=listing_id,
+                admin_user=request.user,
+                reason=reason,
+            )
+        except Listing.DoesNotExist:
+            return Response(
+                {"detail": "Tangazo halijapatikana."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except ValidationError as exc:
+            return Response(
+                {"detail": getattr(exc, "detail", str(exc))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="listing.request_edit",
+                target="Listing",
+                target_id=listing.id,
+                details=f"Requested edit: {listing.title} | Reason: {reason}",
+            )
+        except Exception:
+            pass
+
+        return Response(
+            {
+                "detail": "Ombi la uhariri limetumwa kwa muuzaji.",
+                "listing": ListingDetailSerializer(
+                    listing, context={"request": request},
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================================
+# ADMIN — REQUEST PAYMENT (Chaguo B)
+# ============================================================================
+
+class AdminRequestPaymentListingView(APIView):
+    """
+    POST /api/listings/{id}/request-payment/
+    Body: { reason? }
+
+    Admin ameona listing ni nzuri. Listing inaenda
+    APPROVED_PENDING_PAYMENT. Seller analipa.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, listing_id):
+        reason = (request.data.get("reason") or "").strip()
+        try:
+            listing = request_payment_listing(
+                listing_id=listing_id,
+                admin_user=request.user,
+                reason=reason,
+            )
+        except Listing.DoesNotExist:
+            return Response(
+                {"detail": "Tangazo halijapatikana."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except ValidationError as exc:
+            return Response(
+                {"detail": getattr(exc, "detail", str(exc))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="listing.request_payment",
+                target="Listing",
+                target_id=listing.id,
+                details=f"Requested payment: {listing.title}",
+            )
+        except Exception:
+            pass
+
+        return Response(
+            {
+                "detail": "Ombi la malipo limetumwa kwa muuzaji.",
+                "listing": ListingDetailSerializer(
+                    listing, context={"request": request},
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================================
+# ADMIN — FINALIZE APPROVAL (Chaguo B)
+# ============================================================================
+
+class AdminFinalizeApprovalView(APIView):
+    """
+    POST /api/listings/{id}/finalize-approval/
+
+    Admin analidhinisha mwisho baada ya fee kulipwa.
+    Listing inaenda LIVE.
+    """
+    permission_classes = [permissions.IsAdminUser]
+
+    def post(self, request, listing_id):
+        try:
+            listing = finalize_approval_listing(
+                listing_id=listing_id,
+                admin_user=request.user,
+            )
+        except Listing.DoesNotExist:
+            return Response(
+                {"detail": "Tangazo halijapatikana."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except ValidationError as exc:
+            return Response(
+                {"detail": getattr(exc, "detail", str(exc))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="listing.finalize_approved",
+                target="Listing",
+                target_id=listing.id,
+                details=f"Finalized: {listing.title}",
+            )
+        except Exception:
+            pass
+
+        return Response(
+            {
+                "detail": "Tangazo limeidhinishwa na sasa liko hewani.",
+                "listing": ListingDetailSerializer(
+                    listing, context={"request": request},
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+# ============================================================================
+# CHECK DUPLICATE LISTING (function view)
 # ============================================================================
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def check_duplicate_listing(request):
-    """
-    Angalia kama mtumiaji ana listing inayofanana.
-    Inatumika kuzuia kuweka listing mara mbili.
-    """
     user = request.user
     title = (request.data.get("title") or "").strip()
     price = request.data.get("price")
@@ -1998,16 +1966,12 @@ def check_duplicate_listing(request):
 
 
 # ============================================================================
-# PUBLISH LISTING — wasilisha kwa admin approval
+# PUBLISH LISTING (function view — legacy)
 # ============================================================================
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def publish_listing(request, pk):
-    """
-    Submit listing kwa admin approval.
-    Kila listing (free au paid) inaenda PENDING_APPROVAL.
-    """
     try:
         listing = Listing.objects.get(pk=pk)
     except Listing.DoesNotExist:
@@ -2037,17 +2001,12 @@ def publish_listing(request, pk):
         status=status.HTTP_200_OK,
     )
 
+
 # ============================================================================
 # ADMIN — ABANDONED DRAFTS
 # ============================================================================
 
 class AdminDraftListingsView(GenericAPIView):
-    """
-    GET /api/listings/admin/drafts/?older_than_hours=24
-
-    Returns listings stuck in DRAFT or PENDING_PAYMENT for longer than
-    the given threshold. Useful for outreach and spotting bugs.
-    """
     permission_classes = [permissions.IsAdminUser]
     serializer_class = AdminPendingListingSerializer
 
@@ -2176,16 +2135,10 @@ class AdminBulkDeleteView(APIView):
 
 
 # ============================================================================
-# SELLER — UNPAID LISTINGS (dashboard widget)
+# SELLER — UNPAID LISTINGS
 # ============================================================================
 
 class MyUnpaidListingsView(GenericAPIView):
-    """
-    GET /api/listings/mine/unpaid/
-
-    Returns the seller's own listings that are waiting for payment,
-    so the frontend can show a "you have 3 unpaid listings" banner.
-    """
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ListingListSerializer
 
@@ -2197,6 +2150,7 @@ class MyUnpaidListingsView(GenericAPIView):
                 status__in=[
                     Listing.Status.DRAFT,
                     Listing.Status.PENDING_PAYMENT,
+                    Listing.Status.APPROVED_PENDING_PAYMENT,
                 ],
             )
             .select_related("seller", "category", "listing_fee")

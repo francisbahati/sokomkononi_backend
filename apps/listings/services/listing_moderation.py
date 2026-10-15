@@ -1,6 +1,11 @@
 # apps/listings/services/listing_moderation.py
 """
-Listing moderation: approve / reject + fee-required detection.
+Listing moderation: 5 actions
+  • request_edit_listing       — admin → seller: "hariri kwanza"
+  • reject_listing             — admin → seller: "kataa kabisa"
+  • request_payment_listing    — admin → seller: "lipa fee"
+  • finalize_approval_listing  — admin → seller: "idhinisha mwisho"
+  • approve_listing            — legacy: idhinisha moja kwa moja
 """
 from decimal import Decimal
 
@@ -14,136 +19,105 @@ from apps.notifications.services.notification import create_notification
 from ..models import Listing, ListingFee, ListingFeeRule
 
 
-# ============================================================
-# FEE-REQUIRED DETECTION
-# ============================================================
-
-def _is_listing_fee_required_for(listing):
-    """
-    Every listing requires a paid fee before admin approval.
-
-    The frontend always routes the seller through the payment step and
-    blocks submission when the fee is 0 or missing. To keep that flow
-    consistent, this function always returns True — even when the
-    admin has configured 0, the fee resolver will fall back to the
-    default (3000 TZS) so a real amount is always charged.
-    """
-    return True
-
-# ============================================================
-# APPROVE
-# ============================================================
-
-@transaction.atomic
-def approve_listing(listing_id, admin_user):
+def _require_admin(admin_user):
     if not admin_user or not admin_user.is_authenticated:
         raise ValidationError("Ni lazima uwe umeingia kwenye akaunti.")
     if not admin_user.is_staff:
         raise ValidationError(
-            "Ni wasimamizi wa mfumo pekee wanaoweza kuidhinisha matangazo."
+            "Ni wasimamizi wa mfumo pekee wanaoweza kufanya hivi."
         )
 
-    listing = (
+
+def _get_locked_listing(listing_id):
+    return (
         Listing.objects
         .select_for_update(of=("self",))
         .select_related("seller", "category")
         .get(pk=listing_id)
     )
 
-    if listing.status != Listing.Status.PENDING_APPROVAL:
-        raise ValidationError(
-            "Tangazo hili halipo kwenye hali ya kusubiri idhini."
-        )
 
-    # Verify the fee has been paid when one was required.
-    fee_required = _is_listing_fee_required_for(listing)
-
-    if fee_required:
-        try:
-            listing_fee = (
-                ListingFee.objects
-                .select_for_update()
-                .get(listing=listing)
-            )
-        except ListingFee.DoesNotExist:
-            raise ValidationError(
-                "Tangazo hili halina rekodi ya ada. "
-                "Tafadhali hakikisha muuzaji amelipa ada kwanza."
-            )
-
-        if listing_fee.payment_status != ListingFee.PaymentStatus.PAID:
-            raise ValidationError(
-                "Tangazo hili haliwezi kuidhinishwa kwa sababu ada ya "
-                "tangazo haijalipwa."
-            )
-
-    # Approve
-    listing.status = Listing.Status.LIVE
-    listing.approved_by = admin_user
-    listing.approved_at = timezone.now()
-    listing.rejected_by = None
-    listing.rejected_at = None
-    listing.rejection_reason = ""
-
-    listing.save(update_fields=[
-        "status", "approved_by", "approved_at",
-        "rejected_by", "rejected_at", "rejection_reason", "updated_at",
-    ])
-
+def _notify_seller(listing, ntype, title, message, priority=None):
     seller = listing.seller
     listing_title = listing.title
     listing_id_value = listing.id
+    prio = priority or Notification.Priority.NORMAL
 
-    transaction.on_commit(
-        lambda: create_notification(
+    def _send():
+        create_notification(
             recipient=seller,
-            notification_type=(
-                Notification.NotificationType.LISTING_APPROVED
-            ),
-            title="Tangazo limeidhinishwa",
-            message=(
-                f"Tangazo lako '{listing_title}' limeidhinishwa "
-                f"na sasa linapatikana kwa wanunuzi."
-            ),
-            priority=Notification.Priority.HIGH,
+            notification_type=ntype,
+            title=title,
+            message=message,
+            priority=prio,
             related_object_type="Listing",
             related_object_id=listing_id_value,
-            action_url=f"/listings/{listing_id_value}/",
+            action_url=f"/dashboard/listings",
         )
+
+    transaction.on_commit(_send)
+
+
+# ============================================================
+# 1. REQUEST EDIT — admin anarudisha kwa seller kwa mabadiliko
+# ============================================================
+@transaction.atomic
+def request_edit_listing(listing_id, admin_user, reason):
+    _require_admin(admin_user)
+    reason = (reason or "").strip()
+    if len(reason) < 5:
+        raise ValidationError("Sababu inahitajika (herufi 5+).")
+
+    listing = _get_locked_listing(listing_id)
+
+    if listing.status not in (
+        Listing.Status.PENDING_APPROVAL,
+        Listing.Status.PAID_PENDING_APPROVAL,
+    ):
+        raise ValidationError(
+            "Tangazo hili halipo kwenye hali inayoruhusu kuomba uhariri."
+        )
+
+    listing.status = Listing.Status.NEEDS_EDIT
+    listing.rejection_reason = reason
+    listing.rejected_by = admin_user
+    listing.rejected_at = timezone.now()
+    listing.save(update_fields=[
+        "status", "rejection_reason",
+        "rejected_by", "rejected_at", "updated_at",
+    ])
+
+    _notify_seller(
+        listing,
+        Notification.NotificationType.LISTING_NEEDS_EDIT,
+        "Admin ameomba uhariri wa tangazo",
+        f'Admin ameomba uhariri wa "{listing.title}". Sababu: {reason}',
+        priority=Notification.Priority.HIGH,
     )
 
     return listing
 
 
 # ============================================================
-# REJECT
+# 2. REJECT — kataa kabisa
 # ============================================================
-
 @transaction.atomic
 def reject_listing(listing_id, admin_user, rejection_reason):
-    if not admin_user or not admin_user.is_authenticated:
-        raise ValidationError("Ni lazima uwe umeingia kwenye akaunti.")
-    if not admin_user.is_staff:
-        raise ValidationError(
-            "Ni wasimamizi wa mfumo pekee wanaoweza kukataa matangazo."
-        )
-
+    _require_admin(admin_user)
     rejection_reason = (rejection_reason or "").strip()
     if not rejection_reason:
-        raise ValidationError(
-            "Sababu ya kukataa tangazo inahitajika."
-        )
+        raise ValidationError("Sababu ya kukataa tangazo inahitajika.")
 
-    listing = (
-        Listing.objects
-        .select_for_update(of=("self",))
-        .select_related("seller", "category")
-        .get(pk=listing_id)
-    )
+    listing = _get_locked_listing(listing_id)
 
-    if listing.status != Listing.Status.PENDING_APPROVAL:
+    if listing.status not in (
+        Listing.Status.PENDING_APPROVAL,
+        Listing.Status.PAID_PENDING_APPROVAL,
+        Listing.Status.APPROVED_PENDING_PAYMENT,
+        Listing.Status.NEEDS_EDIT,
+    ):
         raise ValidationError(
-            "Tangazo hili halipo kwenye hali ya kusubiri idhini."
+            "Tangazo hili halipo kwenye hali ya kukataliwa."
         )
 
     listing.status = Listing.Status.REJECTED
@@ -152,33 +126,155 @@ def reject_listing(listing_id, admin_user, rejection_reason):
     listing.rejection_reason = rejection_reason
     listing.approved_by = None
     listing.approved_at = None
-
     listing.save(update_fields=[
         "status", "rejected_by", "rejected_at", "rejection_reason",
         "approved_by", "approved_at", "updated_at",
     ])
 
-    seller = listing.seller
-    listing_title = listing.title
-    listing_id_value = listing.id
-    reason = rejection_reason
+    _notify_seller(
+        listing,
+        Notification.NotificationType.LISTING_REJECTED,
+        "Tangazo limekataliwa",
+        f'Tangazo lako "{listing.title}" halikuidhinishwa. Sababu: {rejection_reason}',
+        priority=Notification.Priority.URGENT,
+    )
 
-    transaction.on_commit(
-        lambda: create_notification(
-            recipient=seller,
-            notification_type=(
-                Notification.NotificationType.LISTING_REJECTED
-            ),
-            title="Tangazo limekataliwa",
-            message=(
-                f"Tangazo lako '{listing_title}' halikuidhinishwa. "
-                f"Sababu: {reason}"
-            ),
-            priority=Notification.Priority.URGENT,
-            related_object_type="Listing",
-            related_object_id=listing_id_value,
-            action_url=f"/listings/{listing_id_value}/",
+    return listing
+
+
+# ============================================================
+# 3. REQUEST PAYMENT — admin ameona ni nzuri, mwambie seller alipe
+# ============================================================
+@transaction.atomic
+def request_payment_listing(listing_id, admin_user, reason=""):
+    _require_admin(admin_user)
+
+    listing = _get_locked_listing(listing_id)
+
+    if listing.status != Listing.Status.PENDING_APPROVAL:
+        raise ValidationError(
+            "Tangazo hili halipo kwenye hali ya kusubiri idhini."
         )
+
+    listing.status = Listing.Status.APPROVED_PENDING_PAYMENT
+    listing.approved_by = admin_user
+    listing.approved_at = timezone.now()
+    listing.save(update_fields=[
+        "status", "approved_by", "approved_at", "updated_at",
+    ])
+
+    clean_reason = (reason or "").strip()
+    msg = (
+        f'Tangazo lako "{listing.title}" limekaguliwa na ni zuri. '
+        f"Tafadhali lipa ada ya kuchapisha ili liidhinishwe."
+    )
+    if clean_reason:
+        msg = f"{msg} Maelezo: {clean_reason}"
+
+    _notify_seller(
+        listing,
+        Notification.NotificationType.LISTING_PAYMENT_REQUESTED,
+        "Lipa ada ya kuchapisha tangazo",
+        msg,
+        priority=Notification.Priority.HIGH,
+    )
+
+    return listing
+
+
+# ============================================================
+# 4. FINALIZE APPROVAL — admin analidhinisha mwisho
+# ============================================================
+@transaction.atomic
+def finalize_approval_listing(listing_id, admin_user):
+    _require_admin(admin_user)
+
+    listing = _get_locked_listing(listing_id)
+
+    if listing.status != Listing.Status.PAID_PENDING_APPROVAL:
+        raise ValidationError(
+            "Tangazo hili halipo kwenye hali ya kusubiri idhini ya mwisho."
+        )
+
+    try:
+        fee = ListingFee.objects.select_for_update().get(listing=listing)
+    except ListingFee.DoesNotExist:
+        raise ValidationError(
+            "Tangazo hili halina rekodi ya ada."
+        )
+
+    if fee.payment_status != ListingFee.PaymentStatus.PAID:
+        raise ValidationError(
+            "Ada ya tangazo hili haijalipwa bado."
+        )
+
+    listing.status = Listing.Status.LIVE
+    listing.approved_by = admin_user
+    listing.approved_at = timezone.now()
+    listing.rejected_by = None
+    listing.rejected_at = None
+    listing.rejection_reason = ""
+    listing.save(update_fields=[
+        "status", "approved_by", "approved_at",
+        "rejected_by", "rejected_at", "rejection_reason", "updated_at",
+    ])
+
+    _notify_seller(
+        listing,
+        Notification.NotificationType.LISTING_FINAL_APPROVED,
+        "Tangazo lako liko hewani!",
+        f'Tangazo lako "{listing.title}" limeidhinishwa na sasa linaonekana kwa wanunuzi.',
+        priority=Notification.Priority.HIGH,
+    )
+
+    return listing
+
+
+# ============================================================
+# 5. APPROVE (legacy) — idhinisha moja kwa moja (in_review → live)
+#    Inatumika kwa listings ambazo fee haijalipwa bado, LAKINI
+#    admin anataka kuidhinisha moja kwa moja (mfano free category).
+# ============================================================
+@transaction.atomic
+def approve_listing(listing_id, admin_user):
+    _require_admin(admin_user)
+
+    listing = _get_locked_listing(listing_id)
+
+    if listing.status != Listing.Status.PENDING_APPROVAL:
+        raise ValidationError(
+            "Tangazo hili halipo kwenye hali ya kusubiri idhini."
+        )
+
+    # Check fee if required
+    try:
+        listing_fee = ListingFee.objects.select_for_update().get(listing=listing)
+    except ListingFee.DoesNotExist:
+        listing_fee = None
+
+    if listing_fee and listing_fee.payment_status != ListingFee.PaymentStatus.PAID:
+        raise ValidationError(
+            "Ada ya tangazo hili haijalipwa. "
+            "Tumia 'Omba Malipo' kwanza, au fanya kama fee haihitajiki."
+        )
+
+    listing.status = Listing.Status.LIVE
+    listing.approved_by = admin_user
+    listing.approved_at = timezone.now()
+    listing.rejected_by = None
+    listing.rejected_at = None
+    listing.rejection_reason = ""
+    listing.save(update_fields=[
+        "status", "approved_by", "approved_at",
+        "rejected_by", "rejected_at", "rejection_reason", "updated_at",
+    ])
+
+    _notify_seller(
+        listing,
+        Notification.NotificationType.LISTING_APPROVED,
+        "Tangazo limeidhinishwa",
+        f'Tangazo lako "{listing.title}" limeidhinishwa na sasa linapatikana.',
+        priority=Notification.Priority.HIGH,
     )
 
     return listing

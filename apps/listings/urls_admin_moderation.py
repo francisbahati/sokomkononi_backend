@@ -1,18 +1,12 @@
-"""
-Alias routes so that frontends whose axios interceptor attaches the
-JWT only to /api/admin/* also work for listing moderation.
-
-Mounts:
-    GET  /api/admin/listings/pending/
-    POST /api/admin/listings/{listing_id}/approve/
-    POST /api/admin/listings/{listing_id}/reject/
-"""
 from django.urls import path
 
 from .views import (
     AdminApproveListingView,
+    AdminFinalizeApprovalView,
     AdminPendingListingsView,
     AdminRejectListingView,
+    AdminRequestEditListingView,
+    AdminRequestPaymentListingView,
 )
 
 
@@ -31,5 +25,20 @@ urlpatterns = [
         "<int:listing_id>/reject/",
         AdminRejectListingView.as_view(),
         name="admin-listings-reject",
+    ),
+    path(
+        "<int:listing_id>/request-edit/",
+        AdminRequestEditListingView.as_view(),
+        name="admin-listings-request-edit",
+    ),
+    path(
+        "<int:listing_id>/request-payment/",
+        AdminRequestPaymentListingView.as_view(),
+        name="admin-listings-request-payment",
+    ),
+    path(
+        "<int:listing_id>/finalize-approval/",
+        AdminFinalizeApprovalView.as_view(),
+        name="admin-listings-finalize-approval",
     ),
 ]

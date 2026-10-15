@@ -17,7 +17,10 @@ class Listing(SoftDeleteModel):
     class Status(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
         PENDING_PAYMENT = "PENDING_PAYMENT", "Pending payment"
-        PENDING_APPROVAL = "PENDING_APPROVAL", "Pending approval"
+        PENDING_APPROVAL = "PENDING_APPROVAL", "Pending admin review"
+        NEEDS_EDIT = "NEEDS_EDIT", "Needs edit (admin requested)"
+        APPROVED_PENDING_PAYMENT = "APPROVED_PENDING_PAYMENT", "Approved — awaiting payment"
+        PAID_PENDING_APPROVAL = "PAID_PENDING_APPROVAL", "Paid — awaiting final approval"
         LIVE = "LIVE", "Live"
         RESERVED = "RESERVED", "Reserved"
         SOLD = "SOLD", "Sold"
@@ -90,9 +93,7 @@ class Listing(SoftDeleteModel):
         verbose_name="Muda wa kubadilisha mahali",
     )
 
-    # ⬇️ MPYA — Category-specific attributes (JSONField)
-    # Inahifadhi data kama: bedrooms, bathrooms, make, model, mileage,
-    # mode, region, district, area, n.k. kulingana na category.
+    # ⬇️ Category-specific attributes (JSONField)
     attributes = models.JSONField(
         default=dict,
         blank=True,
@@ -227,7 +228,6 @@ class ListingImage(models.Model):
         upload_to="listings/",
         verbose_name="Picha",
     )
-    # WebP variants — auto-generated on save, never uploaded by users.
     thumb = models.ImageField(
         upload_to="listings/variants/",
         null=True, blank=True, editable=False,
@@ -813,7 +813,6 @@ class ListingFee(models.Model):
         verbose_name="Kiasi cha ada",
     )
 
-    # Persisted snapshot of the rule used at calculation time.
     rule = models.ForeignKey(
         "listings.ListingFeeRule",
         on_delete=models.SET_NULL,

@@ -300,18 +300,19 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
         "rest_framework.throttling.ScopedRateThrottle",
     ),
-    "DEFAULT_THROTTLE_RATES": {
-        "register": "10/hour",
-        "login": "20/min",
-        "otp_send": "5/hour",
-        "otp_verify": "10/hour",
-        "password_reset": "5/hour",
-        "anon": "100/min",
-        "user": "1000/hour",
-        "support_ticket": "5/hour",
-        "contact": "5/hour",
-        "refresh": "60/min",
-    },
+   "DEFAULT_THROTTLE_RATES": {
+    "register": "10/hour",
+    "login": "20/min",
+    "otp_send": "5/hour",
+    "otp_verify": "10/hour",
+    "password_reset": "5/hour",
+    "anon": "100/min",
+    "user": "1000/hour",
+    "support_ticket": "5/hour",           
+    "support_ticket_admin": "500/hour",   
+    "contact": "5/hour",
+    "refresh": "60/min",
+  },
 }
 
 SIMPLE_JWT = {
@@ -493,8 +494,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute="*/15"),
     },
     "announcements-flush-scheduled": {"task": "announcements.flush_scheduled", "schedule": crontab(minute="*/5")},
-
-    # ⬇️ MPYA — FimiPay status sync (orders: ListingFee, Boost, Bundle, Ads, SuccessFee, Leading)
+   
+    "tickets-send-sla-reminders": {
+    "task": "tickets.send_sla_reminders",
+    "schedule": crontab(minute=0),  # kila saa 1
+},
     "sync-pending-fimipay-statuses": {
         "task": "payments.sync_pending_fimipay_statuses",
         "schedule": crontab(minute="*/5"),

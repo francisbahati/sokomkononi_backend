@@ -5,14 +5,13 @@
 # ============================================================
 import logging
 
-from django.db.models import Q
-
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from .models import User
-from .serializers import AdminUserSerializer, ProfileSerializer
+from .serializers import AdminUserSerializer
 from .services import get_user_role
 
 
@@ -26,6 +25,12 @@ class IsAdminUser(permissions.BasePermission):
             and request.user.is_authenticated
             and request.user.is_staff
         )
+
+
+class AdminUserPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
 
 
 def _log(request, action, target="", target_id=None, details=""):
@@ -57,6 +62,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
     serializer_class = AdminUserSerializer
     permission_classes = [IsAdminUser]
+    pagination_class = AdminUserPagination
 
     def get_queryset(self):
         from django.db.models import Exists, OuterRef, Q as DQ
@@ -65,7 +71,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
 
         qs = User.all_objects.all().order_by("-created_at")
 
-        has_listings = Listing.objects.filter(seller=OuterRef("pk"), is_deleted=False)
+        has_listings = Listing.objects.filter(
+            seller=OuterRef("pk"), is_deleted=False,
+        )
         has_deals = DealRoom.objects.filter(buyer=OuterRef("pk"))
         qs = qs.annotate(
             _has_listings=Exists(has_listings),
@@ -75,10 +83,13 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         q = self.request.query_params.get("q")
         role = self.request.query_params.get("role")
         status_filter = self.request.query_params.get("status")
+        verified_filter = self.request.query_params.get("verified")
 
         if q:
             qs = qs.filter(
-                DQ(name__icontains=q) | DQ(email__icontains=q) | DQ(phone__icontains=q)
+                DQ(name__icontains=q)
+                | DQ(email__icontains=q)
+                | DQ(phone__icontains=q)
             )
 
         if role and role.lower() != "all":
@@ -99,6 +110,11 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         elif status_filter == "suspended":
             qs = qs.filter(is_active=False)
 
+        if verified_filter == "verified":
+            qs = qs.filter(is_verified=True)
+        elif verified_filter == "unverified":
+            qs = qs.filter(is_verified=False)
+
         return qs
 
     def _get_user(self, pk):
@@ -108,7 +124,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         qs = self.get_queryset()
         page = self.paginate_queryset(qs)
         serializer = AdminUserSerializer(
-            page if page is not None else qs, many=True,
+            page if page is not None else qs,
+            many=True,
+            context={"request": request},
         )
         if page is not None:
             return self.get_paginated_response(serializer.data)
@@ -121,7 +139,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 {"detail": "Haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response(AdminUserSerializer(user).data)
+        return Response(
+            AdminUserSerializer(user, context={"request": request}).data
+        )
 
     def partial_update(self, request, pk=None):
         user = self._get_user(pk)
@@ -161,7 +181,9 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 ),
             )
 
-        return Response(AdminUserSerializer(user).data)
+        return Response(
+            AdminUserSerializer(user, context={"request": request}).data
+        )
 
     def destroy(self, request, pk=None):
         """Soft delete — inaweka kwenye kikapu (is_deleted=True)."""

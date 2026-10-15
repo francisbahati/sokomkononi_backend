@@ -199,6 +199,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     is_seller = serializers.SerializerMethodField()
     is_buyer = serializers.SerializerMethodField()
+    avatar = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -206,6 +207,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "id", "name", "email", "phone", "account_type",
             "is_active", "is_verified", "is_staff", "is_superuser",
             "date_joined", "role", "is_seller", "is_buyer",
+            "avatar",
         ]
         read_only_fields = fields
 
@@ -228,6 +230,17 @@ class AdminUserSerializer(serializers.ModelSerializer):
         except Exception:
             return False
 
+    def get_avatar(self, obj):
+        request = self.context.get("request")
+        if not getattr(obj, "avatar", None):
+            return None
+        try:
+            url = obj.avatar.url
+        except Exception:
+            return None
+        if request:
+            return request.build_absolute_uri(url)
+        return url
 
 # ============================================================
 # FORGOT PASSWORD — step 1

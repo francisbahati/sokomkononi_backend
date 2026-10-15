@@ -141,3 +141,81 @@ def send_account_suspended_email(*, to_email, name="mteja", reason=""):
             "reason": reason or "—",
         },
     )
+
+def send_verification_approved_email(
+    *, to_email, name="mteja", verification_type="", action_url=""
+):
+    """
+    Send verification approved notification.
+
+    Called by apps/verifications/notify.py after admin approves.
+    """
+    if not to_email:
+        return EmailResult(False, "no email")
+
+    type_label = {
+        "SELLER": "Muuzaji",
+        "BUYER": "Mnunuzi",
+    }.get(verification_type, verification_type or "—")
+
+    return _send(
+        to_email=to_email,
+        subject="SokoMkononi — Uthibitisho wako umeidhinishwa",
+        template_base="verification_approved",
+        context={
+            "name": name or "mteja",
+            "verification_type": type_label,
+            "action_url": action_url or "/dashboard/verification",
+        },
+    )
+
+
+def send_verification_rejected_email(
+    *, to_email, name="mteja", verification_type="", reason="", action_url=""
+):
+    """
+    Send verification rejected notification.
+
+    Called by apps/verifications/notify.py after admin rejects.
+    """
+    if not to_email:
+        return EmailResult(False, "no email")
+
+    type_label = {
+        "SELLER": "Muuzaji",
+        "BUYER": "Mnunuzi",
+    }.get(verification_type, verification_type or "—")
+
+    return _send(
+        to_email=to_email,
+        subject="SokoMkononi — Uthibitisho umekataliwa",
+        template_base="verification_rejected",
+        context={
+            "name": name or "mteja",
+            "verification_type": type_label,
+            "reason": reason or "—",
+            "action_url": action_url or "/dashboard/verification",
+        },
+    )
+
+def send_documents_requested_email(
+    *, to_email, name="mteja", message="", action_url=""
+):
+    """
+    Send email when admin requests more documents.
+
+    Called by apps/verifications/notify.py.
+    """
+    if not to_email:
+        return EmailResult(False, "no email")
+
+    return _send(
+        to_email=to_email,
+        subject="SokoMkononi — Nyaraka zaidi zinahitajika",
+        template_base="verification_documents_requested",
+        context={
+            "name": name or "mteja",
+            "message": message or "Tafadhali pakia nyaraka zaidi.",
+            "action_url": action_url or "/dashboard/verification",
+        },
+    )

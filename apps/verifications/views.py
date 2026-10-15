@@ -22,9 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 from apps.core.permissions import IsAdminUser  # noqa: E402
+
+
 class VerificationViewSet(viewsets.GenericViewSet):
     """
-    Verification requests.
+    User verification requests (SELLER, BUYER only).
 
         GET     /api/verifications/                    admin: all, user: own
         GET     /api/verifications/?status=PENDING
@@ -113,8 +115,10 @@ class VerificationViewSet(viewsets.GenericViewSet):
     # ══════════════════════════════════════════════════════════
     # APPROVE — idhinisha ombi + update user.is_verified
     # ══════════════════════════════════════════════════════════
-    @action(detail=True, methods=["post"], url_path="approve",
-            permission_classes=[IsAdminUser])
+    @action(
+        detail=True, methods=["post"], url_path="approve",
+        permission_classes=[IsAdminUser],
+    )
     def approve(self, request, pk=None):
         obj = get_object_or_404(VerificationRequest, pk=pk)
         if obj.status != VerificationRequest.Status.PENDING:
@@ -130,7 +134,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
             "status", "reviewed_by", "reviewed_at", "updated_at",
         ])
 
-        # ⬇️ MPYA — Badilisha user.is_verified kulingana na aina ya ombi
+        # is_verified moja — inaruhusu seller NA buyer
         try:
             target_user = obj.user
             if obj.type in (
@@ -143,8 +147,6 @@ class VerificationViewSet(viewsets.GenericViewSet):
                     "[verifications] user %s marked as verified (type=%s)",
                     target_user.id, obj.type,
                 )
-            # PROPERTY, VEHICLE, BUSINESS — zinaathiri listing moja kwa moja,
-            # sio user. Tunaweza kuongeza logic baadaye.
         except Exception as exc:
             logger.warning(
                 "[verifications] failed to update user.is_verified for "
@@ -178,8 +180,10 @@ class VerificationViewSet(viewsets.GenericViewSet):
         request=VerificationRejectSerializer,
         responses={200: VerificationRequestSerializer},
     )
-    @action(detail=True, methods=["post"], url_path="reject",
-            permission_classes=[IsAdminUser])
+    @action(
+        detail=True, methods=["post"], url_path="reject",
+        permission_classes=[IsAdminUser],
+    )
     def reject(self, request, pk=None):
         obj = get_object_or_404(VerificationRequest, pk=pk)
         if obj.status != VerificationRequest.Status.PENDING:
@@ -210,6 +214,14 @@ class VerificationViewSet(viewsets.GenericViewSet):
         except Exception:
             pass
 
+        try:
+            notify_rejected(
+                obj,
+                serializer.validated_data["rejection_reason"],
+            )
+        except Exception:
+            logger.exception("notify_rejected failed for %s", obj.id)
+
         return Response(
             VerificationRequestSerializer(
                 obj, context={"request": request},
@@ -217,7 +229,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
         )
 
     # ══════════════════════════════════════════════════════════
-    # MPYA: Admin anaomba mtumiaji apakie documents zaidi
+    # ADMIN: request documents zaidi
     # ══════════════════════════════════════════════════════════
     @extend_schema(
         request={
@@ -258,6 +270,12 @@ class VerificationViewSet(viewsets.GenericViewSet):
             "documents_request_message",
             "updated_at",
         ])
+
+        try:
+            notify_documents_requested(obj, message)
+        except Exception:
+            logger.exception("notify_documents_requested failed for %s", obj.id)
+
         return Response(
             VerificationRequestSerializer(
                 obj, context={"request": request},
@@ -279,7 +297,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from apps.core.image_utils import validate_image, MAX_LISTING_IMAGE_BYTES
+        from apps.core.image_utils import validate_image
         if f.content_type == "application/pdf":
             if f.size > 10 * 1024 * 1024:
                 return Response({"detail": "Faili haiwezi kuzidi 10MB."}, status=400)

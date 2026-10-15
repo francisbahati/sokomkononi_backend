@@ -133,6 +133,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     bio = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
+    current_role = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -142,12 +143,14 @@ class ProfileSerializer(serializers.ModelSerializer):
             "is_superuser", "seller_status", "buyer_status",
             "role",
             "bio", "location",
+            "current_role",
         ]
         read_only_fields = [
             "id", "email", "date_joined", "is_verified",
             "is_staff", "is_superuser", "seller_status", "buyer_status",
             "avatar", "role",
             "bio", "location",
+            "current_role",
         ]
 
     def validate_phone(self, value):
@@ -173,6 +176,30 @@ class ProfileSerializer(serializers.ModelSerializer):
     def get_role(self, obj):
         return get_user_role(obj)
 
+    def get_current_role(self, obj):
+        """
+        Rudisha role ya mtumiaji kwa sasa: 'seller', 'buyer', 'both', 'neither'.
+        Inahesabiwa kutoka listings + deals.
+        """
+        try:
+            from apps.listings.models import Listing
+            from apps.deals.models import DealRoom
+
+            has_listings = Listing.objects.filter(
+                seller=obj, is_deleted=False,
+            ).exists()
+            has_deals = DealRoom.objects.filter(buyer=obj).exists()
+
+            if has_listings and has_deals:
+                return "both"
+            if has_listings:
+                return "seller"
+            if has_deals:
+                return "buyer"
+            return "neither"
+        except Exception:
+            return "neither"
+
     def get_bio(self, obj):
         try:
             return obj.preferences.bio or ""
@@ -185,8 +212,6 @@ class ProfileSerializer(serializers.ModelSerializer):
             return prefs.location or prefs.region or ""
         except Exception:
             return ""
-
-
 # ============================================================
 # ADMIN USER (list) — role inahesabiwa
 # ============================================================

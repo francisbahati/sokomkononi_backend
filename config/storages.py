@@ -39,7 +39,13 @@ class CloudflareR2MediaStorage(S3Boto3Storage):
 
 
 class PrivateR2Storage(S3Boto3Storage):
-    """R2 storage that generates signed URLs. Use for sensitive files."""
+    """
+    R2 storage that generates signed URLs. Use for sensitive files
+    like verification documents, IDs, licenses, etc.
+
+    URL expiry defaults to SIGNED_URL_EXPIRY (3600s = 1 hour) but
+    can be overridden per-call via .url(name, expire=...).
+    """
     bucket_name = getattr(settings, "R2_BUCKET_NAME", None)
     location = getattr(settings, "R2_PRIVATE_LOCATION", "private")
     endpoint_url = getattr(settings, "R2_ENDPOINT_URL", None)
@@ -48,7 +54,9 @@ class PrivateR2Storage(S3Boto3Storage):
     region_name = "auto"
     signature_version = "s3v4"
     querystring_auth = True
-    querystring_expire = 300
+    # Default expiry for signed URLs. Overridden by .url(expire=...)
+    # from the serializer.
+    querystring_expire = getattr(settings, "SIGNED_URL_EXPIRY", 3600)
     default_acl = None
     custom_domain = None
     file_overwrite = False

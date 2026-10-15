@@ -6,16 +6,14 @@ from apps.core.models import SoftDeleteModel
 
 class VerificationRequest(SoftDeleteModel):
     """
-    One verification request. Covers sellers, buyers, properties,
-    vehicles and businesses. Admin reviews and approves/rejects.
+    One user verification request. Admin reviews and approves/rejects.
+    Properties/vehicles/businesses are verified through Listing Moderation,
+    so this app handles USER verification only.
     """
 
     class Type(models.TextChoices):
         SELLER = "SELLER", "Seller"
         BUYER = "BUYER", "Buyer"
-        PROPERTY = "PROPERTY", "Property"
-        VEHICLE = "VEHICLE", "Vehicle"
-        BUSINESS = "BUSINESS", "Business"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
@@ -64,7 +62,7 @@ class VerificationRequest(SoftDeleteModel):
         verbose_name="Maelezo",
     )
 
-    # ⬇️ MPYA — Admin anaomba documents zaidi
+    # Admin anaomba documents zaidi
     documents_requested_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -130,7 +128,6 @@ class VerificationRequest(SoftDeleteModel):
         return f"{self.type} — {self.subject} ({self.status})"
 
 
-
 _private_storage_instance = None
 
 
@@ -152,7 +149,6 @@ def _private_storage():
                 root = _P("media")
             _private_storage_instance = FileSystemStorage(location=str(root) + "/private")
     except Exception:
-        # Fallback: default storage so the app doesn't crash
         from django.core.files.storage import default_storage
         _private_storage_instance = default_storage
     return _private_storage_instance

@@ -179,6 +179,7 @@ for _p in ("https://", "http://"):
 R2_CUSTOM_DOMAIN = _raw_domain or None
 
 R2_ENABLED = bool(R2_BUCKET_NAME and R2_ENDPOINT_URL and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY)
+SIGNED_URL_EXPIRY = int(os.getenv("SIGNED_URL_EXPIRY", "3600"))
 
 _default_storage = (
     "config.storages.CloudflareR2MediaStorage" if R2_ENABLED

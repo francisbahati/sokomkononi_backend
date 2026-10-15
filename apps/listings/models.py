@@ -61,6 +61,35 @@ class Listing(SoftDeleteModel):
         verbose_name="Mahali",
     )
 
+    # ── Exact geo location (for map display) ──
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Latitude",
+    )
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Longitude",
+    )
+    address_text = models.CharField(
+        max_length=500,
+        blank=True,
+        verbose_name="Anwani kamili (kutoka ramani)",
+        help_text="Full formatted address returned by the map provider.",
+    )
+    location_updated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Muda wa kubadilisha mahali",
+    )
+
     # ⬇️ MPYA — Category-specific attributes (JSONField)
     # Inahifadhi data kama: bedrooms, bathrooms, make, model, mileage,
     # mode, region, district, area, n.k. kulingana na category.

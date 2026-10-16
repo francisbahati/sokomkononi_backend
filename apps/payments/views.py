@@ -73,6 +73,7 @@ _REFUND_HANDLERS = {
     "ADV": ("apps.banners.services", "mark_banner_as_refunded"),
     "SFE": ("apps.finance.services_success_fee", "mark_success_fee_as_refunded"),
     "RSV": ("apps.transactions.services.reservation", "mark_reservation_as_refunded"),
+    "REF": ("apps.payments.refunds", "mark_refund_completed_from_webhook"),
 }
 
 

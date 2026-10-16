@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import Payout
+from .models import Payout, Refund
 
 
 class CreateOrderSerializer(serializers.Serializer):
@@ -62,3 +62,29 @@ class PayoutSerializer(serializers.ModelSerializer):
             "last_synced_at", "created_at", "updated_at",
         ]
         read_only_fields = fields
+
+
+# ============================================================
+# REFUND SERIALIZER
+# ============================================================
+class RefundSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source="user.name", read_only=True)
+    processed_by_name = serializers.CharField(
+        source="processed_by.name", read_only=True,
+    )
+
+    class Meta:
+        model = Refund
+        fields = [
+            "id", "promotion_type", "promotion_id",
+            "user", "user_name",
+            "amount_paid", "amount_refunded",
+            "status", "method", "reason", "admin_note",
+            "processed_by", "processed_by_name",
+            "payment_reference", "refund_reference",
+            "created_at", "processed_at", "completed_at",
+        ]
+        read_only_fields = [
+            "id", "created_at", "processed_at", "completed_at",
+            "user_name", "processed_by_name",
+        ]

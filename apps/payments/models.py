@@ -4,6 +4,8 @@ FimiPay-adjacent persistence layer.
 The Payout model stores every merchant withdrawal SokoMkononi
 requests from its FimiPay balance. A Celery task keeps the status
 in sync with FimiPay.
+
+Refund model inafuatilia refunds za promotions zilizofutwa.
 """
 from decimal import Decimal
 
@@ -128,3 +130,154 @@ class WebhookDiscrepancy(models.Model):
         indexes = [
             models.Index(fields=["resolved", "created_at"]),
         ]
+
+
+# ============================================================
+# REFUND — kwa promotions zilizofutwa
+# ============================================================
+class Refund(models.Model):
+    """
+    Refund record kwa promotions zilizosimamishwa/kufutwa.
+
+    Inafuatilia:
+    - Ni promotion gani (type + id)
+    - Ni mtumiaji gani
+    - Kiasi kilicholipwa
+    - Kiasi kilichorudishwa
+    - Hali (PENDING, PROCESSING, COMPLETED, FAILED)
+    - Njia ya refund (manual, fimipay, credits)
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        PROCESSING = "PROCESSING", "Processing"
+        COMPLETED = "COMPLETED", "Completed"
+        FAILED = "FAILED", "Failed"
+
+    class Method(models.TextChoices):
+        MANUAL = "MANUAL", "Manual"
+        FIMIPAY = "FIMIPAY", "FimiPay"
+        CREDITS = "CREDITS", "Credits"
+
+    class PromotionType(models.TextChoices):
+        BOOST = "BOOST", "Boost"
+        LEADING = "LEADING", "Leading"
+        ADVERTISE = "ADVERTISE", "Advertisement"
+        RESERVATION = "RESERVATION", "Reservation"
+
+    # ── Promotion inayohusika ──────────────────────────────
+    promotion_type = models.CharField(
+        max_length=20,
+        choices=PromotionType.choices,
+        verbose_name="Aina ya promotion",
+    )
+    promotion_id = models.PositiveBigIntegerField(
+        verbose_name="ID ya promotion",
+    )
+
+    # ── Mtumiaji ───────────────────────────────────────────
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="refunds",
+        verbose_name="Mtumiaji",
+    )
+
+    # ── Kiasi ──────────────────────────────────────────────
+    amount_paid = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        verbose_name="Kiasi kilicholipwa",
+    )
+    amount_refunded = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        verbose_name="Kiasi kilichorudishwa",
+    )
+
+    # ── Hali ───────────────────────────────────────────────
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        verbose_name="Hali",
+    )
+    method = models.CharField(
+        max_length=20,
+        choices=Method.choices,
+        default=Method.MANUAL,
+        verbose_name="Njia ya refund",
+    )
+
+    # ── Maelezo ────────────────────────────────────────────
+    reason = models.TextField(
+        blank=True,
+        verbose_name="Sababu ya refund",
+    )
+    admin_note = models.TextField(
+        blank=True,
+        verbose_name="Maelezo ya admin",
+    )
+
+    # ── Admin aliyefanya ───────────────────────────────────
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="processed_refunds",
+        verbose_name="Aliyefanya refund",
+    )
+
+    # ── Payment reference ──────────────────────────────────
+    payment_reference = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Kumbukumbu ya malipo",
+    )
+    refund_reference = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Kumbukumbu ya refund",
+    )
+
+    # ── Timestamps ─────────────────────────────────────────
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "refunds"
+        ordering = ["-created_at"]
+        verbose_name = "Refund"
+        verbose_name_plural = "Refunds"
+
+        indexes = [
+            models.Index(
+                fields=["promotion_type", "promotion_id"],
+                name="refund_promo_idx",
+            ),
+            models.Index(
+                fields=["user", "status"],
+                name="refund_user_status_idx",
+            ),
+            models.Index(
+                fields=["status", "created_at"],
+                name="refund_status_created_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Refund #{self.pk} — {self.promotion_type} "
+            f"#{self.promotion_id} — {self.status}"
+        )
+
+    @property
+    def is_completed(self):
+        return self.status == self.Status.COMPLETED
+
+    @property
+    def is_pending(self):
+        return self.status == self.Status.PENDING

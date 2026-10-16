@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Payout
+from .models import Payout, Refund
 
 
 @admin.register(Payout)
@@ -20,4 +20,20 @@ class PayoutAdmin(admin.ModelAdmin):
         "raw_response", "last_synced_at",
         "created_at", "updated_at",
     )
+    ordering = ("-created_at",)
+
+
+@admin.register(Refund)
+class RefundAdmin(admin.ModelAdmin):
+    list_display = (
+        "id", "promotion_type", "promotion_id",
+        "user", "amount_paid", "amount_refunded",
+        "status", "method", "created_at",
+    )
+    list_filter = ("status", "method", "promotion_type")
+    search_fields = (
+        "user__name", "user__email",
+        "payment_reference", "refund_reference",
+    )
+    readonly_fields = ("created_at", "processed_at", "completed_at")
     ordering = ("-created_at",)

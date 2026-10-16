@@ -4,12 +4,12 @@ from django.contrib import admin
 from django.urls import include, path
 
 from apps.banners.views_admin import AdminPromotionsView
+from apps.core.admin_promotions.views import AdminPromotionActionView  # ⬅️ MPYA
 
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
 )
-
 
 from apps.core.health import health as _health, health_deep as _health_deep
 
@@ -58,13 +58,19 @@ urlpatterns = [
     path("api/admin/users/", include("apps.accounts.urls_admin")),
     path("api/admin/reports/", include("apps.finance.urls_admin_reports")),
     path("api/admin/content/", include("apps.content.urls_admin")),
-    # Admin reports live at /api/finance/reports/
 
     # Admin promotions alias (frontend calls /api/admin/promotions/)
     path(
         "api/admin/promotions/",
         AdminPromotionsView.as_view(),
         name="admin-promotions-alias",
+    ),
+
+    # ⬇️ MPYA: Admin promotion actions
+    path(
+        "api/admin/promotions/<str:type>/<int:id>/<str:action>/",
+        AdminPromotionActionView.as_view(),
+        name="admin-promotion-action",
     ),
 
     # Commerce

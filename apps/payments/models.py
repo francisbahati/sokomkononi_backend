@@ -142,6 +142,7 @@ class Refund(models.Model):
     Inafuatilia:
     - Ni promotion gani (type + id)
     - Ni mtumiaji gani
+    - Namba yake ya malipo (snapshot)
     - Kiasi kilicholipwa
     - Kiasi kilichorudishwa
     - Hali (PENDING, PROCESSING, COMPLETED, FAILED)
@@ -181,6 +182,22 @@ class Refund(models.Model):
         on_delete=models.PROTECT,
         related_name="refunds",
         verbose_name="Mtumiaji",
+    )
+
+    # ── Snapshot ya taarifa za mtumiaji (wakati wa refund) ──
+    user_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="Namba ya simu",
+    )
+    user_email = models.EmailField(
+        blank=True,
+        verbose_name="Barua pepe",
+    )
+    user_payment_method = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name="Njia ya malipo (M-Pesa, Airtel, n.k.)",
     )
 
     # ── Kiasi ──────────────────────────────────────────────

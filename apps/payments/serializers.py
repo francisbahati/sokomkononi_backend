@@ -69,6 +69,9 @@ class PayoutSerializer(serializers.ModelSerializer):
 # ============================================================
 class RefundSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source="user.name", read_only=True)
+    user_phone = serializers.CharField(read_only=True)
+    user_email = serializers.EmailField(read_only=True)
+    user_payment_method = serializers.CharField(read_only=True)
     processed_by_name = serializers.CharField(
         source="processed_by.name", read_only=True,
     )
@@ -78,6 +81,7 @@ class RefundSerializer(serializers.ModelSerializer):
         fields = [
             "id", "promotion_type", "promotion_id",
             "user", "user_name",
+            "user_phone", "user_email", "user_payment_method",
             "amount_paid", "amount_refunded",
             "status", "method", "reason", "admin_note",
             "processed_by", "processed_by_name",
@@ -86,5 +90,6 @@ class RefundSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id", "created_at", "processed_at", "completed_at",
-            "user_name", "processed_by_name",
+            "user_name", "user_phone", "user_email",
+            "user_payment_method", "processed_by_name",
         ]

@@ -2,9 +2,13 @@
 # apps/transactions/views.py
 # ============================================================
 
+from datetime import timedelta
+from decimal import Decimal
+
 from django.db import IntegrityError, transaction as db_transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -35,6 +39,9 @@ from .services.reservation import (
     expire_reservation,
     initiate_reservation_payment,
     start_inspection_period,
+    get_allowed_reservation_hours,
+    calculate_reservation_fee,
+    remove_reservation_by_buyer, 
 )
 from .services.transaction import (
     cancel_transaction,
@@ -471,6 +478,167 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
+    # ============================================================
+    # EXTEND RESERVATION (buyer)
+    # ============================================================
+    @action(detail=True, methods=["post"], url_path="extend-reservation")
+    def extend_reservation(self, request, pk=None):
+        """
+        Buyer anaongeza muda wa reservation yake kwa tier halali.
+        Fee ya tier inaongezwa kwenye deposit_amount.
+
+        Body (JSON):
+            { "additional_hours": 24 }   # lazima iwe tier halali
+        """
+        transaction = self._get_transaction(pk)
+
+        if request.user.id != transaction.buyer_id:
+            raise PermissionDenied(
+                "Ni mnunuzi pekee anayeweza kuongeza muda wa reservation."
+            )
+
+        reservation = getattr(transaction, "reservation", None)
+        if not reservation or reservation.status != Reservation.Status.ACTIVE:
+            raise ValidationError(
+                "Reservation haipo ACTIVE. Haiwezi kuongezwa muda."
+            )
+
+        try:
+            additional_hours = int(request.data.get("additional_hours"))
+        except (TypeError, ValueError):
+            raise ValidationError(
+                "additional_hours inahitajika (integer)."
+            )
+
+        allowed = get_allowed_reservation_hours()
+        if not allowed:
+            raise ValidationError(
+                "Hakuna tiers za reservation zilizo hai."
+            )
+        if additional_hours not in allowed:
+            hours_str = ", ".join(str(h) for h in sorted(allowed))
+            raise ValidationError(
+                f"Muda wa kuongeza lazima uwe mmoja wa: {hours_str}."
+            )
+
+        fee = calculate_reservation_fee(additional_hours)
+
+        with db_transaction.atomic():
+            reservation = (
+                Reservation.objects
+                .select_for_update()
+                .get(pk=reservation.pk)
+            )
+
+            if reservation.status != Reservation.Status.ACTIVE:
+                raise ValidationError(
+                    "Reservation haipo ACTIVE tena."
+                )
+
+            now = timezone.now()
+            base = reservation.expires_at or now
+            reservation.duration_hours += additional_hours
+            reservation.expires_at = base + timedelta(hours=additional_hours)
+            if fee > Decimal("0.00"):
+                reservation.deposit_amount = (
+                    reservation.deposit_amount + fee
+                )
+            reservation.save(update_fields=[
+                "duration_hours", "expires_at",
+                "deposit_amount", "updated_at",
+            ])
+
+        _log(
+            request,
+            action="reservation.extended",
+            target="Reservation",
+            target_id=reservation.id,
+            details=(
+                f"Reservation #{reservation.id} extended by "
+                f"{additional_hours}h (fee TZS {fee}) "
+                f"for Transaction #{transaction.id}"
+            ),
+        )
+
+        # Notify both parties
+        try:
+            from apps.notifications.models import Notification
+            from apps.notifications.services.notification import (
+                create_notification,
+            )
+            for recipient in (transaction.buyer, transaction.seller):
+                create_notification(
+                    recipient=recipient,
+                    notification_type=Notification.NotificationType.GENERAL,
+                    title="Reservation imeongezwa muda",
+                    message=(
+                        f"Reservation ya Transaction #{transaction.id} "
+                        f"imeongezwa saa {additional_hours}. "
+                        f"Inaisha: {reservation.expires_at}."
+                    ),
+                    priority=Notification.Priority.HIGH,
+                    related_object_type="Reservation",
+                    related_object_id=reservation.id,
+                    action_url=f"/transactions/{transaction.id}",
+                )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "reservation extend notify failed"
+            )
+
+        return Response(
+            ReservationSerializer(
+                reservation, context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    # ============================================================
+    # REMOVE RESERVATION (buyer) — njia B
+    # ============================================================
+    @action(detail=True, methods=["post"], url_path="remove-reservation")
+    def remove_reservation(self, request, pk=None):
+        """
+        Buyer anaondoa reservation yake wakati wowote (hiari).
+        Reservation Fee HAIRUDISHWI.
+
+        Body (JSON): {}  (hakuna payload inayohitajika)
+        """
+        transaction = self._get_transaction(pk)
+
+        if request.user.id != transaction.buyer_id:
+            raise PermissionDenied(
+                "Ni mnunuzi pekee anayeweza kuondoa reservation."
+            )
+
+        reservation = getattr(transaction, "reservation", None)
+        if not reservation:
+            raise ValidationError("Transaction hii haina Reservation.")
+
+        # ── Njia B: function mpya inayoruhusu kuondoa BILA check ya muda ──
+        reservation = remove_reservation_by_buyer(reservation=reservation)
+
+        _log(
+            request,
+            action="reservation.removed_by_buyer",
+            target="Reservation",
+            target_id=reservation.id,
+            details=(
+                f"Reservation #{reservation.id} removed by buyer "
+                f"for Transaction #{transaction.id}"
+            ),
+        )
+
+        return Response(
+            ReservationSerializer(
+                reservation, context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+    # ============================================================
+    # INTERNAL HELPER
+    # ============================================================
     def _get_transaction(self, pk):
         transaction = get_object_or_404(self.get_queryset(), pk=pk)
         user = self.request.user

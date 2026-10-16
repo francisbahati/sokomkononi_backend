@@ -12,6 +12,7 @@ class Ticket(SoftDeleteModel):
         LISTING = "LISTING", "Listing"
         ACCOUNT = "ACCOUNT", "Account"
         OTHER = "OTHER", "Other"
+        DEAL_REPORT = "DEAL_REPORT", "Deal Report"   # ⬅️ MPYA
 
     class Priority(models.TextChoices):
         LOW = "LOW", "Low"
@@ -88,6 +89,40 @@ class Ticket(SoftDeleteModel):
         verbose_name="Muda wa ukumbusho wa SLA",
     )
 
+    # ── Deal Report context (kama category=DEAL_REPORT) ──
+    deal_room = models.ForeignKey(
+        "deals.DealRoom",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reports",
+        verbose_name="Deal Room (kama ni ripoti ya deal)",
+    )
+    reported_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reports_against_me",
+        verbose_name="Mtumiaji aliyeripotiwa",
+    )
+    reported_user_name = models.CharField(
+        max_length=150,
+        blank=True,
+        verbose_name="Jina la aliyeripotiwa",
+    )
+    reporter_role = models.CharField(
+        max_length=10,
+        blank=True,
+        choices=[("buyer", "Buyer"), ("seller", "Seller")],
+        verbose_name="Nafasi ya aliyeripoti",
+    )
+    report_reason = models.CharField(
+        max_length=30,
+        blank=True,
+        verbose_name="Sababu ya ripoti",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -108,6 +143,14 @@ class Ticket(SoftDeleteModel):
             models.Index(
                 fields=["sla_deadline", "status"],
                 name="ticket_sla_deadline_idx",
+            ),
+            models.Index(
+                fields=["category", "created_at"],
+                name="ticket_cat_created_idx",
+            ),
+            models.Index(
+                fields=["reported_user", "created_at"],
+                name="ticket_reported_idx",
             ),
         ]
 

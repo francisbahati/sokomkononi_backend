@@ -396,6 +396,12 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     category = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
 
+    # ── MPYA ──
+    can_see_contact = serializers.SerializerMethodField()
+    inspection_started_at = serializers.SerializerMethodField()
+    inspection_expires_at = serializers.SerializerMethodField()
+    inspection_status = serializers.SerializerMethodField()
+
     class Meta:
         model = DealRoom
         fields = [
@@ -407,6 +413,10 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             "transaction_id", "payment_proof",
             "reservation_fee", "reservation_hours",
             "reservation_method", "reservation_expires_at",
+            # ── MPYA ──
+            "can_see_contact",
+            "inspection_started_at", "inspection_expires_at",
+            "inspection_status",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
@@ -417,6 +427,10 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     def _reservation(self, obj):
         txn = self._txn(obj)
         return getattr(txn, "reservation", None) if txn else None
+
+    def _inspection(self, obj):
+        txn = self._txn(obj)
+        return getattr(txn, "inspection_period", None) if txn else None
 
     def get_category(self, obj):
         try:
@@ -475,6 +489,36 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     def get_reservation_expires_at(self, obj):
         r = self._reservation(obj)
         return getattr(r, "expires_at", None) if r else None
+
+    # ── MPYA: can_see_contact ──
+    def get_can_see_contact(self, obj):
+        """
+        True kama reservation imelipwa — buyer/seller wanaweza kuonana
+        (phone/email) na kuwasiliana wakati wa inspection.
+        """
+        txn = self._txn(obj)
+        if not txn:
+            return False
+        from apps.transactions.models import Transaction
+        return txn.status in [
+            Transaction.Status.RESERVED,
+            Transaction.Status.INSPECTION,
+            Transaction.Status.READY_FOR_FINAL_PAYMENT,
+            Transaction.Status.COMPLETED,
+        ]
+
+    # ── MPYA: inspection fields ──
+    def get_inspection_started_at(self, obj):
+        i = self._inspection(obj)
+        return getattr(i, "starts_at", None) if i else None
+
+    def get_inspection_expires_at(self, obj):
+        i = self._inspection(obj)
+        return getattr(i, "expires_at", None) if i else None
+
+    def get_inspection_status(self, obj):
+        i = self._inspection(obj)
+        return getattr(i, "status", None) if i else None
 
     def get_messages(self, obj):
         qs = obj.messages.select_related("sender").order_by("created_at")

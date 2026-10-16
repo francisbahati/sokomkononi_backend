@@ -1,4 +1,6 @@
 # apps/deals/views.py
+from datetime import timedelta
+
 from django.db import IntegrityError, transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
@@ -18,6 +20,8 @@ from drf_spectacular.utils import (
 )
 
 from apps.listings.models import Listing
+from apps.tickets.models import Ticket, TicketMessage
+from apps.tickets.serializers import DealReportSerializer
 
 from .models import DealMessage, DealRoom, NegotiationOffer
 from .permissions import IsDealParticipant, IsVerifiedDealUser
@@ -59,6 +63,11 @@ def _log(request, action, target="", target_id=None, details=""):
         )
 
 
+def _generate_ticket_code():
+    import secrets
+    return f"TKT-{secrets.token_hex(5).upper()}"
+
+
 @extend_schema_view(
     list=extend_schema(responses={200: DealRoomListSerializer(many=True)}),
     retrieve=extend_schema(responses={200: DealRoomDetailSerializer}),
@@ -90,6 +99,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return DealRoomAcceptOfferSerializer
         if self.action == "cancel":
             return DealRoomCancelSerializer
+        if self.action == "report":
+            return DealReportSerializer
         if self.action == "messages_create":
             return DealMessageCreateSerializer
         if self.action == "retrieve":
@@ -105,7 +116,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated(), IsVerifiedDealUser()]
         if self.action in [
             "retrieve", "offer", "accept_offer", "cancel",
-            "messages_create", "messages_list",
+            "messages_create", "messages_list", "report",
         ]:
             return [
                 permissions.IsAuthenticated(),
@@ -292,6 +303,105 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             "confirmed_at": txn.seller_confirmed_at,
         })
 
+    # ============================================================
+    # REPORT — inaunda Ticket ya category=DEAL_REPORT
+    # ============================================================
+    @extend_schema(
+        request=DealReportSerializer,
+        responses={201: None},
+    )
+    @action(
+        detail=True, methods=["post"],
+        url_path="report", url_name="report",
+    )
+    @transaction.atomic
+    def report(self, request, pk=None):
+        deal_room = self.get_object()
+
+        serializer = DealReportSerializer(
+            data=request.data,
+            context={"request": request, "deal_room": deal_room},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        reported_user_id = serializer.validated_data["reported_user_id"]
+        reason = serializer.validated_data["reason"]
+        details = serializer.validated_data["details"]
+
+        # Amua nafasi ya aliyeripoti
+        if request.user.id == deal_room.buyer_id:
+            reporter_role = "buyer"
+            reported_user = deal_room.seller
+        else:
+            reporter_role = "seller"
+            reported_user = deal_room.buyer
+
+        subject = (
+            f"Ripoti ya {reporter_role.upper()} dhidi ya "
+            f"{reported_user.name} — Deal #{deal_room.id}"
+        )
+        description = (
+            f"**Deal Room:** #{deal_room.id} — {deal_room.listing.title}\n"
+            f"**Aliyeripoti:** {request.user.name} "
+            f"(ID {request.user.id}, {reporter_role})\n"
+            f"**Aliripotiwa:** {reported_user.name} "
+            f"(ID {reported_user.id})\n"
+            f"**Sababu:** {reason}\n\n"
+            f"**Maelezo:**\n{details}"
+        )
+
+        ticket = Ticket.objects.create(
+            code=_generate_ticket_code(),
+            subject=subject[:255],
+            description=description,
+            category=Ticket.Category.DEAL_REPORT,
+            priority=Ticket.Priority.HIGH,
+            user=request.user,
+            user_name=request.user.name,
+            user_email=request.user.email or "",
+            sla_deadline=timezone.now() + timedelta(hours=24),
+            deal_room=deal_room,
+            reported_user=reported_user,
+            reported_user_name=reported_user.name,
+            reporter_role=reporter_role,
+            report_reason=reason,
+        )
+
+        TicketMessage.objects.create(
+            ticket=ticket,
+            sender=TicketMessage.Sender.USER,
+            sender_name=request.user.name,
+            text=description,
+        )
+
+        _log(
+            request,
+            action="deal.reported",
+            target="Ticket",
+            target_id=ticket.id,
+            details=(
+                f"User {request.user.id} ({reporter_role}) reported "
+                f"user {reported_user.id} in deal #{deal_room.id} "
+                f"— reason={reason}"
+            ),
+        )
+
+        return Response(
+            {
+                "ok": True,
+                "ticket_id": ticket.id,
+                "ticket_code": ticket.code,
+                "message": (
+                    "Ripoti yako imetumwa. Timu yetu itachukua hatua "
+                    "ndani ya saa 24."
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ============================================================
+    # OFFER
+    # ============================================================
     @extend_schema(
         request=NegotiationOfferCreateSerializer,
         responses={201: NegotiationOfferSerializer},

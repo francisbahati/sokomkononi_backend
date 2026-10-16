@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db import models   
 
 from .models import Ticket, TicketAttachment, TicketMessage
 
@@ -48,6 +49,8 @@ class TicketSerializer(serializers.ModelSerializer):
     messages = TicketMessageSerializer(many=True, read_only=True)
     attachments = TicketAttachmentSerializer(many=True, read_only=True)
     sla_overdue = serializers.SerializerMethodField()
+    deal_room_id = serializers.IntegerField(source="deal_room.id", read_only=True)
+    reported_user_id = serializers.IntegerField(source="reported_user.id", read_only=True)
 
     class Meta:
         model = Ticket
@@ -58,6 +61,9 @@ class TicketSerializer(serializers.ModelSerializer):
             "assigned_to", "assigned_to_name",
             "resolved_at", "sla_deadline", "sla_reminded_at",
             "sla_overdue",
+            # ── Deal Report context ──
+            "deal_room_id", "reported_user_id", "reported_user_name",
+            "reporter_role", "report_reason",
             "messages", "attachments",
             "created_at", "updated_at",
         ]
@@ -65,6 +71,8 @@ class TicketSerializer(serializers.ModelSerializer):
             "id", "code", "user", "user_name", "user_email",
             "assigned_to", "assigned_to_name", "resolved_at",
             "sla_deadline", "sla_reminded_at", "sla_overdue",
+            "deal_room_id", "reported_user_id", "reported_user_name",
+            "reporter_role", "report_reason",
             "messages", "attachments", "created_at", "updated_at",
         ]
 
@@ -121,3 +129,78 @@ class TicketPrioritySerializer(serializers.Serializer):
 
 class TicketAssignSerializer(serializers.Serializer):
     staff_id = serializers.IntegerField()
+
+
+# ============================================================
+# DEAL REPORT — inatumika kwenye apps.deals.views
+# ============================================================
+class DealReportReason(models.TextChoices):
+    FRAUD = "FRAUD", "Utapeli / Uongo"
+    HARASSMENT = "HARASSMENT", "Unyanyasaji / Vitisho"
+    NO_SHOW = "NO_SHOW", "Hakufika kwenye Ukaguzi"
+    FAKE_DOCS = "FAKE_DOCS", "Hati za Uongo"
+    OFF_PLATFORM = "OFF_PLATFORM", "Kutaka Malipo Nje ya Jukwaa"
+    OTHER = "OTHER", "Nyingine"
+
+
+class DealReportSerializer(serializers.Serializer):
+    """
+    Inatumika kwenye DealRoomViewSet.report — inaunda Ticket ya
+    category=DEAL_REPORT.
+    """
+    reported_user_id = serializers.IntegerField(required=True)
+    reason = serializers.ChoiceField(choices=DealReportReason.choices)
+    details = serializers.CharField(
+        required=True, min_length=10, max_length=4000,
+        trim_whitespace=True,
+    )
+
+    def validate_details(self, value):
+        value = (value or "").strip()
+        if len(value) < 10:
+            raise serializers.ValidationError(
+                "Tafadhali toa maelezo ya kutosha (angalau herufi 10)."
+            )
+        return value
+
+    def validate(self, attrs):
+        deal_room = self.context.get("deal_room")
+        request = self.context.get("request")
+
+        if not deal_room:
+            raise serializers.ValidationError("Deal Room haijapatikana.")
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError(
+                "Ni lazima uwe umeingia kwenye akaunti."
+            )
+        if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
+            raise serializers.ValidationError(
+                "Huruhusiwi kuripoti kwenye Deal Room hii."
+            )
+
+        reported_id = attrs.get("reported_user_id")
+        if reported_id == request.user.id:
+            raise serializers.ValidationError({
+                "reported_user_id": "Huwezi kujiripoti mwenyewe."
+            })
+        if reported_id not in [deal_room.buyer_id, deal_room.seller_id]:
+            raise serializers.ValidationError({
+                "reported_user_id": (
+                    "Mtumiaji huyo hayupo kwenye Deal Room hii."
+                ),
+            })
+
+        # Zuia ripoti ya pili kwenye deal moja kwa mtumiaji huyo huyo
+        existing = Ticket.objects.filter(
+            category=Ticket.Category.DEAL_REPORT,
+            deal_room=deal_room,
+            user=request.user,
+            reported_user_id=reported_id,
+        ).exists()
+        if existing:
+            raise serializers.ValidationError(
+                "Tayari umesharipoti mtumiaji huyu kwenye Deal Room hii. "
+                "Timu yetu inachunguza."
+            )
+
+        return attrs

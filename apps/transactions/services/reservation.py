@@ -662,6 +662,7 @@ def expire_inspection_period(*, inspection):
     )
     return inspection
 
+
 @db_transaction.atomic
 def mark_reservation_as_refunded(*, ref_id, reason=""):
     reservation = Reservation.objects.select_for_update().get(pk=ref_id)
@@ -673,4 +674,111 @@ def mark_reservation_as_refunded(*, ref_id, reason=""):
     reservation.save(update_fields=[
         "payment_status", "refunded_at", "refund_reference", "updated_at",
     ])
+    return reservation
+
+
+# ============================================================================
+# REMOVE RESERVATION BY BUYER (njia B)
+# ============================================================================
+# Tofauti na expire_reservation, function hii HAIANGALII expires_at.
+# Buyer anaweza kuondoa reservation yake wakati wowote kabla ya
+# transaction kukamilika. Reservation Fee HAIRUDISHWI.
+
+@db_transaction.atomic
+def remove_reservation_by_buyer(*, reservation):
+    """
+    Buyer anaondoa reservation yake (hiari, muda wowote).
+    - reservation.status       → CANCELLED
+    - transaction.status       → CANCELLED
+    - listing.status           → LIVE (kama ilikuwa RESERVED)
+    - inspection_period.status → CANCELLED (kama ipo)
+    - Waiting list inaarifiwa  (kama listing ilirudi LIVE)
+
+    Reservation Fee HAIRUDISHWI.
+    """
+    reservation = (
+        Reservation.objects
+        .select_for_update(of=("self",))
+        .select_related(
+            "transaction",
+            "transaction__listing",
+            "transaction__deal_room",
+            "transaction__buyer",
+            "transaction__seller",
+        )
+        .get(pk=reservation.pk)
+    )
+
+    transaction = (
+        Transaction.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "buyer", "seller")
+        .get(pk=reservation.transaction_id)
+    )
+
+    if reservation.status not in [
+        Reservation.Status.ACTIVE,
+        Reservation.Status.PENDING_PAYMENT,
+    ]:
+        raise ValidationError(
+            "Reservation hii haiwezi kuondolewa kwa hali yake ya sasa "
+            f"({reservation.status})."
+        )
+
+    if transaction.status in [
+        Transaction.Status.COMPLETED,
+        Transaction.Status.CANCELLED,
+    ]:
+        raise ValidationError(
+            "Transaction hii haiwezi kughairiwa tena."
+        )
+
+    now = timezone.now()
+
+    reservation.status = Reservation.Status.CANCELLED
+    reservation.save(update_fields=["status", "updated_at"])
+
+    listing_reopened = False
+
+    if transaction.status in [
+        Transaction.Status.RESERVED,
+        Transaction.Status.INSPECTION,
+        Transaction.Status.READY_FOR_FINAL_PAYMENT,
+        Transaction.Status.RESERVATION_PENDING,
+    ]:
+        transaction.status = Transaction.Status.CANCELLED
+        transaction.cancelled_at = now
+        transaction.cancellation_reason = (
+            "Mnunuzi ameondoa reservation."
+        )
+        transaction.save(update_fields=[
+            "status", "cancelled_at", "cancellation_reason", "updated_at",
+        ])
+
+        listing = Listing.objects.select_for_update().get(
+            pk=transaction.listing_id,
+        )
+        if listing.status == Listing.Status.RESERVED:
+            listing.status = Listing.Status.LIVE
+            listing.save(update_fields=["status", "updated_at"])
+            listing_reopened = True
+
+    inspection = getattr(transaction, "inspection_period", None)
+    if inspection and inspection.status in [
+        InspectionPeriod.Status.PENDING,
+        InspectionPeriod.Status.ACTIVE,
+    ]:
+        inspection.status = InspectionPeriod.Status.CANCELLED
+        inspection.save(update_fields=["status", "updated_at"])
+
+    db_transaction.on_commit(
+        lambda: notify_reservation_expired(reservation=reservation)
+    )
+
+    if listing_reopened:
+        reopened_listing = Listing.objects.get(pk=transaction.listing_id)
+        db_transaction.on_commit(
+            lambda: notify_waiting_buyers(listing=reopened_listing)
+        )
+
     return reservation

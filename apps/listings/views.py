@@ -73,6 +73,8 @@ from .services.listing_moderation import (
 )
 
 from .views_helpers import require_int_listing_id
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 
 from .ownership import get_owned_or_public_listing
 
@@ -137,8 +139,9 @@ CATEGORY_SLUGS = {
         ),
     ),
 )
-class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
+@method_decorator(csrf_exempt, name="dispatch")
 
+class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     owner_field = "seller"
     staff_can_restore_any = True
 

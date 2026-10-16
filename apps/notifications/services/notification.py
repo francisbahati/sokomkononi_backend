@@ -1,3 +1,12 @@
+# apps/notifications/services/notification.py
+"""
+Notification service — create notifications for users and admins.
+
+Marekebisho:
+  - create_notification_for_admins: imeongezwa `action_url` param
+  - create_notification: imeongezwa `action_url` param (tayari ipo)
+  - send_notification_via_channels: stub (email/SMS/push)
+"""
 from rest_framework.exceptions import PermissionDenied
 from django.utils import timezone
 
@@ -70,20 +79,11 @@ def _should_send_via_channel(recipient, notification_type, channel):
 
     Chaguo B: Function hii HAITUMIKI kwenye create_notification().
     Inatumika TU kwenye send_notification_via_channels() baadaye.
-
-    Args:
-        recipient: User
-        notification_type: str (mfano "NEW_OFFER")
-        channel: "email" | "sms" | "push"
-
-    Returns:
-        True — tuma
-        False — mtumiaji amezima channel hii kwa category hii
     """
     try:
         prefs = recipient.notification_preferences
     except Exception:
-        return True 
+        return True
 
     nt = str(notification_type or "").strip().upper()
     if not nt:
@@ -98,12 +98,8 @@ def _should_send_via_channel(recipient, notification_type, channel):
     if mapped_channel is None or category is None:
         return True
 
-    # Kama channel iliyotolewa ni tofauti na mapping, tuma
-    if channel != mapped_channel:
-        # Angalia prefs field kwa channel iliyotolewa
-        field = f"{channel}_{category}"
-    else:
-        field = f"{channel}_{category}"
+    # Angalia prefs field kwa channel iliyotolewa
+    field = f"{channel}_{category}"
 
     if not hasattr(prefs, field):
         return True
@@ -152,18 +148,7 @@ def create_notification(
 # ============================================================
 # OPTIONAL — SEND VIA CHANNELS (email/SMS/push)
 # ============================================================
-# Hii ni kwa siku zijazo ukiongeza email/SMS/push services.
-# Kwa sasa ina-log tu (hakuna kutuma).
-#
-# Matumizi:
-#   create_notification(...)                       # in-app, kila wakati
-#   send_notification_via_channels(recipient, ...) # email/SMS/push kwa prefs
-#
-def send_notification_via_channels(   # noqa: F811  (documented stub)
-    # NOTE: email/SMS/push delivery is not yet implemented.
-    # This function currently returns False for every channel.
-    # Wire it to real providers before relying on it.
-
+def send_notification_via_channels(
     *,
     recipient,
     notification_type,
@@ -176,14 +161,7 @@ def send_notification_via_channels(   # noqa: F811  (documented stub)
     Tuma notification kupitia channels mbalimbali, ukizingatia
     prefs za mtumiaji.
 
-    Kwa sasa hii ni **stub** — ina-log tu. Ukiongeza email/SMS/push
-    services, badilisha `_send_via_channel()` hapa chini.
-
-    Args:
-        channels: Tuple ya channels za kujaribu. Default: zote tatu.
-
-    Returns:
-        dict { channel: bool } — True kama ilitumwa, False kama ilirukwa.
+    Kwa sasa hii ni **stub** — ina-log tu.
     """
     results = {}
 
@@ -208,8 +186,7 @@ def _send_via_channel(*, channel, recipient, title, message, **kwargs):
     """
     Tuma notification via channel fulani.
 
-    Chaguo B: Hii ni stub kwa sasa — ina-log tu. Ukiongeza services,
-    badilisha code hapa.
+    Chaguo B: Hii ni stub kwa sasa — ina-log tu.
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -236,9 +213,6 @@ def _send_via_channel(*, channel, recipient, title, message, **kwargs):
             return False
 
     if channel == "sms":
-        # TODO: integrate SMS service (FimiPay/Beem)
-        # from .sms_service import send_sms
-        # send_sms(recipient.phone, message)
         if not recipient.phone:
             return False
         logger.info(
@@ -248,9 +222,6 @@ def _send_via_channel(*, channel, recipient, title, message, **kwargs):
         return True
 
     if channel == "push":
-        # TODO: integrate push service (Firebase/OneSignal)
-        # from .push_service import send_push
-        # send_push(recipient.id, title, message)
         logger.info(
             "[notif:push] Would send to user %s: %s — %s",
             recipient.id, title, message,
@@ -308,6 +279,11 @@ def create_notification_for_admins(
 ):
     """
     Tuma notification kwa admins wote (is_staff=True).
+
+    Marekebisho:
+      - Imeongezwa `action_url` param ili admin aweze kubofya
+        na kuenda kwenye screen husika (mfano user drawer
+        ili kuona sold listings).
 
     Admin notifications HAZIATHIRIWI na prefs za mtumiaji —
     admin anaona kila kitu.

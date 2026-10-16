@@ -663,13 +663,70 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Kama tayari SOLD, usifanye kitu
+        if listing.status == Listing.Status.SOLD:
+            return Response(
+                ListingDetailSerializer(
+                    listing, context={"request": request},
+                ).data,
+                status=status.HTTP_200_OK,
+            )
+
+        # ── Badilisha status ────────────────────────────────
         listing.status = Listing.Status.SOLD
         listing.save(update_fields=["status", "updated_at"])
+
+        # ── Notify admins ──────────────────────────────────
+        try:
+            from apps.notifications.models import Notification
+            from apps.notifications.services.notification import (
+                create_notification_for_admins,
+            )
+
+            seller_name = (
+                getattr(request.user, "name", "")
+                or getattr(request.user, "email", "")
+                or "Muuzaji"
+            )
+
+            create_notification_for_admins(
+                notification_type=Notification.NotificationType.GENERAL,
+                title="Mali Imemarkiwa kama Imepande",
+                message=(
+                    f'{seller_name} amemarki tangazo '
+                    f'"{listing.title}" kama SOLD (imeshauzwa).'
+                ),
+                related_object_type="listings.Listing",
+                related_object_id=listing.id,
+                action_url=(
+                    f"/smk-control-9x7k/users/{listing.seller_id}"
+                    f"?tab=listings&filter=sold"
+                ),
+                priority=Notification.Priority.NORMAL,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to notify admins about sold listing %s", listing.pk,
+            )
+
+        # ── Audit log ──────────────────────────────────────
+        try:
+            from apps.audit.services.audit import log_action
+            log_action(
+                request=request,
+                action="listing.marked_sold",
+                target="Listing",
+                target_id=listing.id,
+                details=f'Listing "{listing.title}" marked as SOLD',
+            )
+        except Exception:
+            pass
+
         return Response(
             ListingDetailSerializer(listing, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
-
     # ========================================================================
     # DESTROY - soft delete (default) au hard delete (admin)
     # ========================================================================

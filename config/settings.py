@@ -1,5 +1,10 @@
 # ============================================================
 # config/settings.py — SokoMkononi (production-ready)
+#
+# Marekebisho:
+#  - Ongeza CSRF_TRUSTED_ORIGINS kwa api.sokomkononi.co.tz
+#  - CSP: ongeza api.sokomkononi.co.tz kwenye connect-src
+#  - Ondoa duplicate CELERY_BEAT_SCHEDULE keys
 # ============================================================
 import os
 from datetime import timedelta
@@ -77,8 +82,6 @@ MIDDLEWARE = [
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    # MUST come before CsrfViewMiddleware so the flag is set
-    # before Django checks it.
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -136,8 +139,6 @@ if _REDIS_CACHE_URL.startswith(("redis://", "rediss://")):
             "LOCATION": _REDIS_CACHE_URL,
         }
     }
-    # django-ratelimit needs a shared cache — only load it when Redis
-    # is configured. Local dev (LocMemCache) skips it entirely.
     if "django_ratelimit" not in INSTALLED_APPS:
         INSTALLED_APPS.append("django_ratelimit")
 else:
@@ -201,7 +202,12 @@ if R2_PUBLIC_ORIGIN:
     _CSP_MEDIA_SRC.append(R2_PUBLIC_ORIGIN)
 
 _connect_src = ["'self'"] + [
-    o for o in ["https://api.sokomkononi.co.tz", R2_PUBLIC_ORIGIN] if o
+    o for o in [
+        "https://api.sokomkononi.co.tz",
+        "https://sokomkononi.co.tz",
+        "https://www.sokomkononi.co.tz",
+        R2_PUBLIC_ORIGIN,
+    ] if o
 ]
 
 _CSP_DIRECTIVES = {
@@ -210,7 +216,6 @@ _CSP_DIRECTIVES = {
     "media-src": _CSP_MEDIA_SRC,
     "script-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
     "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
-    # FIX: duplicate "font-src" key removed; the Google Fonts version is kept.
     "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
     "connect-src": _connect_src,
     "frame-ancestors": ["'none'"],
@@ -220,8 +225,7 @@ _CSP_DIRECTIVES = {
 
 _EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin")
 
-if env_bool("CSP_REPORT_ONLY", DEBUG):  # report-only in dev, enforce in prod
-    # django-csp 4.0 native report-only mode.
+if env_bool("CSP_REPORT_ONLY", DEBUG):
     CONTENT_SECURITY_POLICY_REPORT_ONLY = {
         "DIRECTIVES": _CSP_DIRECTIVES,
         "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
@@ -232,8 +236,6 @@ else:
         "DIRECTIVES": _CSP_DIRECTIVES,
         "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
     }
-
-
 
 # ---------------- CORS ----------------
 _cors_default = (
@@ -257,30 +259,32 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken",
     "x-requested-with",
     "x-access-token",
-    "idempotency-key",          
-    "x-idempotency-key",        
-    "x-request-id",             
+    "idempotency-key",
+    "x-idempotency-key",
+    "x-request-id",
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
 
+# ============================================================
+# CSRF TRUSTED ORIGINS
+# ============================================================
+# Frontend + API origins must be trusted so the SPA can send
+# X-CSRFToken on unsafe methods when a session cookie is present.
 CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(
     env_list("CSRF_TRUSTED_ORIGINS", "") + [
         "https://sokomkononi.co.tz",
         "https://www.sokomkononi.co.tz",
         "https://api.sokomkononi.co.tz",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
     ]
 ))
 
 # ---------------- DRF ----------------
 REST_FRAMEWORK = {
-    # FIX: stop DRF from hijacking ?format=pdf|csv|doc (it returned 404).
     "URL_FORMAT_OVERRIDE": None,
-    # enforces CSRF on unsafe methods (POST/PUT/PATCH/DELETE) when a
-    # session cookie happens to be present — which broke API calls
-    # whenever a stale Django admin session existed on the same origin.
-    #
-    # The Django admin (/django-admin/) still uses SessionMiddleware and
-    # its own CSRF checks — those are unaffected by this change.
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.accounts.authentication.FlexibleJWTAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -300,19 +304,19 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
         "rest_framework.throttling.ScopedRateThrottle",
     ),
-   "DEFAULT_THROTTLE_RATES": {
-    "register": "10/hour",
-    "login": "20/min",
-    "otp_send": "5/hour",
-    "otp_verify": "10/hour",
-    "password_reset": "5/hour",
-    "anon": "100/min",
-    "user": "1000/hour",
-    "support_ticket": "5/hour",           
-    "support_ticket_admin": "500/hour",   
-    "contact": "5/hour",
-    "refresh": "60/min",
-  },
+    "DEFAULT_THROTTLE_RATES": {
+        "register": "10/hour",
+        "login": "20/min",
+        "otp_send": "5/hour",
+        "otp_verify": "10/hour",
+        "password_reset": "5/hour",
+        "anon": "100/min",
+        "user": "1000/hour",
+        "support_ticket": "5/hour",
+        "support_ticket_admin": "500/hour",
+        "contact": "5/hour",
+        "refresh": "60/min",
+    },
 }
 
 SIMPLE_JWT = {
@@ -329,7 +333,7 @@ SIMPLE_JWT = {
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
 }
 
-# ---------------- SPECTACULAR (SWAGGER) — FIXED ----------------
+# ---------------- SPECTACULAR (SWAGGER) ----------------
 SPECTACULAR_SETTINGS = {
     "TITLE": "SokoMkononi API",
     "DESCRIPTION": "SokoMkononi marketplace API",
@@ -340,68 +344,39 @@ SPECTACULAR_SETTINGS = {
     "REDOC_DIST": "SIDECAR",
     "COMPONENT_SPLIT_REQUEST": True,
     "SORT_OPERATIONS": False,
-    # Disambiguate enum names that would otherwise collide across
-    # multiple choice sets named "status", "type", "priority", etc.
     "ENUM_NAME_OVERRIDES": {
-        # Transaction.status, Reservation.status, InspectionPeriod.status,
-        # BannerAd.payment_status, ListingFee.payment_status,
-        # BundlePurchase.status, ListingBoost.payment_status, etc.
-        "TransactionStatusEnum":
-            "apps.transactions.models.Transaction.Status.choices",
-        "ReservationStatusEnum":
-            "apps.transactions.models.Reservation.Status.choices",
-        "InspectionStatusEnum":
-            "apps.transactions.models.InspectionPeriod.Status.choices",
-        "ListingStatusEnum":
-            "apps.listings.models.Listing.Status.choices",
-        "ListingFeeStatusEnum":
-            "apps.listings.models.ListingFee.PaymentStatus.choices",
-        "BoostStatusEnum":
-            "apps.boosting.models.ListingBoost.BoostStatus.choices",
-        "BoostPaymentStatusEnum":
-            "apps.boosting.models.ListingBoost.PaymentStatus.choices",
-        "DealRoomStatusEnum":
-            "apps.deals.models.DealRoom.Status.choices",
-        "BundleStatusEnum":
-            "apps.bundles.models.BundlePurchase.Status.choices",
-        "BundleTypeEnum":
-            "apps.bundles.models.Bundle.Type.choices",
+        "TransactionStatusEnum": "apps.transactions.models.Transaction.Status.choices",
+        "ReservationStatusEnum": "apps.transactions.models.Reservation.Status.choices",
+        "InspectionStatusEnum": "apps.transactions.models.InspectionPeriod.Status.choices",
+        "ListingStatusEnum": "apps.listings.models.Listing.Status.choices",
+        "ListingFeeStatusEnum": "apps.listings.models.ListingFee.PaymentStatus.choices",
+        "BoostStatusEnum": "apps.boosting.models.ListingBoost.BoostStatus.choices",
+        "BoostPaymentStatusEnum": "apps.boosting.models.ListingBoost.PaymentStatus.choices",
+        "DealRoomStatusEnum": "apps.deals.models.DealRoom.Status.choices",
+        "BundleStatusEnum": "apps.bundles.models.BundlePurchase.Status.choices",
+        "BundleTypeEnum": "apps.bundles.models.Bundle.Type.choices",
         "BannerPaymentStatusEnum": [
             ("PENDING", "Pending"),
             ("PAID", "Paid"),
             ("FAILED", "Failed"),
             ("REFUNDED", "Refunded"),
         ],
-        "NotificationTypeEnum":
-            "apps.notifications.models.Notification.NotificationType.choices",
-        "NotificationPriorityEnum":
-            "apps.notifications.models.Notification.Priority.choices",
-        "NotificationAudienceEnum":
-            "apps.notifications.models.Notification.Audience.choices",
-        "TicketStatusEnum":
-            "apps.tickets.models.Ticket.Status.choices",
-        "TicketPriorityEnum":
-            "apps.tickets.models.Ticket.Priority.choices",
-        "TicketCategoryEnum":
-            "apps.tickets.models.Ticket.Category.choices",
-        "VerificationStatusEnum":
-            "apps.verifications.models.VerificationRequest.Status.choices",
-        "VerificationTypeEnum":
-            "apps.verifications.models.VerificationRequest.Type.choices",
-        "LeadingStatusEnum":
-            "apps.leading_fees.models.ListingLeading.Status.choices",
-        "LeadingPaymentStatusEnum":
-            "apps.leading_fees.models.ListingLeading.PaymentStatus.choices",
-        "PayoutStatusEnum":
-            "apps.payments.models.Payout.Status.choices",
-        "WaitingListStatusEnum":
-            "apps.waiting_list.models.WaitingListEntry.Status.choices",
-        "UserAccountTypeEnum":
-            "apps.accounts.models.User.AccountType.choices",
+        "NotificationTypeEnum": "apps.notifications.models.Notification.NotificationType.choices",
+        "NotificationPriorityEnum": "apps.notifications.models.Notification.Priority.choices",
+        "NotificationAudienceEnum": "apps.notifications.models.Notification.Audience.choices",
+        "TicketStatusEnum": "apps.tickets.models.Ticket.Status.choices",
+        "TicketPriorityEnum": "apps.tickets.models.Ticket.Priority.choices",
+        "TicketCategoryEnum": "apps.tickets.models.Ticket.Category.choices",
+        "VerificationStatusEnum": "apps.verifications.models.VerificationRequest.Status.choices",
+        "VerificationTypeEnum": "apps.verifications.models.VerificationRequest.Type.choices",
+        "LeadingStatusEnum": "apps.leading_fees.models.ListingLeading.Status.choices",
+        "LeadingPaymentStatusEnum": "apps.leading_fees.models.ListingLeading.PaymentStatus.choices",
+        "PayoutStatusEnum": "apps.payments.models.Payout.Status.choices",
+        "WaitingListStatusEnum": "apps.waiting_list.models.WaitingListEntry.Status.choices",
+        "UserAccountTypeEnum": "apps.accounts.models.User.AccountType.choices",
     },
 }
 
-# Docs are PUBLIC by default. Flip RESTRICT_DOCS=True in .env to lock down.
 if not DEBUG and env_bool("RESTRICT_DOCS", True):
     SPECTACULAR_SETTINGS["SERVE_PERMISSIONS"] = [
         "rest_framework.permissions.IsAdminUser",
@@ -415,9 +390,7 @@ _default_email_backend = (
 )
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", _default_email_backend)
 if not DEBUG and EMAIL_BACKEND.endswith("console.EmailBackend"):
-    raise ImproperlyConfigured(
-        "EMAIL_BACKEND=console is not allowed when DEBUG=False."
-    )
+    raise ImproperlyConfigured("EMAIL_BACKEND=console is not allowed when DEBUG=False.")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = env_int("EMAIL_PORT", 587)
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
@@ -449,7 +422,6 @@ if not DEBUG and not FIMIPAY_SECRET_KEY:
 if not DEBUG and not FIMIPAY_WEBHOOK_SECRET:
     raise ImproperlyConfigured("FIMIPAY_WEBHOOK_SECRET must be set when DEBUG=False.")
 
-
 # ---------------- CELERY ----------------
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
@@ -464,7 +436,6 @@ CELERY_RESULT_EXPIRES = 60 * 60 * 24
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-# Dev only — when True, Celery runs tasks inline (no broker needed).
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", False)
 CELERY_TASK_EAGER_PROPAGATES = True
 
@@ -478,32 +449,14 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-banners": {"task": "banners.expire_stale_banners", "schedule": crontab(minute="*/15")},
     "expire-stale-credits": {"task": "credits.expire_stale_credits", "schedule": crontab(hour=2, minute=30)},
     "cleanup-stale-services": {"task": "credits.cleanup_stale_services", "schedule": crontab(hour=2, minute=45)},
-    "refresh-pending-payouts": {
-        "task": "payments.refresh_pending_payouts",
-        "schedule": crontab(minute="*/10"),
-    },
+    "refresh-pending-payouts": {"task": "payments.refresh_pending_payouts", "schedule": crontab(minute="*/10")},
     "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},
     "cleanup-otp": {"task": "accounts.cleanup_old_otps", "schedule": crontab(hour=2, minute=15)},
     "cleanup-outstanding-tokens": {"task": "accounts.cleanup_expired_tokens", "schedule": crontab(hour=2, minute=25)},
-    "expire-stale-success-fee": {
-        "task": "finance.expire_stale_success_fee",
-        "schedule": crontab(hour=3, minute=15),
-    },
-    "waiting-list-expire-notified": {
-        "task": "waiting_list.expire_notified",
-        "schedule": crontab(minute="*/15"),
-    },
+    "expire-stale-success-fee": {"task": "finance.expire_stale_success_fee", "schedule": crontab(hour=3, minute=15)},
+    "waiting-list-expire-notified": {"task": "waiting_list.expire_notified", "schedule": crontab(minute="*/15")},
     "announcements-flush-scheduled": {"task": "announcements.flush_scheduled", "schedule": crontab(minute="*/5")},
-   
-    "tickets-send-sla-reminders": {
-    "task": "tickets.send_sla_reminders",
-    "schedule": crontab(minute=0),  # kila saa 1
-   },
- "announcements-flush-scheduled": {
-        "task": "announcements.flush_scheduled",
-        "schedule": 60.0,
-    },
-
+    "tickets-send-sla-reminders": {"task": "tickets.send_sla_reminders", "schedule": crontab(minute=0)},
     "sync-pending-fimipay-statuses": {
         "task": "payments.sync_pending_fimipay_statuses",
         "schedule": crontab(minute="*/5"),
@@ -558,42 +511,18 @@ if SENTRY_DSN:
         import logging
         logging.getLogger(__name__).exception("Sentry init failed")
 
-
 # ---------------- CSRF COOKIE ----------------
-# The SPA must be able to read the CSRF cookie (js-cookie, axios xsrfCookieName).
-# If you keep the access token in a cookie, the SPA also needs to send
-# X-CSRFToken back on unsafe methods.
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = not DEBUG
 
-
 # ============================================================
 # LISTING FEE BEHAVIOUR
 # ============================================================
-# When True, a category with no configured fee rule is charged the
-# default flat fee (TZS 3,000). Recommended: False — during launch
-# you want no surprise charges. If a rule is missing, the API
-# returns a clear "not configured" error and the admin fixes it.
-# Default True: a missing fee rule falls back to the default flat fee
-# (TZS 3,000) instead of raising "not configured" and blocking the
-# seller. Set LISTING_FEE_ALLOW_FALLBACK=False in .env to opt out.
-LISTING_FEE_ALLOW_FALLBACK = env_bool(
-    "LISTING_FEE_ALLOW_FALLBACK", True,
-)
-
-# How long a PENDING listing fee stays frozen before we re-price it
-# from the current rule. Sellers who abandon the payment page get the
-# new price if the admin raises the fee.
-LISTING_FEE_REPRICE_AFTER_HOURS = env_int(
-    "LISTING_FEE_REPRICE_AFTER_HOURS", 24,
-)
-
+LISTING_FEE_ALLOW_FALLBACK = env_bool("LISTING_FEE_ALLOW_FALLBACK", True)
+LISTING_FEE_REPRICE_AFTER_HOURS = env_int("LISTING_FEE_REPRICE_AFTER_HOURS", 24)
 
 # ============================================================
 # ADMIN PATH (used in notification action_url)
 # ============================================================
-# The frontend admin dashboard lives under this path prefix. Notification
-# action_urls that point to admin screens must use it so the SPA can
-# deep-link without knowing where the admin app is mounted.
 ADMIN_PATH = os.environ.get("ADMIN_PATH", "/smk-control-9x7k")

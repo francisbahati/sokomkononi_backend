@@ -1,4 +1,10 @@
 # apps/finance/views_reports.py
+#
+# Marekebisho:
+#  - Ongeza @method_decorator(csrf_exempt) kwa ReportsView na
+#    ReportsExportView ili kuepuka CSRF 500 kwenye JWT-only API
+#  - Ondoa DISPUTED kutoka deals_by_status (dispute imeondolewa)
+# ============================================================
 from collections import defaultdict
 from datetime import timedelta
 from io import BytesIO
@@ -8,6 +14,8 @@ from django.db.models import Count, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -59,13 +67,14 @@ def _period_range(period):
 # ============================================================
 # REPORTS VIEW
 # ============================================================
+@method_decorator(csrf_exempt, name="dispatch")
 class ReportsView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
         now = timezone.now()
 
-        # ── USER STATS — TUMA BACKEND PEKEE (sawa na Overview) ──
+        # ── USER STATS ──────────────────────────────────────
         user_stats = calculate_user_stats()
 
         total_users = user_stats["totalUsers"]
@@ -75,7 +84,7 @@ class ReportsView(APIView):
         neither_role = user_stats["neitherRole"]
         total_admins = user_stats["totalAdmins"]
 
-        # ── USERS GROWTH (cumulative, siku 30) ──
+        # ── USERS GROWTH ────────────────────────────────────
         start_day = (now - timedelta(days=29)).date()
         growth_rows = dict(
             User.objects
@@ -104,7 +113,7 @@ class ReportsView(APIView):
                 "cumulative": running,
             })
 
-        # ── LISTINGS ──
+        # ── LISTINGS ────────────────────────────────────────
         visible_qs = _visible_listings_qs()
 
         total_listings = visible_qs.count()
@@ -124,13 +133,10 @@ class ReportsView(APIView):
                 "count": count,
             })
 
-        # ── DEALS ──
+        # ── DEALS ───────────────────────────────────────────
         total_deals = DealRoom.objects.count()
         completed_deals = DealRoom.objects.filter(
             status=DealRoom.Status.COMPLETED,
-        ).count()
-        disputed_deals = DealRoom.objects.filter(
-            status=DealRoom.Status.DISPUTED,
         ).count()
 
         deals_by_status = dict(
@@ -139,21 +145,21 @@ class ReportsView(APIView):
             .values_list("status", "c")
         )
         for k in [
-            "OPEN", "NEGOTIATING", "ACCEPTED",
-            "CANCELLED", "COMPLETED", "DISPUTED",
+            "OPEN", "NEGOTIATING", "ACCEPTED", "RESERVED",
+            "AWAITING_FINAL_PAYMENT", "PAYMENT_PROOF_SUBMITTED",
+            "COMPLETED", "CANCELLED",
         ]:
             deals_by_status.setdefault(k, 0)
 
         deals_by_status_frontend = {
             "negotiating": deals_by_status.get("NEGOTIATING", 0),
             "accepted": deals_by_status.get("ACCEPTED", 0),
-            "reserved": 0,
+            "reserved": deals_by_status.get("RESERVED", 0),
             "completed": deals_by_status.get("COMPLETED", 0),
-            "disputed": deals_by_status.get("DISPUTED", 0),
             "cancelled": deals_by_status.get("CANCELLED", 0),
         }
 
-        # ── REVENUE ──
+        # ── REVENUE ─────────────────────────────────────────
         revenue_qs = Transaction.objects.filter(
             status=Transaction.Status.COMPLETED,
         )
@@ -190,7 +196,7 @@ class ReportsView(APIView):
             (completed_deals / total_deals) * 100 if total_deals else 0
         )
 
-        # ── TOP SELLERS ──
+        # ── TOP SELLERS ─────────────────────────────────────
         top_sellers_qs = (
             visible_qs
             .filter(seller__is_staff=False, seller__is_deleted=False)
@@ -210,7 +216,7 @@ class ReportsView(APIView):
             for s in top_sellers_qs
         ]
 
-        # ── MOST VIEWED ──
+        # ── MOST VIEWED ─────────────────────────────────────
         most_viewed_qs = visible_qs.order_by("-views_count")[:5]
         most_viewed = [
             {
@@ -222,7 +228,7 @@ class ReportsView(APIView):
             for l in most_viewed_qs
         ]
 
-        # ── TOP CATEGORIES ──
+        # ── TOP CATEGORIES ──────────────────────────────────
         cat_qs = (
             visible_qs
             .values("category__slug", "category__name")
@@ -239,7 +245,7 @@ class ReportsView(APIView):
             for c in cat_qs
         ]
 
-        # ── TOP LOCATIONS ──
+        # ── TOP LOCATIONS ───────────────────────────────────
         loc_qs = (
             visible_qs
             .values("location")
@@ -256,7 +262,6 @@ class ReportsView(APIView):
         ]
 
         return Response({
-            # ── User stats ──
             "totalUsers": total_users,
             "totalSellers": total_sellers,
             "totalBuyers": total_buyers,
@@ -265,25 +270,21 @@ class ReportsView(APIView):
             "totalAdmins": total_admins,
             "usersGrowth": users_growth,
 
-            # ── Listings ──
             "totalListings": total_listings,
             "liveListings": live_listings,
             "soldListings": sold_listings,
             "listingsGrowth": listings_growth,
 
-            # ── Deals ──
             "totalDeals": total_deals,
             "completedDeals": completed_deals,
-            "disputedDeals": disputed_deals,
+            "disputedDeals": 0,
             "dealsByStatus": deals_by_status_frontend,
 
-            # ── Revenue ──
             "totalGMV": float(total_gmv),
             "totalRevenue": total_revenue,
             "revenueByMonth": revenue_by_month,
             "conversionRate": round(conversion_rate, 2),
 
-            # ── Top lists ──
             "topSellers": top_sellers,
             "mostViewedListings": most_viewed,
             "topCategories": top_categories,
@@ -292,8 +293,9 @@ class ReportsView(APIView):
 
 
 # ============================================================
-# EXPORT REPORT — CSV / PDF / DOC kwa period
+# EXPORT REPORT — CSV / PDF / DOC
 # ============================================================
+@method_decorator(csrf_exempt, name="dispatch")
 class ReportsExportView(APIView):
     """
     GET /api/finance/reports/export/?format=csv&period=week
@@ -317,10 +319,8 @@ class ReportsExportView(APIView):
                 status=400,
             )
 
-        # Chukua data kutoka ReportsView
         data = ReportsView().get(request).data
 
-        # Chukua data ya revenue ya period
         from .services.revenue import (
             calculate_financial_dashboard,
             get_revenue_records,
@@ -329,15 +329,10 @@ class ReportsExportView(APIView):
             "today": "today",
             "week": "week",
             "month": "month",
-            "year": "all",  # mfumo hauna "year" — tumia "all"
+            "year": "all",
             "all": "all",
         }
         api_period = period_map.get(period, "all")
-
-        try:
-            fees_data = calculate_financial_dashboard(api_period)
-        except Exception:
-            fees_data = {}
 
         try:
             records = get_revenue_records(period=api_period, source="all")
@@ -352,7 +347,7 @@ class ReportsExportView(APIView):
             return self._pdf(data, records, period, timestamp)
         return self._doc(data, records, period, timestamp)
 
-    # ── CSV ──
+    # ── CSV ─────────────────────────────────────────────────
     def _csv(self, data, records, period, timestamp):
         import csv
         response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -367,7 +362,6 @@ class ReportsExportView(APIView):
         writer.writerow([f"Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}"])
         writer.writerow([])
 
-        # ── Users ──
         writer.writerow(["=== WATUMIAJI ==="])
         writer.writerow(["Jumla ya Watumiaji", data.get("totalUsers", 0)])
         writer.writerow(["Wauzaji Pekee", data.get("totalSellers", 0)])
@@ -377,23 +371,19 @@ class ReportsExportView(APIView):
         writer.writerow(["Admins", data.get("totalAdmins", 0)])
         writer.writerow([])
 
-        # ── Listings ──
         writer.writerow(["=== MALI ==="])
         writer.writerow(["Jumla ya Mali", data.get("totalListings", 0)])
         writer.writerow(["Mali Hai", data.get("liveListings", 0)])
         writer.writerow(["Zimeuzwa", data.get("soldListings", 0)])
         writer.writerow([])
 
-        # ── Deals ──
         writer.writerow(["=== DEALS ==="])
         writer.writerow(["Jumla ya Deals", data.get("totalDeals", 0)])
         writer.writerow(["Zimekamilika", data.get("completedDeals", 0)])
-        writer.writerow(["Migogoro", data.get("disputedDeals", 0)])
         for k, v in (data.get("dealsByStatus") or {}).items():
             writer.writerow([f"  {k}", v])
         writer.writerow([])
 
-        # ── Revenue ──
         writer.writerow(["=== MAPATO ==="])
         writer.writerow([
             "Jumla ya Mapato",
@@ -409,14 +399,12 @@ class ReportsExportView(APIView):
         ])
         writer.writerow([])
 
-        # ── Top Sellers ──
         writer.writerow(["=== WAUZAJI BORA ==="])
         writer.writerow(["#", "Jina", "Mali", "Views"])
         for i, s in enumerate(data.get("topSellers", []), 1):
             writer.writerow([i, s.get("name"), s.get("listings", 0), s.get("views", 0)])
         writer.writerow([])
 
-        # ── Most Viewed ──
         writer.writerow(["=== MALI ZINAZOONEKANA ZAIDI ==="])
         writer.writerow(["#", "Jina", "Views", "Bei"])
         for i, l in enumerate(data.get("mostViewedListings", []), 1):
@@ -426,7 +414,6 @@ class ReportsExportView(APIView):
             ])
         writer.writerow([])
 
-        # ── Top Categories ──
         writer.writerow(["=== KATEGORIA ZINAZOONEKANA ZAIDI ==="])
         writer.writerow(["#", "Kategoria", "Mali", "Views"])
         for i, c in enumerate(data.get("topCategories", []), 1):
@@ -435,14 +422,12 @@ class ReportsExportView(APIView):
             ])
         writer.writerow([])
 
-        # ── Top Locations ──
         writer.writerow(["=== MAENEO YANAYOONEKANA ZAIDI ==="])
         writer.writerow(["#", "Eneo", "Mali", "Views"])
         for i, l in enumerate(data.get("topLocations", []), 1):
             writer.writerow([i, l.get("name"), l.get("count", 0), l.get("views", 0)])
         writer.writerow([])
 
-        # ── Detailed records ──
         writer.writerow(["=== MIAMALA ILIYOKAMILIKA ==="])
         writer.writerow(["Tarehe", "Kumbukumbu", "Aina", "Kichwa", "Kiasi (TZS)", "Hali"])
         for r in records:
@@ -459,7 +444,7 @@ class ReportsExportView(APIView):
 
         return response
 
-    # ── PDF ──
+    # ── PDF ─────────────────────────────────────────────────
     def _pdf(self, data, records, period, timestamp):
         try:
             from reportlab.lib import colors
@@ -467,7 +452,7 @@ class ReportsExportView(APIView):
             from reportlab.lib.styles import getSampleStyleSheet
             from reportlab.lib.units import cm
             from reportlab.platypus import (
-                PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+                Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
             )
         except ImportError:
             return Response(
@@ -532,7 +517,6 @@ class ReportsExportView(APIView):
         elements.append(make_table([
             ["Jumla ya Deals", str(data.get("totalDeals", 0))],
             ["Zimekamilika", str(data.get("completedDeals", 0))],
-            ["Migogoro", str(data.get("disputedDeals", 0))],
         ], ["Kipimo", "Thamani"]))
         elements.append(Spacer(1, 0.5 * cm))
 
@@ -542,23 +526,6 @@ class ReportsExportView(APIView):
             ["Jumla ya GMV", f"TZS {float(data.get('totalGMV', 0)):,.0f}"],
             ["Conversion Rate", f"{float(data.get('conversionRate', 0)):.2f}%"],
         ], ["Kipimo", "Thamani"]))
-        elements.append(Spacer(1, 0.5 * cm))
-
-        if data.get("topSellers"):
-            elements.append(Paragraph("<b>5. Wauzaji Bora</b>", styles["Heading2"]))
-            elements.append(make_table([
-                [str(i), s["name"], str(s.get("listings", 0)), str(s.get("views", 0))]
-                for i, s in enumerate(data["topSellers"], 1)
-            ], ["#", "Jina", "Mali", "Views"]))
-            elements.append(Spacer(1, 0.5 * cm))
-
-        if data.get("mostViewedListings"):
-            elements.append(Paragraph("<b>6. Mali Zinazoonekana Zaidi</b>", styles["Heading2"]))
-            elements.append(make_table([
-                [str(i), l["title"][:40], str(l.get("views", 0)),
-                 f"TZS {float(l.get('price', 0)):,.0f}"]
-                for i, l in enumerate(data["mostViewedListings"], 1)
-            ], ["#", "Jina", "Views", "Bei"]))
 
         doc.build(elements)
         buffer.seek(0)
@@ -568,7 +535,7 @@ class ReportsExportView(APIView):
         )
         return response
 
-    # ── DOC ──
+    # ── DOC ─────────────────────────────────────────────────
     def _doc(self, data, records, period, timestamp):
         try:
             from docx import Document
@@ -618,7 +585,6 @@ class ReportsExportView(APIView):
         add_section("3. Deals", [
             ["Jumla ya Deals", data.get("totalDeals", 0)],
             ["Zimekamilika", data.get("completedDeals", 0)],
-            ["Migogoro", data.get("disputedDeals", 0)],
         ], ["Kipimo", "Thamani"])
 
         add_section("4. Mapato", [
@@ -626,12 +592,6 @@ class ReportsExportView(APIView):
             ["Jumla ya GMV", f"TZS {float(data.get('totalGMV', 0)):,.0f}"],
             ["Conversion Rate", f"{float(data.get('conversionRate', 0)):.2f}%"],
         ], ["Kipimo", "Thamani"])
-
-        if data.get("topSellers"):
-            add_section("5. Wauzaji Bora", [
-                [i, s["name"], s.get("listings", 0), s.get("views", 0)]
-                for i, s in enumerate(data["topSellers"], 1)
-            ], ["#", "Jina", "Mali", "Views"])
 
         buffer = BytesIO()
         doc.save(buffer)

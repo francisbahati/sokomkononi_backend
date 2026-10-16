@@ -182,3 +182,6 @@ class Campaign(models.Model):
         if self.end_date and self.end_date < at:
             return False
         return True
+
+    paused_by_admin = models.BooleanField(default=False)
+    admin_note = models.TextField(blank=True)

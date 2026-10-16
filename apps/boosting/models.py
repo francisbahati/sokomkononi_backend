@@ -224,3 +224,6 @@ class ListingBoost(models.Model):
             f"{self.listing.title} - "
             f"{self.status}"
         )
+
+    paused_by_admin = models.BooleanField(default=False)
+    admin_note = models.TextField(blank=True)

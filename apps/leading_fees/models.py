@@ -170,3 +170,6 @@ class ListingLeading(models.Model):
 
     def __str__(self):
         return f"Leading #{self.pk} — {self.listing_id} — {self.status}"
+
+    paused_by_admin = models.BooleanField(default=False)
+    admin_note = models.TextField(blank=True)

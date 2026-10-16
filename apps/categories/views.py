@@ -1,3 +1,11 @@
+# ============================================================
+# apps/categories/views.py
+#
+# Marekebisho:
+#  - Ongeza bulk() action — enable/disable/mark_popular/
+#    unmark_popular/delete kwa categories nyingi kwa wakati mmoja
+#  - Audit log: category.bulk_<action>
+# ============================================================
 import uuid
 
 from django.core.files.base import ContentFile
@@ -35,7 +43,6 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 # AUDIT LOG HELPER
 # ============================================================
 def _log(request, action, target="", target_id=None, details=""):
-    """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -94,7 +101,6 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             with transaction.atomic():
                 response = super().create(request, *args, **kwargs)
         except IntegrityError:
-            # Race on slug uniqueness — retry once.
             with transaction.atomic():
                 response = super().create(request, *args, **kwargs)
 
@@ -183,7 +189,110 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         return response
 
     # ══════════════════════════════════════════════════════════
-    # UPLOAD IMAGE — (hiari) log category.updated
+    # BULK — actions kwa categories nyingi kwa wakati mmoja
+    # ══════════════════════════════════════════════════════════
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="bulk",
+        url_name="bulk",
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def bulk(self, request):
+        """
+        Bulk actions kwa categories.
+
+        Body:
+          {
+            "action": "enable" | "disable" | "mark_popular"
+                      | "unmark_popular" | "delete",
+            "ids": [1, 2, 3]
+          }
+
+        Returns:
+          { "detail": "...", "count": N, "action": "..." }
+        """
+        action_name = (request.data.get("action") or "").strip().lower()
+        ids = request.data.get("ids") or []
+
+        if not action_name:
+            return Response(
+                {"detail": "action inahitajika."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"detail": "ids lazima iwe list isiyo tupu."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Safisha ids — numbers pekee
+        try:
+            clean_ids = [int(i) for i in ids if str(i).strip()]
+        except (ValueError, TypeError):
+            return Response(
+                {"detail": "ids lazima ziwe namba."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not clean_ids:
+            return Response(
+                {"detail": "Hakuna ids halali."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = Category.objects.filter(id__in=clean_ids)
+        count = qs.count()
+
+        if count == 0:
+            return Response(
+                {"detail": "Hakuna category iliyopatikana."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ── TEKELEZA ACTION ─────────────────────────────────
+        if action_name == "enable":
+            qs.update(is_active=True)
+        elif action_name == "disable":
+            qs.update(is_active=False)
+        elif action_name == "mark_popular":
+            qs.update(is_popular=True)
+        elif action_name == "unmark_popular":
+            qs.update(is_popular=False)
+        elif action_name == "delete":
+            # Soft delete — `SoftDeleteQuerySet.delete()` inarudisha
+            # (count, {label: count}) lakini `qs.update()` haifanyi
+            # hivyo. Tunatumia `delete()` ya QuerySet.
+            for cat in qs:
+                cat.delete(by=request.user, reason="bulk_delete")
+        else:
+            return Response(
+                {"detail": f"action '{action_name}' haijulikani."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        _log(
+            request,
+            action=f"category.bulk_{action_name}",
+            target="Category",
+            target_id=None,
+            details=(
+                f"Bulk {action_name} on {count} categories "
+                f"(ids={clean_ids[:20]})"
+            ),
+        )
+
+        return Response({
+            "detail": (
+                f"Categories {count} zimefanyiwa '{action_name}'."
+            ),
+            "count": count,
+            "action": action_name,
+        })
+
+    # ══════════════════════════════════════════════════════════
+    # UPLOAD IMAGE
     # ══════════════════════════════════════════════════════════
     @action(
         detail=False,
@@ -227,7 +336,7 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         )
 
     # ══════════════════════════════════════════════════════════
-    # REORDER — admin anaweza kupanga categories
+    # REORDER
     # ══════════════════════════════════════════════════════════
     @action(
         detail=False,
@@ -237,11 +346,6 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[permissions.IsAdminUser],
     )
     def reorder(self, request):
-        """
-        Reorder categories.
-        Body: { "order": ["key_1", "key_2", ...] }
-        au:   { "order": [id_1, id_2, ...] }
-        """
         order = request.data.get("order") or []
         if not isinstance(order, list) or not order:
             return Response(
@@ -252,13 +356,10 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         updated = 0
         for idx, item in enumerate(order):
             cat = None
-            # Jaribu id
             if isinstance(item, int) or (isinstance(item, str) and item.isdigit()):
                 cat = Category.objects.filter(id=item).first()
-            # Jaribu slug
             if not cat:
                 cat = Category.objects.filter(slug=item).first()
-            # Jaribu name
             if not cat:
                 cat = Category.objects.filter(name=item).first()
 

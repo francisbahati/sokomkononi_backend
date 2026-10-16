@@ -1,3 +1,14 @@
+# ============================================================
+# apps/trash/views.py
+#
+# Marekebisho:
+#  - _build_thumbnail: inasaidia URLField (string) + ImageField (.url)
+#  - _build_subtitle: inatumika kama `name` fallback
+#  - TrashPermanentDeleteView: inaonyesha protected_objects kwenye
+#    ProtectedError
+#  - TrashEmptyByTypeView: inaonyesha protected_objects
+#  - TrashListView: inaonyesha `protected` flag kwa kila item
+# ============================================================
 from django.apps import apps
 from django.db import transaction
 from django.db.models import ProtectedError
@@ -62,8 +73,7 @@ def _is_protected(model):
 def _build_subtitle(model, obj):
     """
     Rudisha subtitle mafupi kutoka fields za kawaida.
-    Inajaribu: title, name, subject, email, description, location,
-    price — kwa mpangilio huo.
+    Inajaribu: title, name, subject, email, description, location, address.
     """
     for field in (
         "title", "name", "subject", "email",
@@ -78,7 +88,6 @@ def _build_subtitle(model, obj):
             if text:
                 return text[:200]
 
-    # Fallback: price kama ipo
     try:
         price = getattr(obj, "price", None)
         if price is not None:
@@ -99,7 +108,6 @@ def _build_deleted_by_name(obj):
     if not user:
         return None
 
-    # Kama `deleted_by` ni FK object (User)
     name = getattr(user, "name", None)
     if name:
         return name
@@ -108,7 +116,6 @@ def _build_deleted_by_name(obj):
     if email:
         return email
 
-    # Kama ni integer ID pekee — tafuta User
     try:
         from django.contrib.auth import get_user_model
         User = get_user_model()
@@ -122,21 +129,38 @@ def _build_deleted_by_name(obj):
 
 
 def _build_thumbnail(obj):
-    """URL ya picha — kutoka fields za kawaida za ImageField."""
+    """
+    URL ya picha — kutoka ImageField (.url) au URLField/CharField (string).
+    Marekebisho: inasaidia `image_url` (URLField) pamoja na ImageField.
+    """
     for field in (
         "image", "avatar", "thumbnail", "photo",
-        "logo", "banner", "cover",
+        "logo", "banner", "cover", "image_url",  # ⬅️ image_url imeongezwa
     ):
         try:
             f = getattr(obj, field, None)
         except Exception:
             f = None
-        if f and hasattr(f, "url"):
+        if not f:
+            continue
+        # URLField / CharField — string moja kwa moja
+        if isinstance(f, str):
+            return f
+        # ImageField — ina `.url`
+        if hasattr(f, "url"):
             try:
                 return f.url
             except Exception:
                 pass
     return None
+
+
+def _format_protected(e):
+    """Rudisha orodha ya protected_objects kama strings (max 10)."""
+    try:
+        return [str(o) for o in e.protected_objects][:10]
+    except Exception:
+        return []
 
 
 class TrashOverviewView(APIView):
@@ -169,15 +193,17 @@ class TrashListView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        protected = _is_protected(model)
         qs = model.all_objects.filter(is_deleted=True).order_by("-deleted_at")
 
         results = []
         for obj in qs[:500]:
+            subtitle = _build_subtitle(model, obj)
             results.append({
                 "id": obj.pk,
                 "type": type,
-                "name": str(obj),
-                "subtitle": _build_subtitle(model, obj),
+                "name": subtitle or str(obj),
+                "subtitle": subtitle,
                 "deleted_at": getattr(obj, "deleted_at", None),
                 "deleted_by": getattr(obj, "deleted_by_id", None),
                 "deleted_by_name": _build_deleted_by_name(obj),
@@ -185,12 +211,13 @@ class TrashListView(APIView):
                 "details": getattr(obj, "deletion_reason", "") or "",
                 "thumbnail": _build_thumbnail(obj),
                 "repr": str(obj),
+                "protected": protected,  # ⬅️ MPYA — kwa UI
             })
 
         return Response({
             "type": type,
             "count": qs.count(),
-            "protected": _is_protected(model),
+            "protected": protected,
             "results": results,
         })
 
@@ -231,7 +258,10 @@ class TrashPermanentDeleteView(APIView):
             )
         if _is_protected(model):
             return Response(
-                {"detail": "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa."},
+                {
+                    "detail": "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa.",
+                    "protected": True,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         obj = model.all_objects.filter(pk=pk, is_deleted=True).first()
@@ -247,9 +277,12 @@ class TrashPermanentDeleteView(APIView):
                     f"Hard-deleted {model.__name__}#{obj.pk}",
                 )
                 obj.hard_delete()
-        except ProtectedError:
+        except ProtectedError as e:
             return Response(
-                {"detail": "Haifutiki — inatumika mahali pengine."},
+                {
+                    "detail": "Haifutiki — inatumika mahali pengine.",
+                    "protected_objects": _format_protected(e),
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -267,10 +300,14 @@ class TrashEmptyByTypeView(APIView):
             )
         if _is_protected(model):
             return Response(
-                {"detail": "Aina hii ya rekodi haiwezi kufutwa kabisa."},
+                {
+                    "detail": "Aina hii ya rekodi haiwezi kufutwa kabisa.",
+                    "protected": True,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         deleted = skipped = 0
+        protected_objs = []
         for obj in model.all_objects.filter(is_deleted=True).iterator():
             try:
                 with transaction.atomic():
@@ -280,9 +317,14 @@ class TrashEmptyByTypeView(APIView):
                     )
                     obj.hard_delete()
                 deleted += 1
-            except ProtectedError:
+            except ProtectedError as e:
                 skipped += 1
-        return Response({"deleted": deleted, "skipped": skipped})
+                protected_objs.extend(_format_protected(e))
+        return Response({
+            "deleted": deleted,
+            "skipped": skipped,
+            "protected_objects": protected_objs[:10],
+        })
 
 
 class TrashEmptyAllView(APIView):

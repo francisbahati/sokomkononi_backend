@@ -1,7 +1,18 @@
+# ============================================================
+# apps/announcements/views.py
+#
+# AnnouncementViewSet — Admin CRUD + public reads.
+#
+# Marekebisho:
+#  - Ondoa __import__() — tumia timezone + Q moja kwa moja
+#  - create(): sent default = False kama scheduled_for ipo
+#  - Audit logging kupitia _log() helper
+# ============================================================
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-
 
 from apps.core.permissions import IsAdminUser  # noqa: E402
 from .models import Announcement
@@ -35,29 +46,42 @@ def _log(request, action, target="", target_id=None, details=""):
 class AnnouncementViewSet(viewsets.GenericViewSet):
     """
         GET     /api/announcements/          public: sent ones; admin: all
-        GET     /api/announcements/sent/
+        GET     /api/announcements/sent/     public: sent ones (paginated)
+        GET     /api/announcements/{id}/     public: detail
         POST    /api/announcements/          admin only
         DELETE  /api/announcements/{id}/     admin only
     """
 
     serializer_class = AnnouncementSerializer
 
+    # ------------------------------------------------------------
+    # PERMISSIONS
+    # ------------------------------------------------------------
     def get_permissions(self):
         if self.action in ["list", "retrieve", "sent"]:
             return [permissions.AllowAny()]
         return [IsAdminUser()]
 
+    # ------------------------------------------------------------
+    # QUERYSET
+    # ------------------------------------------------------------
     def get_queryset(self):
         user = self.request.user
         qs = Announcement.objects.all()
+
+        # Admin/staff wanaona zote
         if user.is_authenticated and user.is_staff:
             return qs
-        now = __import__("django.utils.timezone", fromlist=["now"]).now()
-        from django.db.models import Q
+
+        # Public: sent ones tu, na scheduled_for haijapita au haipo
+        now = timezone.now()
         return qs.filter(sent=True).filter(
             Q(scheduled_for__isnull=True) | Q(scheduled_for__lte=now)
         )
 
+    # ------------------------------------------------------------
+    # LIST
+    # ------------------------------------------------------------
     def list(self, request):
         qs = self.get_queryset()
         page = self.paginate_queryset(qs)
@@ -68,15 +92,23 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
+    # ------------------------------------------------------------
+    # RETRIEVE
+    # ------------------------------------------------------------
     def retrieve(self, request, pk=None):
         obj = self.get_object()
         return Response(AnnouncementSerializer(obj).data)
 
-    @action(detail=False, methods=["get"], url_path="sent",
-            permission_classes=[permissions.AllowAny])
+    # ------------------------------------------------------------
+    # SENT — public, sent ones pekee
+    # ------------------------------------------------------------
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="sent",
+        permission_classes=[permissions.AllowAny],
+    )
     def sent(self, request):
-        from django.db.models import Q
-        from django.utils import timezone
         now = timezone.now()
         qs = Announcement.objects.filter(sent=True).filter(
             Q(scheduled_for__isnull=True) | Q(scheduled_for__lte=now)
@@ -89,10 +121,19 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
+    # ------------------------------------------------------------
+    # CREATE — admin only
+    # ------------------------------------------------------------
     def create(self, request):
         serializer = AnnouncementCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         d = serializer.validated_data
+
+        # sent default: False kama scheduled_for ipo, True kama haipo
+        scheduled = d.get("scheduled_for")
+        sent = d.get("sent")
+        if sent is None:
+            sent = not scheduled
 
         obj = Announcement.objects.create(
             type=d["type"],
@@ -100,14 +141,14 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
             title_en=d.get("title_en", ""),
             message=d["message"],
             message_en=d.get("message_en", ""),
-            scheduled_for=d.get("scheduled_for"),
-            sent=d.get("sent", True),
+            scheduled_for=scheduled,
+            sent=sent,
             created_by=request.user,
         )
 
         _log(
             request,
-            action="announcement.sent",
+            action="announcement.created",
             target="Announcement",
             target_id=obj.id,
             details=(
@@ -121,6 +162,9 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    # ------------------------------------------------------------
+    # DESTROY — admin only
+    # ------------------------------------------------------------
     def destroy(self, request, pk=None):
         obj = self.get_object()
 

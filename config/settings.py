@@ -498,7 +498,12 @@ CELERY_BEAT_SCHEDULE = {
     "tickets-send-sla-reminders": {
     "task": "tickets.send_sla_reminders",
     "schedule": crontab(minute=0),  # kila saa 1
-},
+   },
+ "announcements-flush-scheduled": {
+        "task": "announcements.flush_scheduled",
+        "schedule": 60.0,
+    },
+
     "sync-pending-fimipay-statuses": {
         "task": "payments.sync_pending_fimipay_statuses",
         "schedule": crontab(minute="*/5"),

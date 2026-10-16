@@ -48,11 +48,13 @@ class RoleSerializer(serializers.ModelSerializer):
                 data.setdefault("description_en", desc["en"])
         return super().to_internal_value(data)
 
+
     VALID_PERMISSIONS = {
-        "overview", "users", "moderation", "verification", "deals",
-        "revenue", "bundles", "promotions", "reports", "support",
-        "content", "audit", "trash", "system", "staff",
-    }
+      "overview", "users", "moderation", "verification", "deals",
+      "revenue", "bundles", "promotions", "reports", "support",
+      "content", "audit", "trash", "system", "staff",
+      "profile", 
+      }
 
     def validate_permissions(self, value):
         if not isinstance(value, list):

@@ -48,7 +48,6 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     reservationMethod = serializers.SerializerMethodField()
     reservationExpiresAt = serializers.SerializerMethodField()
     paymentProof = serializers.SerializerMethodField()
-    disputeNote = serializers.SerializerMethodField()
 
     class Meta:
         model = DealRoom
@@ -60,7 +59,7 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
             "currentOffer", "messages",
             "reservationFee", "reservationHours",
             "reservationMethod", "reservationExpiresAt",
-            "paymentProof", "disputeNote",
+            "paymentProof",
             "created_at", "updated_at",
         ]
 
@@ -156,9 +155,3 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
             "submittedAt": txn.final_payment_uploaded_at,
             "url": url,
         }
-
-    def get_disputeNote(self, obj):
-        txn = self._txn(obj)
-        if not txn:
-            return ""
-        return txn.cancellation_reason or ""

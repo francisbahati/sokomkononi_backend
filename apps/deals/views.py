@@ -140,7 +140,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         serializer.is_valid(raise_exception=True)
 
-        # Kama deal room ipo tayari, irudishe (200) badala ya kosa (400).
         existing = getattr(serializer, "_existing_deal_room", None)
         if existing:
             response_serializer = DealRoomDetailSerializer(
@@ -247,7 +246,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         serializer.is_valid(raise_exception=True)
 
-        # Deal Room ina chat yake — HAIGUSI Conversation/Message za Messaging.
         msg = DealMessage.objects.create(
             deal_room=deal_room,
             sender=request.user,
@@ -528,67 +526,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(
-        detail=True, methods=["post"],
-        url_path="resolve", url_name="resolve",
-        permission_classes=[permissions.IsAdminUser],
-    )
-    @transaction.atomic
-    def resolve(self, request, pk=None):
-        deal_room = get_object_or_404(
-            DealRoom.objects
-            .select_for_update(of=("self",))
-            .select_related("listing", "buyer", "seller"),
-            pk=pk,
-        )
-
-        resolution = (request.data.get("resolution") or "").strip().lower()
-        note = (request.data.get("note") or "").strip()
-
-        if resolution not in ("continue", "cancel"):
-            return Response(
-                {"detail": "resolution lazima iwe 'continue' au 'cancel'."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if resolution == "continue":
-            if deal_room.status not in (
-                DealRoom.Status.DISPUTED,
-                DealRoom.Status.CANCELLED,
-            ):
-                return Response(
-                    {"detail": "Deal Room hii haiwezi kurudishwa."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            deal_room.status = DealRoom.Status.ACCEPTED
-            deal_room.save(update_fields=["status", "updated_at"])
-        else:
-            deal_room.status = DealRoom.Status.CANCELLED
-            deal_room.save(update_fields=["status", "updated_at"])
-
-        try:
-            from apps.audit.services.audit import log_action
-            log_action(
-                request=request,
-                action="deal.dispute_resolved",
-                target="DealRoom",
-                target_id=deal_room.id,
-                details=f"resolution={resolution} note={note[:200]}",
-            )
-        except Exception:
-            import logging
-            logging.getLogger(__name__).exception(
-                "audit log failed for deal.resolve"
-            )
-
-        return Response(
-            DealRoomDetailSerializer(
-                deal_room,
-                context={"request": request, "deal_room": deal_room},
-            ).data,
-            status=status.HTTP_200_OK,
-        )
-
     @extend_schema(
         request=DealRoomCancelSerializer,
         responses={200: DealRoomDetailSerializer},
@@ -639,7 +576,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         if request.user.is_staff:
             _log(
                 request,
-                action="dispute.resolved",
+                action="deal.cancelled_by_admin",
                 target="DealRoom",
                 target_id=deal_room.id,
                 details=(

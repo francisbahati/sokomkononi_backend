@@ -178,9 +178,7 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
     message = serializers.CharField(
         required=False, allow_blank=True, trim_whitespace=True,
     )
-    responded_to = serializers.IntegerField(
-        required=False, allow_null=True,
-    )
+    responded_to = serializers.IntegerField(required=False, allow_null=True)
 
     def validate_amount(self, value):
         if value <= Decimal("0"):
@@ -395,7 +393,6 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     reservation_hours = serializers.SerializerMethodField()
     reservation_method = serializers.SerializerMethodField()
     reservation_expires_at = serializers.SerializerMethodField()
-    dispute_note = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
 
@@ -410,7 +407,6 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             "transaction_id", "payment_proof",
             "reservation_fee", "reservation_hours",
             "reservation_method", "reservation_expires_at",
-            "dispute_note",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
@@ -479,12 +475,6 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     def get_reservation_expires_at(self, obj):
         r = self._reservation(obj)
         return getattr(r, "expires_at", None) if r else None
-
-    def get_dispute_note(self, obj):
-        txn = self._txn(obj)
-        if not txn:
-            return ""
-        return txn.cancellation_reason or ""
 
     def get_messages(self, obj):
         qs = obj.messages.select_related("sender").order_by("created_at")

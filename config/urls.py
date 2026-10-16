@@ -17,6 +17,7 @@ urlpatterns = [
     path("health/", _health, name="health"),
     path("health/deep/", _health_deep, name="health-deep"),
     path("admin/", admin.site.urls),
+    path("admin/deals/", include("apps.deals.urls_admin")),
 
     # Schema / docs
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

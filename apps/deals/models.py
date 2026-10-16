@@ -1,3 +1,4 @@
+# apps/deals/models.py
 from decimal import Decimal
 
 from django.conf import settings
@@ -11,6 +12,9 @@ class DealRoom(models.Model):
     """
     Mazungumzo ya ununuzi kati ya mnunuzi na muuzaji
     kuhusu tangazo moja.
+
+    Payment proof inatumika kwa seller kumark mali kuwa SOLD —
+    sio kwa refund.
     """
 
     class Status(models.TextChoices):
@@ -25,7 +29,6 @@ class DealRoom(models.Model):
             "PAYMENT_PROOF_SUBMITTED", "Payment proof submitted",
         )
         COMPLETED = "COMPLETED", "Completed"
-        DISPUTED = "DISPUTED", "Disputed"
         CANCELLED = "CANCELLED", "Cancelled"
 
     listing = models.ForeignKey(
@@ -123,9 +126,7 @@ class DealRoom(models.Model):
 class NegotiationOffer(models.Model):
     """
     Huhifadhi kila offer/counter-offer ndani ya Deal Room.
-
     Hakuna offer inayofutwa au kubadilishwa.
-    Hii inatunza historia kamili ya negotiation.
     """
 
     class OfferedBy(models.TextChoices):
@@ -156,16 +157,11 @@ class NegotiationOffer(models.Model):
     amount = models.DecimalField(
         max_digits=15,
         decimal_places=2,
-        validators=[
-            MinValueValidator(Decimal("0.01")),
-        ],
+        validators=[MinValueValidator(Decimal("0.01"))],
         verbose_name="Kiasi cha offer",
     )
 
-    message = models.TextField(
-        blank=True,
-        verbose_name="Ujumbe",
-    )
+    message = models.TextField(blank=True, verbose_name="Ujumbe")
 
     status = models.CharField(
         max_length=30,
@@ -183,15 +179,8 @@ class NegotiationOffer(models.Model):
         verbose_name="Offer iliyojibiwa",
     )
 
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name="Imeundwa",
-    )
-
-    updated_at = models.DateTimeField(
-        auto_now=True,
-        verbose_name="Imesasishwa",
-    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Imeundwa")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Imesasishwa")
 
     class Meta:
         db_table = "negotiation_offers"
@@ -213,16 +202,9 @@ class NegotiationOffer(models.Model):
         ]
 
     def __str__(self):
-        return (
-            f"Offer #{self.pk} - "
-            f"{self.amount} - "
-            f"{self.offered_by.name}"
-        )
+        return f"Offer #{self.pk} - {self.amount} - {self.offered_by.name}"
 
-    # ============================================================
-# Ongeza mwishoni mwa apps/deals/models.py (baada ya NegotiationOffer)
-# Kisha: python manage.py makemigrations deals && python manage.py migrate
-# ============================================================
+
 class DealMessage(models.Model):
     """
     Chat ndani ya Deal Room. Imejitegemea — haihusiani na

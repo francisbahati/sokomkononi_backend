@@ -339,6 +339,9 @@ class DealRoomListSerializer(serializers.ModelSerializer):
     location = serializers.SerializerMethodField()
     latest_offer = serializers.SerializerMethodField()
 
+    # ── MPYA: transaction_id ili frontend isijaribu ku-create tena ──
+    transaction_id = serializers.SerializerMethodField()
+
     class Meta:
         model = DealRoom
         fields = [
@@ -346,9 +349,23 @@ class DealRoomListSerializer(serializers.ModelSerializer):
             "category", "location",
             "buyer", "seller",
             "status", "agreed_price", "agreed_at", "latest_offer",
+            # ── MPYA ──
+            "transaction_id",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
+
+    def get_transaction_id(self, obj):
+        """
+        Rudisha transaction ID kama ipo. Hii inasaidia frontend
+        kuepuka POST /api/transactions/ tena (ambayo inarudisha 400
+        'Transaction tayari imeundwa kwa Deal Room hii').
+        """
+        try:
+            txn = obj.transaction
+            return txn.id if txn else None
+        except Exception:
+            return None
 
     def get_category(self, obj):
         try:
@@ -373,7 +390,6 @@ class DealRoomListSerializer(serializers.ModelSerializer):
         return NegotiationOfferSerializer(
             offers[0], context={**self.context, "deal_room": obj},
         ).data
-
 
 # ============================================================
 # DEAL ROOM DETAIL

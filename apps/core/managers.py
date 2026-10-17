@@ -4,10 +4,12 @@ from django.utils import timezone
 
 class SoftDeleteQuerySet(models.QuerySet):
     def delete(self, *, by=None, reason="", **kwargs):
-        """Bulk soft delete. Returns (count, {}) for parity with Django."""
-        count = self.update(
+        """Bulk soft-delete. Only touches currently-alive rows."""
+        now = timezone.now()
+        count = self.filter(is_deleted=False).update(
             is_deleted=True,
-            deleted_at=timezone.now(),
+            deleted_at=now,
+            updated_at=now,
             deleted_by=by,
             deletion_reason=reason or "",
         )
@@ -23,11 +25,13 @@ class SoftDeleteQuerySet(models.QuerySet):
         return self.filter(is_deleted=True)
 
     def restore(self):
-        return self.update(
+        now = timezone.now()
+        return self.filter(is_deleted=True).update(
             is_deleted=False,
             deleted_at=None,
             deleted_by=None,
             deletion_reason="",
+            updated_at=now,
         )
 
 

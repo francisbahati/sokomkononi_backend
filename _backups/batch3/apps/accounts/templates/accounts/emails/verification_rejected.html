@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #011957;">
+  <div style="text-align: center; margin-bottom: 24px;">
+    <div style="display: inline-block; width: 64px; height: 64px; border-radius: 50%; background: rgba(193,80,46,0.12); line-height: 64px; font-size: 32px; color: #C1502E;">!</div>
+  </div>
+  <h2 style="color: #C1502E; text-align: center;">Uthibitisho umekataliwa</h2>
+  <p>Habari {{ name }},</p>
+  <p>Ombi lako la uthibitisho <strong>{{ verification_type }}</strong> halikuidhinishwa.</p>
+  {% if reason %}
+  <div style="background: rgba(193,80,46,0.08); border-left: 4px solid #C1502E; padding: 12px 16px; margin: 16px 0; border-radius: 4px;">
+    <p style="margin: 0; font-weight: bold; color: #C1502E;">Sababu:</p>
+    <p style="margin: 8px 0 0 0;">{{ reason }}</p>
+  </div>
+  {% endif %}
+  <p>Unaweza kuwasilisha ombi jipya baada ya kurekebisha yale yaliyotajwa.</p>
+  <p style="text-align: center; margin: 32px 0;">
+    <a href="{{ action_url }}" style="display: inline-block; padding: 12px 24px; background: #FEA406; color: #011957; text-decoration: none; border-radius: 8px; font-weight: bold;">Angalia Hali ya Ombi</a>
+  </p>
+  <p>Kama una maswali, wasiliana nasi kwa <a href="mailto:support@sokomkononi.co.tz">support@sokomkononi.co.tz</a>.</p>
+  <p style="color: #6B7280; font-size: 12px; text-align: center; margin-top: 32px;">
+    SokoMkononi — Nunua na Uza Mali kwa Urahisi.
+  </p>
+</body>
+</html>

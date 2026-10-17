@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.utils.html import format_html
+from django.contrib import messages
 
 
 class DeletedFilter(admin.SimpleListFilter):
@@ -24,12 +24,12 @@ class DeletedFilter(admin.SimpleListFilter):
 class SoftDeleteAdminMixin:
     """
     Show soft-deleted rows in admin, allow restore / hard-delete.
+    Respects AUDIT_PROTECTED_MODEL_NAMES.
     """
 
     actions = ["restore_selected", "hard_delete_selected"]
 
     def get_queryset(self, request):
-        # Use all_objects so deleted rows are reachable from admin.
         return self.model.all_objects.all()
 
     def get_list_filter(self, request):
@@ -46,12 +46,29 @@ class SoftDeleteAdminMixin:
 
     @admin.action(description="Rejesha vilivyochaguliwa")
     def restore_selected(self, request, queryset):
+        count = 0
         for obj in queryset.filter(is_deleted=True):
             obj.restore()
-        self.message_user(request, "Vitu vilivyochaguliwa vimerejeshwa.")
+            count += 1
+        self.message_user(request, f"Vitu {count} vimerejeshwa.")
 
     @admin.action(description="Futa kabisa (mara moja)")
     def hard_delete_selected(self, request, queryset):
+        from apps.core.constants import AUDIT_PROTECTED_MODEL_NAMES
+
+        model = queryset.model
+        key = (model._meta.app_label, model.__name__)
+        if key in AUDIT_PROTECTED_MODEL_NAMES:
+            self.message_user(
+                request,
+                f"{model._meta.verbose_name} inalindwa dhidi ya kufutwa "
+                f"kabisa. Tumia trash API au contact superuser.",
+                level=messages.ERROR,
+            )
+            return
+
+        count = 0
         for obj in queryset:
             obj.hard_delete()
-        self.message_user(request, "Vitu vilivyochaguliwa vimefutwa kabisa.")
+            count += 1
+        self.message_user(request, f"Vitu {count} vimefutwa kabisa.")

@@ -1,4 +1,26 @@
 services:
+  db:
+    networks: [soko_internal]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${DB_NAME:-sokomkononi}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
   web:
     networks: [soko_internal]
     build: .
@@ -18,12 +40,14 @@ services:
       - static_files:/app/staticfiles
       - media_files:/app/media
     depends_on:
+      db:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
       test:
         - CMD-SHELL
-        - "curl -fsS http://127.0.0.1:8000/health/ || exit 1"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=3)\" || exit 1"
       interval: 20s
       timeout: 5s
       retries: 5
@@ -79,6 +103,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      db:
+        condition: service_healthy
     logging:
       driver: json-file
       options:
@@ -99,7 +125,7 @@ services:
     environment:
       DEBUG: "False"
       SOKO_SKIP_INIT: "1"
-    command: celery -A config beat -l info
+    command: celery -A config beat -l info -s /app/celerybeat/celerybeat-schedule
     volumes:
       - beat_data:/app/celerybeat
     depends_on:
@@ -120,3 +146,4 @@ volumes:
   media_files:
   redis_data:
   beat_data:
+  pg_data:

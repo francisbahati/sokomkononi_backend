@@ -75,3 +75,6 @@ whitenoise==6.8.2
 
 # --- Optional error tracking (activated when SENTRY_DSN is set) ---
 sentry-sdk==2.19.2
+
+# --- 2FA ---
+pyotp==2.9.0

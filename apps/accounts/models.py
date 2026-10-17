@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.utils import timezone
@@ -461,3 +462,53 @@ class TermsAcceptance(models.Model):
         db_table = "terms_acceptances"
         ordering = ["-accepted_at"]
         indexes = [models.Index(fields=["user", "terms_version"])]
+
+
+# ============================================================
+# TOTP 2FA (added for /api/auth/2fa/*)
+# ============================================================
+class UserTOTP(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="totp",
+    )
+    secret = models.CharField(max_length=64, blank=True)
+    enabled = models.BooleanField(default=False)
+    recovery_codes = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_totp"
+        verbose_name = "User TOTP"
+        verbose_name_plural = "User TOTP"
+
+    def __str__(self):
+        return f"TOTP — user {self.user_id} (enabled={self.enabled})"
+
+
+# ============================================================
+# USER SESSIONS (added for /api/auth/sessions/*)
+# ============================================================
+class UserSession(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sessions",
+    )
+    refresh_jti = models.CharField(max_length=255, unique=True, db_index=True)
+    device_name = models.CharField(max_length=200, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=500, blank=True)
+    last_seen = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "user_sessions"
+        ordering = ["-last_seen"]
+        verbose_name = "User session"
+        verbose_name_plural = "User sessions"
+
+    def __str__(self):
+        return f"Session {self.pk} — user {self.user_id}"

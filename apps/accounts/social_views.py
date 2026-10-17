@@ -100,7 +100,12 @@ class SocialLoginView(APIView):
 
         data = r.json()
         client_id = getattr(settings, "GOOGLE_CLIENT_ID", "") or ""
-        if client_id and data.get("aud") != client_id:
+        if not client_id:
+            from django.core.exceptions import ImproperlyConfigured
+            raise ImproperlyConfigured(
+                "GOOGLE_CLIENT_ID must be set when using social login."
+            )
+        if data.get("aud") != client_id:
             raise ValidationError(
                 {"id_token": "ID token haikubaliani na client."}
             )
@@ -141,7 +146,12 @@ class SocialLoginView(APIView):
             raise ValidationError({"id_token": "ID token si sahihi."})
 
         client_id = getattr(settings, "APPLE_CLIENT_ID", "") or ""
-        if client_id and payload.get("aud") != client_id:
+        if not client_id:
+            from django.core.exceptions import ImproperlyConfigured
+            raise ImproperlyConfigured(
+                "APPLE_CLIENT_ID must be set when using social login."
+            )
+        if payload.get("aud") != client_id:
             raise ValidationError(
                 {"id_token": "ID token haikubaliani na client."}
             )

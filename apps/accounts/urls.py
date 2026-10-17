@@ -3,6 +3,16 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .social_views import SocialLoginView
+from .views_2fa import (
+    DataExportView,
+    RevokeOtherSessionsView,
+    SessionsView,
+    TwoFactorChallengeView,
+    TwoFactorDisableView,
+    TwoFactorSetupView,
+    TwoFactorStatusView,
+    TwoFactorVerifyView,
+)
 from .views import (
     AvatarUploadView,
     ChangePasswordView,

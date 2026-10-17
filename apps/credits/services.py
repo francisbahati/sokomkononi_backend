@@ -135,8 +135,17 @@ def grant_bundle_credits(
         uc.save()
 
     for key in (services or []):
-        UserService.objects.update_or_create(
-            user=user,
-            service_key=key,
-            defaults={"expires_at": expires_at},
-        )
+        existing = UserService.objects.filter(
+            user=user, service_key=key,
+        ).first()
+        if existing:
+            # Never shorten an existing paid service window.
+            if existing.expires_at and expires_at:
+                existing.expires_at = max(existing.expires_at, expires_at)
+            elif expires_at:
+                existing.expires_at = expires_at
+            existing.save(update_fields=["expires_at"])
+        else:
+            UserService.objects.create(
+                user=user, service_key=key, expires_at=expires_at,
+            )

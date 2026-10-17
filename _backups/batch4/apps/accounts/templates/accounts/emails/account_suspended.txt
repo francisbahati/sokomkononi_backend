@@ -1,0 +1,10 @@
+Akaunti yako ya SokoMkononi imesimamishwa
+
+Habari {{ name }},
+
+Akaunti yako imesimamishwa kwa muda.
+Sababu: {{ reason }}
+
+Kama unadhani hii ni kosa, wasiliana nasi: support@sokomkononi.co.tz
+
+— SokoMkononi

@@ -30,7 +30,7 @@ class SavedListingViewSet(viewsets.GenericViewSet):
     def get_queryset(self):
         return (
             SavedListing.objects
-            .filter(user=self.request.user)
+            .filter(user=self.request.user, listing__is_deleted=False)
             .select_related("listing", "listing__category")
             .prefetch_related("listing__images")
         )

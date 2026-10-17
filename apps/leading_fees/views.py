@@ -203,19 +203,15 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
                 leading.payment_status = "PAID"
                 leading.payment_reference = f"free-{leading.pk}-{uuid.uuid4().hex[:8]}"
                 leading.paid_at = now
-                leading.status = "ACTIVE"
-                leading.starts_at = now
-                hours = leading.package.duration_hours if leading.package else 168
-                leading.expires_at = now + timedelta(hours=hours)
+                # Only mark paid here; use _activate to stack the window.
+                leading.payment_status = "PAID"
+                leading.payment_reference = f"free-{leading.pk}-{uuid.uuid4().hex[:8]}"
+                leading.paid_at = now
                 leading.save(update_fields=[
-                    "payment_status", "payment_reference", "paid_at",
-                    "status", "starts_at", "expires_at", "updated_at",
+                    "payment_status", "payment_reference", "paid_at", "updated_at",
                 ])
-                from apps.listings.models import Listing
-                Listing.objects.filter(pk=leading.listing_id).update(
-                    leading_until=leading.expires_at,
-                    updated_at=now,
-                )
+                from .services.leading import _activate
+                leading = _activate(leading)
             return Response(
                 {
                     "payment_status": "SUCCESS",
@@ -241,15 +237,12 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
                 leading.payment_status = "PAID"
                 leading.payment_reference = f"credits-{leading.pk}-{uuid.uuid4().hex[:12]}"
                 leading.paid_at = now
-                leading.status = "ACTIVE"
-                leading.starts_at = now
-                hours = leading.package.duration_hours if leading.package else (leading.days or 7) * 24
-                leading.expires_at = now + timedelta(hours=hours)
                 leading.save(update_fields=[
                     "payment_status", "payment_reference",
-                    "paid_at", "status", "starts_at",
-                    "expires_at", "updated_at",
+                    "paid_at", "updated_at",
                 ])
+                from .services.leading import _activate
+                leading = _activate(leading)
             return Response(
                 {
                     "payment_status": "SUCCESS",

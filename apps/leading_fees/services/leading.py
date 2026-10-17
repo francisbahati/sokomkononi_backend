@@ -223,6 +223,23 @@ def mark_leading_as_refunded(*, ref_id, reason=""):
     leading.payment_status = ListingLeading.PaymentStatus.REFUNDED
     leading.status = ListingLeading.Status.CANCELLED
     leading.save(update_fields=["payment_status", "status", "updated_at"])
+
     if leading.listing_id:
-        Listing.objects.filter(pk=leading.listing_id).update(leading_until=None)
+        now = timezone.now()
+        latest_other = (
+            ListingLeading.objects
+            .filter(
+                listing_id=leading.listing_id,
+                status=ListingLeading.Status.ACTIVE,
+                expires_at__gt=now,
+            )
+            .exclude(pk=leading.pk)
+            .order_by("-expires_at")
+            .values_list("expires_at", flat=True)
+            .first()
+        )
+        Listing.objects.filter(pk=leading.listing_id).update(
+            leading_until=latest_other,
+            updated_at=now,
+        )
     return leading

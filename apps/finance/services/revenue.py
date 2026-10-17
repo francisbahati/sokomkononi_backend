@@ -317,10 +317,12 @@ def get_revenue_records(period="all", source="all"):
 
     # ---------------- Advertisements ----------------
     if source in {"all", "advertisement"}:
-        qs = BannerAd.objects.filter(payment_status="PAID").select_related("seller", "listing")
+        qs = BannerAd.objects.filter(payment_status="PAID").select_related("seller", "listing").annotate(
+            effective_paid=Coalesce("paid_at", "created_at"),
+        )
         if start and end:
             qs = qs.filter(
-                created_at__gte=start, created_at__lt=end,
+                effective_paid__gte=start, effective_paid__lt=end,
             )
         for item in qs:
             records.append({

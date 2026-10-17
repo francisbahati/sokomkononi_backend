@@ -24,6 +24,9 @@ SYNC_SOURCES = [
     {"model":"finance.SuccessFeePayment","pending_field":"payment_status","pending_value":"PENDING",
      "reference_field":"payment_reference","user_field":"user",
      "handler":("apps.finance.services_success_fee","mark_success_fee_paid_from_webhook")},
+    {"model":"transactions.Reservation","pending_field":"payment_status","pending_value":"PENDING",
+     "reference_field":"payment_reference","user_field":"transaction__buyer",
+     "handler":("apps.transactions.services.reservation","mark_reservation_paid_from_webhook")},
 ]
 
 def _ensure_db():

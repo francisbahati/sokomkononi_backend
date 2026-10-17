@@ -53,6 +53,7 @@ class SoftDeleteModel(models.Model):
 
         self.save(update_fields=[
             "is_deleted", "deleted_at", "deleted_by", "deletion_reason",
+            "updated_at",
         ])
 
         return (1, {self._meta.label: 1})
@@ -71,6 +72,7 @@ class SoftDeleteModel(models.Model):
 
         self.save(update_fields=[
             "is_deleted", "deleted_at", "deleted_by", "deletion_reason",
+            "updated_at",
         ])
 
     @property

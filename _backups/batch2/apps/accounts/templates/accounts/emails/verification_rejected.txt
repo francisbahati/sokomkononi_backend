@@ -1,0 +1,15 @@
+Uthibitisho umekataliwa
+
+Habari {{ name }},
+
+Ombi lako la uthibitisho {{ verification_type }} halikuidhinishwa.
+
+Sababu: {{ reason }}
+
+Unaweza kuwasilisha ombi jipya baada ya kurekebisha yale yaliyotajwa.
+
+Angalia hali ya ombi: {{ action_url }}
+
+Kama una maswali, wasiliana nasi: support@sokomkononi.co.tz
+
+— SokoMkononi

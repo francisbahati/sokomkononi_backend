@@ -1,0 +1,382 @@
+# ============================================================
+# apps/categories/views.py
+#
+# Marekebisho:
+#  - Ongeza bulk() action — enable/disable/mark_popular/
+#    unmark_popular/delete kwa categories nyingi kwa wakati mmoja
+#  - Audit log: category.bulk_<action>
+# ============================================================
+import uuid
+
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+)
+
+from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.response import Response
+
+from apps.core.mixins import SoftDeleteViewSetMixin
+
+from .models import Category
+from .serializers import CategorySerializer
+
+
+class IsAdminOrReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_staff
+        )
+
+
+# ============================================================
+# AUDIT LOG HELPER
+# ============================================================
+def _log(request, action, target="", target_id=None, details=""):
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=target,
+            target_id=target_id,
+            details=details,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to write audit log: %s", action,
+        )
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Orodha ya makundi",
+        responses=CategorySerializer(many=True),
+    ),
+    retrieve=extend_schema(summary="Taarifa za kundi"),
+    create=extend_schema(summary="Unda kundi"),
+    update=extend_schema(summary="Badilisha kundi"),
+    partial_update=extend_schema(summary="Sasisha sehemu ya kundi"),
+    destroy=extend_schema(
+        summary="Futa kundi",
+        responses={
+            204: OpenApiResponse(description="Kundi limewekwa kwenye kikapu."),
+        },
+    ),
+)
+class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
+    serializer_class = CategorySerializer
+    permission_classes = [IsAdminOrReadOnly]
+    staff_can_restore_any = True
+
+    def get_queryset(self):
+        qs = Category.objects.all()
+        if (
+            self.request.user.is_authenticated
+            and self.request.user.is_staff
+        ):
+            return qs
+        return qs.filter(is_active=True)
+
+    def _can_restore(self, instance):
+        return bool(self.request.user.is_staff)
+
+    # ══════════════════════════════════════════════════════════
+    # CREATE — log category.created
+    # ══════════════════════════════════════════════════════════
+    def create(self, request, *args, **kwargs):
+        from django.db import IntegrityError, transaction
+        try:
+            with transaction.atomic():
+                response = super().create(request, *args, **kwargs)
+        except IntegrityError:
+            with transaction.atomic():
+                response = super().create(request, *args, **kwargs)
+
+        if response.status_code == status.HTTP_201_CREATED:
+            data = response.data or {}
+            _log(
+                request,
+                action="category.created",
+                target="Category",
+                target_id=data.get("id"),
+                details=(
+                    f"Created category: "
+                    f"{data.get('name') or data.get('slug') or '—'}"
+                ),
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # UPDATE — log category.updated
+    # ══════════════════════════════════════════════════════════
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        old_name = instance.name
+        response = super().update(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_200_OK,
+            status.HTTP_202_ACCEPTED,
+        ):
+            _log(
+                request,
+                action="category.updated",
+                target="Category",
+                target_id=instance.id,
+                details=f"Updated category: {old_name}",
+            )
+
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        old_name = instance.name
+        response = super().partial_update(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_200_OK,
+            status.HTTP_202_ACCEPTED,
+        ):
+            _log(
+                request,
+                action="category.updated",
+                target="Category",
+                target_id=instance.id,
+                details=f"Updated category (partial): {old_name}",
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # DESTROY — log category.deleted
+    # ══════════════════════════════════════════════════════════
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        cat_id = instance.id
+        cat_name = instance.name
+        cat_slug = instance.slug
+
+        response = super().destroy(request, *args, **kwargs)
+
+        if response.status_code in (
+            status.HTTP_204_NO_CONTENT,
+            status.HTTP_200_OK,
+        ):
+            _log(
+                request,
+                action="category.deleted",
+                target="Category",
+                target_id=cat_id,
+                details=(
+                    f"Deleted category: {cat_name} "
+                    f"(slug={cat_slug})"
+                ),
+            )
+
+        return response
+
+    # ══════════════════════════════════════════════════════════
+    # BULK — actions kwa categories nyingi kwa wakati mmoja
+    # ══════════════════════════════════════════════════════════
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="bulk",
+        url_name="bulk",
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def bulk(self, request):
+        """
+        Bulk actions kwa categories.
+
+        Body:
+          {
+            "action": "enable" | "disable" | "mark_popular"
+                      | "unmark_popular" | "delete",
+            "ids": [1, 2, 3]
+          }
+
+        Returns:
+          { "detail": "...", "count": N, "action": "..." }
+        """
+        action_name = (request.data.get("action") or "").strip().lower()
+        ids = request.data.get("ids") or []
+
+        if not action_name:
+            return Response(
+                {"detail": "action inahitajika."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"detail": "ids lazima iwe list isiyo tupu."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Safisha ids — numbers pekee
+        try:
+            clean_ids = [int(i) for i in ids if str(i).strip()]
+        except (ValueError, TypeError):
+            return Response(
+                {"detail": "ids lazima ziwe namba."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not clean_ids:
+            return Response(
+                {"detail": "Hakuna ids halali."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = Category.objects.filter(id__in=clean_ids)
+        count = qs.count()
+
+        if count == 0:
+            return Response(
+                {"detail": "Hakuna category iliyopatikana."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ── TEKELEZA ACTION ─────────────────────────────────
+        if action_name == "enable":
+            qs.update(is_active=True)
+        elif action_name == "disable":
+            qs.update(is_active=False)
+        elif action_name == "mark_popular":
+            qs.update(is_popular=True)
+        elif action_name == "unmark_popular":
+            qs.update(is_popular=False)
+        elif action_name == "delete":
+            # Soft delete — `SoftDeleteQuerySet.delete()` inarudisha
+            # (count, {label: count}) lakini `qs.update()` haifanyi
+            # hivyo. Tunatumia `delete()` ya QuerySet.
+            for cat in qs:
+                cat.delete(by=request.user, reason="bulk_delete")
+        else:
+            return Response(
+                {"detail": f"action '{action_name}' haijulikani."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        _log(
+            request,
+            action=f"category.bulk_{action_name}",
+            target="Category",
+            target_id=None,
+            details=(
+                f"Bulk {action_name} on {count} categories "
+                f"(ids={clean_ids[:20]})"
+            ),
+        )
+
+        return Response({
+            "detail": (
+                f"Categories {count} zimefanyiwa '{action_name}'."
+            ),
+            "count": count,
+            "action": action_name,
+        })
+
+    # ══════════════════════════════════════════════════════════
+    # UPLOAD IMAGE
+    # ══════════════════════════════════════════════════════════
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="upload-image",
+        url_name="upload-image",
+        permission_classes=[permissions.IsAdminUser],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_image(self, request):
+        f = request.FILES.get("image")
+        if not f:
+            return Response(
+                {"detail": "Picha inahitajika."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.core.image_utils import validate_image, MAX_CATEGORY_IMAGE_BYTES
+        ok, err = validate_image(f, max_bytes=MAX_CATEGORY_IMAGE_BYTES, field="image")
+        if not ok:
+            return Response(
+                {"detail": err},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ext = f.name.rsplit(".", 1)[-1].lower() if "." in f.name else "jpg"
+        if ext not in ("jpg", "jpeg", "png", "webp"):
+            ext = "jpg"
+
+        path = default_storage.save(
+            f"categories/{uuid.uuid4().hex}.{ext}",
+            ContentFile(f.read()),
+        )
+        url = default_storage.url(path)
+        if not url.startswith("http"):
+            url = request.build_absolute_uri(url)
+
+        return Response(
+            {"image_url": url, "url": url},
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ══════════════════════════════════════════════════════════
+    # REORDER
+    # ══════════════════════════════════════════════════════════
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="reorder",
+        url_name="reorder",
+        permission_classes=[permissions.IsAdminUser],
+    )
+    def reorder(self, request):
+        order = request.data.get("order") or []
+        if not isinstance(order, list) or not order:
+            return Response(
+                {"detail": "order lazima iwe list isiyo tupu."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated = 0
+        for idx, item in enumerate(order):
+            cat = None
+            if isinstance(item, int) or (isinstance(item, str) and item.isdigit()):
+                cat = Category.objects.filter(id=item).first()
+            if not cat:
+                cat = Category.objects.filter(slug=item).first()
+            if not cat:
+                cat = Category.objects.filter(name=item).first()
+
+            if cat:
+                cat.ordering = idx
+                cat.save(update_fields=["ordering"])
+                updated += 1
+
+        _log(
+            request,
+            action="category.reordered",
+            target="Category",
+            target_id=None,
+            details=f"Reordered {updated} categories",
+        )
+
+        return Response({
+            "detail": f"Categories {updated} zimepangwa upya.",
+            "updated": updated,
+        })

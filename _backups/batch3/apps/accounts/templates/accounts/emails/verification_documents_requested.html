@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #011957;">
+  <div style="text-align: center; margin-bottom: 24px;">
+    <div style="display: inline-block; width: 64px; height: 64px; border-radius: 50%; background: rgba(232,163,61,0.12); line-height: 64px; font-size: 32px; color: #8A5A16;">📄</div>
+  </div>
+  <h2 style="color: #8A5A16; text-align: center;">Nyaraka zaidi zinahitajika</h2>
+  <p>Habari {{ name }},</p>
+  <p>Ili kuendelea na uthibitisho wako, timu yetu inahitaji nyaraka zaidi kutoka kwako.</p>
+  {% if message %}
+  <div style="background: rgba(232,163,61,0.10); border-left: 4px solid #FEA406; padding: 12px 16px; margin: 16px 0; border-radius: 4px;">
+    <p style="margin: 0; font-weight: bold; color: #8A5A16;">Ujumbe kutoka Admin:</p>
+    <p style="margin: 8px 0 0 0;">{{ message }}</p>
+  </div>
+  {% endif %}
+  <p>Tafadhali ingia kwenye dashboard yako na pakia nyaraka zinazohitajika.</p>
+  <p style="text-align: center; margin: 32px 0;">
+    <a href="{{ action_url }}" style="display: inline-block; padding: 12px 24px; background: #FEA406; color: #011957; text-decoration: none; border-radius: 8px; font-weight: bold;">Pakia Nyaraka</a>
+  </p>
+  <p style="color: #6B7280; font-size: 12px; text-align: center; margin-top: 32px;">
+    SokoMkononi — Nunua na Uza Mali kwa Urahisi.
+  </p>
+</body>
+</html>

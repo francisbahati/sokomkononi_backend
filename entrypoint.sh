@@ -86,6 +86,7 @@ if [ "${SOKO_RUN_SEEDERS:-1}" = "1" ]; then
 
     echo "Seeding categories + fee rules..."
     python manage.py seed_all_fee_rules || echo "WARN: seed failed, continuing."
+    python manage.py seed_boost_packages || echo "WARN: boost seed failed, continuing."
 else
     echo "SOKO_RUN_SEEDERS=0 — skipping seeders."
 fi
@@ -112,7 +113,9 @@ fi
 
 # ── Static files ────────────────────────────────────────────
 echo "Collecting static files..."
-python manage.py collectstatic --noinput
+if ! python manage.py collectstatic --noinput; then
+    echo "WARN: collectstatic failed, continuing." >&2
+fi
 
 echo "Starting application..."
 exec "$@"

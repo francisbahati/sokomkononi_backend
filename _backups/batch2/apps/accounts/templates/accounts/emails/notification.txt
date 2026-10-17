@@ -1,0 +1,9 @@
+{{ title }}
+
+Habari {{ name }},
+
+{{ message }}
+
+{% if action_url %}Fungua: https://sokomkononi.co.tz{{ action_url }}{% endif %}
+
+-- SokoMkononi

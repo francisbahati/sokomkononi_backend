@@ -245,7 +245,10 @@ class NotificationViewSet(
         """GET /api/notifications/admin-feed/ — all admin-audience items."""
         qs = (
             Notification.objects
-            .filter(audience=Notification.Audience.ADMIN)
+            .filter(
+                recipient=request.user,
+                audience=Notification.Audience.ADMIN,
+            )
             .order_by("-created_at")
         )
         page = self.paginate_queryset(qs)

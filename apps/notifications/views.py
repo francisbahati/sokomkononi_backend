@@ -188,6 +188,7 @@ class NotificationViewSet(
 
         return Response(
             {
+                "ok": True,
                 "detail": "Arifa zote zimesomwa.",
                 "updated_count": updated_count,
             },
@@ -200,38 +201,17 @@ class NotificationViewSet(
         url_path="clear-all",
     )
     def clear_all(self, request):
-        """
-        Futa notifications zote za user PERMANENTLY.
-
-        Query params:
-            audience (optional): "admin" au "user" — filter kwa audience.
-            Kama haipo, futa zote za user huyu.
-
-        NOTE:
-            - `Notification.Audience.USER == "user"` (lowercase), hivyo
-              tunatumia `.lower()` sio `.upper()`.
-            - `QuerySet` HAINA `.hard_delete()`. `hard_delete()` ni
-              instance method kwenye `SoftDeleteModel`. Hivyo tunaita
-              kila instance kwa loop.
-        """
         qs = self.get_queryset()
-
-        # Filter kwa audience kama imetolewa
         audience = request.query_params.get("audience")
         if audience:
             qs = qs.filter(audience=audience.lower())
-
-        count = qs.count()
-
-        # Hard delete kila instance — QuerySet haina .hard_delete()
-        for notification in qs:
-            notification.hard_delete()
-
+        ids = list(qs.values_list("pk", flat=True))
+        count = len(ids)
+        if ids:
+            Notification.objects.filter(pk__in=ids).hard_delete()
         return Response(
-            {
-                "detail": f"Arifa {count} zimefutwa kabisa.",
-                "deleted_count": count,
-            },
+            {"ok": True, "detail": f"Arifa {count} zimefutwa kabisa.",
+             "deleted_count": count},
             status=status.HTTP_200_OK,
         )
 

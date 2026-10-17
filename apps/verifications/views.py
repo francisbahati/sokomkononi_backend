@@ -337,6 +337,24 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # Check the file exists in R2/S3 BEFORE returning a signed URL.
+        # Prevents the frontend opening an S3 <NoSuchKey> XML page.
+        if doc.file:
+            try:
+                _exists = doc.file.storage.exists(doc.file.name)
+            except Exception:
+                logger.exception("[verifications] storage.exists() failed for doc %s", doc.pk)
+                _exists = True
+            if not _exists:
+                return Response(
+                    {"ok": False, "file_missing": True,
+                     "code": "file_missing",
+                     "document_id": doc.pk,
+                     "detail": "Faili haipatikani kwenye hifadhi. "
+                               "Huenda ilifutwa au haikupakiwa."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
         serializer = VerificationDocumentSerializer(
             doc, context={"request": request},
         )

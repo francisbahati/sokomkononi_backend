@@ -339,8 +339,21 @@ class DealRoomListSerializer(serializers.ModelSerializer):
     location = serializers.SerializerMethodField()
     latest_offer = serializers.SerializerMethodField()
 
-    # ── MPYA: transaction_id ili frontend isijaribu ku-create tena ──
+    # ── MPYA: transaction_id ──
     transaction_id = serializers.SerializerMethodField()
+
+    # ── MPYA: reservation fields ──
+    reservation_fee = serializers.SerializerMethodField()
+    reservation_hours = serializers.SerializerMethodField()
+    reservation_method = serializers.SerializerMethodField()
+    reservation_paid_at = serializers.SerializerMethodField()
+    reservation_expires_at = serializers.SerializerMethodField()
+
+    # ── MPYA: contact + inspection ──
+    can_see_contact = serializers.SerializerMethodField()
+    inspection_started_at = serializers.SerializerMethodField()
+    inspection_expires_at = serializers.SerializerMethodField()
+    inspection_status = serializers.SerializerMethodField()
 
     class Meta:
         model = DealRoom
@@ -351,19 +364,91 @@ class DealRoomListSerializer(serializers.ModelSerializer):
             "status", "agreed_price", "agreed_at", "latest_offer",
             # ── MPYA ──
             "transaction_id",
+            "reservation_fee", "reservation_hours",
+            "reservation_method", "reservation_paid_at",
+            "reservation_expires_at",
+            "can_see_contact",
+            "inspection_started_at", "inspection_expires_at",
+            "inspection_status",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
 
     def get_transaction_id(self, obj):
-        """
-        Rudisha transaction ID kama ipo. Hii inasaidia frontend
-        kuepuka POST /api/transactions/ tena (ambayo inarudisha 400
-        'Transaction tayari imeundwa kwa Deal Room hii').
-        """
         try:
             txn = obj.transaction
             return txn.id if txn else None
+        except Exception:
+            return None
+
+    def get_reservation_fee(self, obj):
+        try:
+            r = obj.transaction.reservation
+            return str(r.deposit_amount) if r else None
+        except Exception:
+            return None
+
+    def get_reservation_hours(self, obj):
+        try:
+            r = obj.transaction.reservation
+            return getattr(r, "duration_hours", None) if r else None
+        except Exception:
+            return None
+
+    def get_reservation_method(self, obj):
+        try:
+            r = obj.transaction.reservation
+            return getattr(r, "payment_method", None) if r else None
+        except Exception:
+            return None
+
+    def get_reservation_paid_at(self, obj):
+        try:
+            r = obj.transaction.reservation
+            return getattr(r, "paid_at", None) if r else None
+        except Exception:
+            return None
+
+    def get_reservation_expires_at(self, obj):
+        try:
+            r = obj.transaction.reservation
+            return getattr(r, "expires_at", None) if r else None
+        except Exception:
+            return None
+
+    def get_can_see_contact(self, obj):
+        try:
+            txn = obj.transaction
+        except Exception:
+            return False
+        if not txn:
+            return False
+        from apps.transactions.models import Transaction
+        return txn.status in [
+            Transaction.Status.RESERVED,
+            Transaction.Status.INSPECTION,
+            Transaction.Status.READY_FOR_FINAL_PAYMENT,
+            Transaction.Status.COMPLETED,
+        ]
+
+    def get_inspection_started_at(self, obj):
+        try:
+            i = obj.transaction.inspection_period
+            return getattr(i, "starts_at", None) if i else None
+        except Exception:
+            return None
+
+    def get_inspection_expires_at(self, obj):
+        try:
+            i = obj.transaction.inspection_period
+            return getattr(i, "expires_at", None) if i else None
+        except Exception:
+            return None
+
+    def get_inspection_status(self, obj):
+        try:
+            i = obj.transaction.inspection_period
+            return getattr(i, "status", None) if i else None
         except Exception:
             return None
 

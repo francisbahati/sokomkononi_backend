@@ -144,8 +144,15 @@ def _activate_reservation(*, reservation, transaction, payment_reference):
     Mark a reservation PAID + ACTIVE and reserve the listing.
     Shared by every payment path (free, credits, FimiPay webhook,
     staff manual). The caller holds the locks and validated the state.
+
+    Pia:
+      - Inabadilisha DealRoom.status → RESERVED
+      - Inaunda InspectionPeriod papo hapo (status: ACTIVE)
+      - Inabadilisha Transaction.status → INSPECTION
+      - Inatuma notifications (RESERVATION_PAID + INSPECTION_STARTED)
     """
-    from apps.deals.models import DealRoom   # ⬅️ ONGEZA
+    from apps.deals.models import DealRoom
+    from ..models import InspectionPeriod   # ⬅️ ONGEZA
 
     listing = Listing.objects.select_for_update().get(
         pk=transaction.listing_id,
@@ -180,6 +187,7 @@ def _activate_reservation(*, reservation, transaction, payment_reference):
     transaction.status = Transaction.Status.RESERVED
     transaction.save(update_fields=["status", "updated_at"])
 
+    # ── MPYA: Badilisha DealRoom.status kuwa RESERVED ──
     try:
         deal_room = DealRoom.objects.select_for_update().get(
             pk=transaction.deal_room_id,
@@ -190,11 +198,36 @@ def _activate_reservation(*, reservation, transaction, payment_reference):
     except DealRoom.DoesNotExist:
         pass
 
+    # ── MPYA: Auto-create InspectionPeriod ──
+    try:
+        if not hasattr(transaction, "inspection_period"):
+            inspection_expires_at = now + timedelta(
+                hours=DEFAULT_INSPECTION_HOURS
+            )
+            inspection = InspectionPeriod.objects.create(
+                transaction=transaction,
+                duration_hours=DEFAULT_INSPECTION_HOURS,
+                starts_at=now,
+                expires_at=inspection_expires_at,
+                status=InspectionPeriod.Status.ACTIVE,
+            )
+            # Badilisha transaction.status kuwa INSPECTION
+            transaction.status = Transaction.Status.INSPECTION
+            transaction.save(update_fields=["status", "updated_at"])
+            db_transaction.on_commit(
+                lambda: notify_inspection_started(inspection=inspection)
+            )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Failed to create inspection for transaction %s",
+            transaction.pk,
+        )
+
     db_transaction.on_commit(
         lambda: notify_reservation_paid(reservation=reservation)
     )
     return reservation
-
 
 # ============================================================================
 # CREATE

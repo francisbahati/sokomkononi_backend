@@ -145,6 +145,8 @@ def _activate_reservation(*, reservation, transaction, payment_reference):
     Shared by every payment path (free, credits, FimiPay webhook,
     staff manual). The caller holds the locks and validated the state.
     """
+    from apps.deals.models import DealRoom   # ⬅️ ONGEZA
+
     listing = Listing.objects.select_for_update().get(
         pk=transaction.listing_id,
     )
@@ -177,6 +179,16 @@ def _activate_reservation(*, reservation, transaction, payment_reference):
 
     transaction.status = Transaction.Status.RESERVED
     transaction.save(update_fields=["status", "updated_at"])
+
+    try:
+        deal_room = DealRoom.objects.select_for_update().get(
+            pk=transaction.deal_room_id,
+        )
+        if deal_room.status == DealRoom.Status.ACCEPTED:
+            deal_room.status = DealRoom.Status.RESERVED
+            deal_room.save(update_fields=["status", "updated_at"])
+    except DealRoom.DoesNotExist:
+        pass
 
     db_transaction.on_commit(
         lambda: notify_reservation_paid(reservation=reservation)

@@ -1,3 +1,4 @@
+# apps/verifications/views.py
 import logging
 
 from django.shortcuts import get_object_or_404
@@ -10,10 +11,16 @@ from rest_framework.response import Response
 
 from drf_spectacular.utils import extend_schema
 
+from apps.core.permissions import IsAdminUser
 from .models import VerificationDocument, VerificationRequest
-from .notify import notify_approved, notify_rejected, notify_documents_requested
+from .notify import (
+    notify_approved,
+    notify_documents_requested,
+    notify_rejected,
+)
 from .serializers import (
     VerificationCreateSerializer,
+    VerificationDocumentSerializer,
     VerificationRejectSerializer,
     VerificationRequestSerializer,
 )
@@ -21,7 +28,18 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-from apps.core.permissions import IsAdminUser  # noqa: E402
+def _log(request, action, target="", target_id=None, details=""):
+    try:
+        from apps.audit.services.audit import log_action
+        log_action(
+            request=request,
+            action=action,
+            target=target,
+            target_id=target_id,
+            details=details,
+        )
+    except Exception:
+        logger.exception("audit failed: %s", action)
 
 
 class VerificationViewSet(viewsets.GenericViewSet):
@@ -36,6 +54,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
         POST    /api/verifications/{id}/approve/       admin only
         POST    /api/verifications/{id}/reject/        admin only
         POST    /api/verifications/{id}/request-documents/  admin only
+        GET     /api/verifications/{id}/documents/{doc_id}/  signed URL mpya
         POST    /api/verifications/{id}/documents/     multipart upload
         DELETE  /api/verifications/{id}/               owner or admin
     """
@@ -62,6 +81,15 @@ class VerificationViewSet(viewsets.GenericViewSet):
             return qs
         return qs.filter(user=user)
 
+    def get_serializer_class(self):
+        if self.action == "create":
+            return VerificationCreateSerializer
+        if self.action == "reject":
+            return VerificationRejectSerializer
+        if self.action == "document_url":
+            return VerificationDocumentSerializer
+        return VerificationRequestSerializer
+
     def list(self, request):
         qs = self.get_queryset()
         status_filter = request.query_params.get("status")
@@ -83,7 +111,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
     def retrieve(self, request, pk=None):
         obj = get_object_or_404(self.get_queryset(), pk=pk)
         return Response(
-            VerificationRequestSerializer(obj, context={"request": request}).data,
+            VerificationRequestSerializer(
+                obj, context={"request": request},
+            ).data,
         )
 
     @extend_schema(
@@ -113,7 +143,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
         )
 
     # ══════════════════════════════════════════════════════════
-    # APPROVE — idhinisha ombi + update user.is_verified
+    # APPROVE
     # ══════════════════════════════════════════════════════════
     @action(
         detail=True, methods=["post"], url_path="approve",
@@ -134,7 +164,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
             "status", "reviewed_by", "reviewed_at", "updated_at",
         ])
 
-        # is_verified moja — inaruhusu seller NA buyer
+        # is_verified — inaruhusu seller NA buyer
         try:
             target_user = obj.user
             if obj.type in (
@@ -153,17 +183,13 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 "request %s: %s", obj.id, exc,
             )
 
-        try:
-            from apps.audit.services.audit import log_action
-            log_action(
-                request=request,
-                action="verification.approved",
-                target="VerificationRequest",
-                target_id=obj.id,
-                details=f"Approved: type={obj.type}, subject={obj.subject}",
-            )
-        except Exception:
-            pass
+        _log(
+            request,
+            action="verification.approved",
+            target="VerificationRequest",
+            target_id=obj.id,
+            details=f"Approved: type={obj.type}, subject={obj.subject}",
+        )
 
         try:
             notify_approved(obj)
@@ -176,6 +202,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
             ).data,
         )
 
+    # ══════════════════════════════════════════════════════════
+    # REJECT
+    # ══════════════════════════════════════════════════════════
     @extend_schema(
         request=VerificationRejectSerializer,
         responses={200: VerificationRequestSerializer},
@@ -202,17 +231,16 @@ class VerificationViewSet(viewsets.GenericViewSet):
             "reviewed_at", "updated_at",
         ])
 
-        try:
-            from apps.audit.services.audit import log_action
-            log_action(
-                request=request,
-                action="verification.rejected",
-                target="VerificationRequest",
-                target_id=obj.id,
-                details=f"Rejected: {serializer.validated_data['rejection_reason'][:200]}",
-            )
-        except Exception:
-            pass
+        _log(
+            request,
+            action="verification.rejected",
+            target="VerificationRequest",
+            target_id=obj.id,
+            details=(
+                f"Rejected: "
+                f"{serializer.validated_data['rejection_reason'][:200]}"
+            ),
+        )
 
         try:
             notify_rejected(
@@ -274,7 +302,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
         try:
             notify_documents_requested(obj, message)
         except Exception:
-            logger.exception("notify_documents_requested failed for %s", obj.id)
+            logger.exception(
+                "notify_documents_requested failed for %s", obj.id,
+            )
 
         return Response(
             VerificationRequestSerializer(
@@ -282,6 +312,39 @@ class VerificationViewSet(viewsets.GenericViewSet):
             ).data,
         )
 
+    # ══════════════════════════════════════════════════════════
+    # DOCUMENT URL — signed URL mpya (kwa admin preview)
+    # ══════════════════════════════════════════════════════════
+    @action(
+        detail=True, methods=["get"],
+        url_path="documents/(?P<doc_id>[^/.]+)",
+    )
+    def document_url(self, request, pk=None, doc_id=None):
+        """
+        Rudisha signed URL mpya kwa document fulani.
+
+        GET /api/verifications/{request_id}/documents/{doc_id}/
+
+        Signed URLs zinaisha baada ya SIGNED_URL_EXPIRY, kwa hiyo admin
+        anahitaji kupata URL mpya kila mara anapofungua document.
+        """
+        obj = get_object_or_404(self.get_queryset(), pk=pk)
+        try:
+            doc = obj.documents.get(pk=doc_id)
+        except VerificationDocument.DoesNotExist:
+            return Response(
+                {"detail": "Document haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = VerificationDocumentSerializer(
+            doc, context={"request": request},
+        )
+        return Response(serializer.data)
+
+    # ══════════════════════════════════════════════════════════
+    # UPLOAD document
+    # ══════════════════════════════════════════════════════════
     @action(
         detail=True, methods=["post"], url_path="documents",
         parser_classes=[MultiPartParser, FormParser],
@@ -289,7 +352,10 @@ class VerificationViewSet(viewsets.GenericViewSet):
     def upload_document(self, request, pk=None):
         obj = get_object_or_404(self.get_queryset(), pk=pk)
         if obj.status != VerificationRequest.Status.PENDING:
-            return Response({"detail": "Ombi hili halipokei nyaraka mpya."}, status=400)
+            return Response(
+                {"detail": "Ombi hili halipokei nyaraka mpya."},
+                status=400,
+            )
         f = request.FILES.get("file")
         if not f:
             return Response(
@@ -300,13 +366,20 @@ class VerificationViewSet(viewsets.GenericViewSet):
         from apps.core.image_utils import validate_image
         if f.content_type == "application/pdf":
             if f.size > 10 * 1024 * 1024:
-                return Response({"detail": "Faili haiwezi kuzidi 10MB."}, status=400)
+                return Response(
+                    {"detail": "Faili haiwezi kuzidi 10MB."},
+                    status=400,
+                )
             if not (f.read(5) == b"%PDF-"):
                 f.seek(0)
-                return Response({"detail": "Faili si PDF halali."}, status=400)
+                return Response(
+                    {"detail": "Faili si PDF halali."}, status=400,
+                )
             f.seek(0)
         else:
-            ok, err = validate_image(f, max_bytes=10 * 1024 * 1024, field="file")
+            ok, err = validate_image(
+                f, max_bytes=10 * 1024 * 1024, field="file",
+            )
             if not ok:
                 return Response({"detail": err}, status=400)
 
@@ -324,6 +397,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    # ══════════════════════════════════════════════════════════
+    # DELETE
+    # ══════════════════════════════════════════════════════════
     def destroy(self, request, pk=None):
         obj = get_object_or_404(self.get_queryset(), pk=pk)
         if obj.user_id != request.user.id and not request.user.is_staff:

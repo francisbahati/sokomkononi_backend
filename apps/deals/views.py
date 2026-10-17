@@ -130,6 +130,16 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         if user.is_staff:
             return qs
+
+        # ── MPYA: Filter kwa role (buyer / seller) ──
+        role = self.request.query_params.get("role", "").strip().lower()
+
+        if role == "buyer":
+            return qs.filter(buyer=user)
+        if role == "seller":
+            return qs.filter(seller=user)
+
+        # Fallback: zote (kwa backward compatibility)
         return qs.filter(Q(buyer=user) | Q(seller=user))
 
     def update(self, request, *args, **kwargs):

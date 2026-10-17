@@ -13,6 +13,15 @@ from .serializers import (
 )
 
 
+def _saved_ids_for(user):
+    """All saved listing IDs for the user — INCLUDING soft-deleted."""
+    return list(
+        SavedListing.objects
+        .filter(user=user)
+        .values_list("listing_id", flat=True)
+    )
+
+
 class SavedListingViewSet(viewsets.GenericViewSet):
     """
     Buyer's saved / favorite listings.
@@ -147,3 +156,72 @@ class SavedListingViewSet(viewsets.GenericViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+    def state(self, request):
+        """
+        Combined state for frontend hydration.
+        Returns {saved_ids, snapshots} in one call — includes
+        soft-deleted listings so the frontend can render them as
+        "removed" snapshot cards.
+        """
+        saved = (
+            SavedListing.objects
+            .filter(user=request.user)
+            .select_related("listing", "listing__category")
+        )
+        saved_ids = []
+        snapshots = {}
+        for s in saved:
+            lid = str(s.listing_id)
+            saved_ids.append(lid)
+            live = getattr(s, "listing", None)
+            live_deleted = bool(getattr(live, "is_deleted", False)) if live else True
+            snapshots[lid] = {
+                "title": s.snapshot_title or (
+                    getattr(live, "title", "") if live else ""
+                ),
+                "price": str(
+                    s.snapshot_price if s.snapshot_price is not None
+                    else (getattr(live, "price", 0) if live else 0)
+                ),
+                "status": s.snapshot_status or (
+                    getattr(live, "status", "removed") if live else "removed"
+                ),
+                "savedAt": (
+                    s.saved_at.isoformat() if s.saved_at else None
+                ),
+                "is_deleted": live_deleted,
+            }
+        return Response({
+            "ok": True,
+            "saved_ids": saved_ids,
+            "snapshots": snapshots,
+            "count": len(saved_ids),
+        })
+
+    @action(detail=False, methods=["get"], url_path="state")
+    def state(self, request):
+        saved = (
+            SavedListing.objects
+            .filter(user=request.user)
+            .select_related("listing", "listing__category")
+        )
+        saved_ids = []
+        snapshots = {}
+        for s in saved:
+            lid = str(s.listing_id)
+            saved_ids.append(lid)
+            live = getattr(s, "listing", None)
+            live_deleted = bool(getattr(live, "is_deleted", False)) if live else True
+            snapshots[lid] = {
+                "title": s.snapshot_title or (getattr(live, "title", "") if live else ""),
+                "price": str(s.snapshot_price if s.snapshot_price is not None else (getattr(live, "price", 0) if live else 0)),
+                "status": s.snapshot_status or (getattr(live, "status", "removed") if live else "removed"),
+                "savedAt": s.saved_at.isoformat() if s.saved_at else None,
+                "is_deleted": live_deleted,
+            }
+        return Response({
+            "ok": True,
+            "saved_ids": saved_ids,
+            "snapshots": snapshots,
+            "count": len(saved_ids),
+        })

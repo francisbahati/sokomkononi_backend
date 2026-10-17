@@ -1,7 +1,46 @@
 """Admin-specific deal serializers."""
 from rest_framework import serializers
 
+from apps.accounts.models import User
+from apps.listings.models import Listing
+
 from .models import DealRoom, NegotiationOffer
+
+
+
+
+class UserMiniSerializer(serializers.ModelSerializer):
+    """Compact user shape for nested buyer/seller in admin responses."""
+    class Meta:
+        model = User
+        fields = ["id", "name", "email", "phone"]
+        read_only_fields = fields
+
+
+class ListingMiniSerializer(serializers.ModelSerializer):
+    """Compact listing shape for nested listing in admin responses."""
+    category_name = serializers.SerializerMethodField()
+    category_slug = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Listing
+        fields = [
+            "id", "title", "price", "location", "status",
+            "category_name", "category_slug",
+        ]
+        read_only_fields = fields
+
+    def get_category_name(self, obj):
+        try:
+            return obj.category.name if obj.category else ""
+        except Exception:
+            return ""
+
+    def get_category_slug(self, obj):
+        try:
+            return obj.category.slug if obj.category else ""
+        except Exception:
+            return ""
 
 
 class AdminOfferSerializer(serializers.ModelSerializer):
@@ -30,6 +69,23 @@ class AdminOfferSerializer(serializers.ModelSerializer):
 
 
 class AdminDealRoomSerializer(serializers.ModelSerializer):
+    # ── Nested objects (frontend reads these) ──
+    buyer = UserMiniSerializer(read_only=True)
+    seller = UserMiniSerializer(read_only=True)
+    listing = ListingMiniSerializer(read_only=True)
+
+    # ── Flat snake_case aliases (some normalizers prefer these) ──
+    buyer_name = serializers.CharField(source="buyer.name", read_only=True)
+    seller_name = serializers.CharField(source="seller.name", read_only=True)
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
+    asking_price = serializers.DecimalField(
+        source="listing.price", max_digits=15, decimal_places=2, read_only=True,
+    )
+    agreed_price = serializers.DecimalField(
+        max_digits=15, decimal_places=2, read_only=True, allow_null=True,
+    )
+    current_offer = serializers.SerializerMethodField()
+
     buyerId = serializers.IntegerField(source="buyer.id", read_only=True)
     sellerId = serializers.IntegerField(source="seller.id", read_only=True)
     listingId = serializers.IntegerField(source="listing.id", read_only=True)
@@ -52,16 +108,29 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     class Meta:
         model = DealRoom
         fields = [
-            "id", "status",
+            "id", "status", "created_at", "updated_at",
+            # Nested objects
+            "buyer", "seller", "listing",
+            # Flat camelCase aliases
             "buyerId", "sellerId", "listingId",
-            "listingTitle", "buyerName", "sellerName",
-            "askingPrice", "category", "location",
+            "listingTitle", "buyerName", "sellerName", "askingPrice",
+            # Flat snake_case aliases
+            "buyer_name", "seller_name", "listing_title",
+            "asking_price", "agreed_price", "current_offer",
+            # Computed
+            "category", "location",
             "currentOffer", "messages",
             "reservationFee", "reservationHours",
             "reservationMethod", "reservationExpiresAt",
             "paymentProof",
-            "created_at", "updated_at",
         ]
+
+    def get_current_offer(self, obj):
+        try:
+            latest = obj.offers.order_by("-created_at").first()
+            return float(latest.amount) if latest else 0
+        except Exception:
+            return 0
 
     def _txn(self, obj):
         return getattr(obj, "transaction", None)

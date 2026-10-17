@@ -20,7 +20,10 @@ class AdminDealRoomViewSet(viewsets.GenericViewSet):
     permission_classes = [permissions.IsAdminUser]
     queryset = (
         DealRoom.objects
-        .select_related("listing", "listing__category", "buyer", "seller")
+        .select_related(
+            "listing", "listing__category", "buyer", "seller",
+            "transaction", "transaction__reservation",
+        )
         .prefetch_related("offers", "offers__offered_by")
         .order_by("-updated_at")
     )

@@ -293,10 +293,14 @@ class MyTransactionSerializer(serializers.ModelSerializer):
     has_reservation = serializers.SerializerMethodField()
     has_inspection = serializers.SerializerMethodField()
 
+    # ── MPYA: raw_id (backend PK halisi) ──
+    raw_id = serializers.IntegerField(source="id", read_only=True)
+
     class Meta:
         model = Transaction
         fields = [
-            "id", "deal_room", "listing", "listing_title", "listing_status",
+            "id", "raw_id",          # ⬅️ MPYA: ongeza raw_id
+            "deal_room", "listing", "listing_title", "listing_status",
             "agreed_price", "status", "buyer_decision", "other_party_name",
             "reservation_status", "reservation_expires_at",
             "inspection_status", "inspection_expires_at",

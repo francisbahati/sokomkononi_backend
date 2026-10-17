@@ -25,12 +25,16 @@ from .services.user_stats import calculate_user_stats
 
 
 def _parse_bool(v):
-    if isinstance(v, bool): return v
-    if isinstance(v, str): return v.strip().lower() in ("1","true","yes","on")
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
     return bool(v)
 
 
 from apps.core.permissions import IsAdminUser  # noqa: E402
+
+
 # ============================================================
 # AUDIT LOG HELPER
 # ============================================================
@@ -144,6 +148,7 @@ class MyTransactionsView(APIView):
         ).select_related("listing").order_by("-created_at"):
             records.append({
                 "id": f"lf_{item.pk}",
+                "raw_id": item.pk,          # ⬅️ MPYA: backend ID (integer)
                 "source": "listing_fee",
                 "ref": item.payment_reference or f"LF-{item.pk}",
                 "type": "listing_fee",
@@ -165,6 +170,7 @@ class MyTransactionsView(APIView):
         ).select_related("listing", "package").order_by("-created_at"):
             records.append({
                 "id": f"b_{item.pk}",
+                "raw_id": item.pk,          # ⬅️ MPYA
                 "source": "boosting",
                 "ref": item.payment_reference or f"B-{item.pk}",
                 "type": "boost",
@@ -189,6 +195,7 @@ class MyTransactionsView(APIView):
             listing = item.transaction.listing
             records.append({
                 "id": f"r_{item.pk}",
+                "raw_id": item.pk,          # ⬅️ MPYA
                 "source": "reservation",
                 "ref": item.payment_reference or f"R-{item.pk}",
                 "type": "reservation",
@@ -234,6 +241,7 @@ class MyTransactionsView(APIView):
 
             records.append({
                 "id": f"bp_{item.pk}",
+                "raw_id": item.pk,          # ⬅️ MPYA
                 "source": "bundle_purchase",
                 "ref": item.payment_reference or f"BP-{item.pk}",
                 "type": "bundle_purchase",

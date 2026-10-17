@@ -69,7 +69,12 @@ class RevenueRecordSerializer(serializers.Serializer):
 # ============================================================
 
 class MyTransactionSerializer(serializers.Serializer):
+    """
+    id = prefixed string (fin_42, lf_1, b_2, r_3, bp_4)
+    raw_id = backend PK (integer) — tumika kwa receipt, receipt download, n.k.
+    """
     id = serializers.CharField()
+    raw_id = serializers.IntegerField(allow_null=True, required=False)
     source = serializers.CharField()
     ref = serializers.CharField()
     type = serializers.CharField()
@@ -89,7 +94,6 @@ class MyTransactionSerializer(serializers.Serializer):
 
     paid_at = serializers.DateTimeField(allow_null=True)
     created_at = serializers.DateTimeField()
-
 
 
 # ============================================================

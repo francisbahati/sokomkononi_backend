@@ -313,9 +313,8 @@ class VerificationViewSet(viewsets.GenericViewSet):
         )
 
     # ══════════════════════════════════════════════════════════
-    # DOCUMENT URL — signed URL mpya (kwa admin preview)
+    # DOCUMENT STREAM — bytes kupitia Django (bypass S3 XML)
     # ══════════════════════════════════════════════════════════
-
     @action(
         detail=True, methods=["get"],
         url_path="documents/(?P<doc_id>[^/.]+)/stream",
@@ -326,12 +325,20 @@ class VerificationViewSet(viewsets.GenericViewSet):
 
         Auth: standard DRF auth (Authorization: Bearer <jwt>) because the
         frontend fetches this with an auth header, NOT window.open().
+
+        Inajaribu storage mbili kwa mpangilio:
+          1. `default_storage` (CloudflareR2MediaStorage — bucket kuu)
+          2. `doc.file.storage` (PrivateR2Storage — faili za zamani)
+          3. local MEDIA_ROOT (fallback ya legacy)
+
         Returns:
-          - 200 + FileResponse on success (R2, S3, or local disk)
+          - 200 + FileResponse on success
           - 404 + JSON {code: "file_missing"} when file is gone
         """
         import mimetypes
+        from pathlib import Path
         from django.conf import settings as dj_settings
+        from django.core.files.storage import default_storage
         from django.http import FileResponse, Http404
 
         obj = get_object_or_404(self.get_queryset(), pk=pk)
@@ -351,33 +358,48 @@ class VerificationViewSet(viewsets.GenericViewSet):
         content_type, _ = mimetypes.guess_type(file_name)
         content_type = content_type or "application/octet-stream"
 
-        # 1. Try storage class (R2 / S3 / default)
+        def _make_response(handle, storage_label):
+            response = FileResponse(handle, content_type=content_type)
+            response["Content-Disposition"] = (
+                f'inline; filename="{file_name.split("/")[-1]}"'
+            )
+            response["Cache-Control"] = "private, max-age=300"
+            response["X-Storage"] = storage_label
+            return response
+
+        # ── 1. default_storage (CloudflareR2MediaStorage) ──
         try:
-            if doc.file.storage.exists(file_name):
-                doc.file.open("rb")
-                response = FileResponse(doc.file, content_type=content_type)
-                response["Content-Disposition"] = (
-                    f'inline; filename="{file_name.split("/")[-1]}"'
-                )
-                response["Cache-Control"] = "private, max-age=300"
-                return response
+            if default_storage.exists(file_name):
+                f = default_storage.open(file_name, "rb")
+                return _make_response(f, "default")
         except Exception:
             logger.exception(
-                "[verifications] stream via storage failed for doc %s",
-                doc.pk,
+                "[verifications] stream via default_storage failed "
+                "for doc %s", doc.pk,
             )
 
-        # 2. Fallback: local MEDIA_ROOT (for legacy files)
+        # ── 2. doc.file.storage (PrivateR2Storage) ──
+        try:
+            if doc.file.storage.exists(file_name):
+                f = doc.file.storage.open(file_name, "rb")
+                return _make_response(f, "private")
+        except Exception:
+            logger.exception(
+                "[verifications] stream via doc.file.storage failed "
+                "for doc %s", doc.pk,
+            )
+
+        # ── 3. local MEDIA_ROOT (legacy fallback) ──
         try:
             local_path = Path(str(dj_settings.MEDIA_ROOT)) / file_name
             if local_path.exists() and local_path.is_file():
-                return FileResponse(
-                    open(local_path, "rb"), content_type=content_type,
-                )
+                return _make_response(open(local_path, "rb"), "local")
         except Exception:
-            pass
+            logger.exception(
+                "[verifications] local fallback failed for doc %s", doc.pk,
+            )
 
-        # 3. Not found anywhere — clean JSON, no XML
+        # ── 4. Haipatikani ──
         return Response(
             {"ok": False, "code": "file_missing",
              "document_id": doc.pk,
@@ -386,6 +408,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
             status=status.HTTP_404_NOT_FOUND,
         )
 
+    # ══════════════════════════════════════════════════════════
+    # DOCUMENT URL — signed URL mpya (legacy; bado inatumika)
+    # ══════════════════════════════════════════════════════════
     @action(
         detail=True, methods=["get"],
         url_path="documents/(?P<doc_id>[^/.]+)",
@@ -408,14 +433,27 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Check the file exists in R2/S3 BEFORE returning a signed URL.
-        # Prevents the frontend opening an S3 <NoSuchKey> XML page.
+        # Check the file exists BEFORE returning a signed URL.
         if doc.file:
+            from django.core.files.storage import default_storage
+            _exists = False
             try:
-                _exists = doc.file.storage.exists(doc.file.name)
+                if default_storage.exists(doc.file.name):
+                    _exists = True
             except Exception:
-                logger.exception("[verifications] storage.exists() failed for doc %s", doc.pk)
-                _exists = True
+                logger.exception(
+                    "[verifications] default_storage.exists() failed "
+                    "for doc %s", doc.pk,
+                )
+            if not _exists:
+                try:
+                    _exists = doc.file.storage.exists(doc.file.name)
+                except Exception:
+                    logger.exception(
+                        "[verifications] doc.file.storage.exists() failed "
+                        "for doc %s", doc.pk,
+                    )
+                    _exists = True
             if not _exists:
                 return Response(
                     {"ok": False, "file_missing": True,

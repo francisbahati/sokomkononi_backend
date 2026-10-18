@@ -4,11 +4,14 @@
 # Marekebisho:
 #  - _build_thumbnail: inasaidia URLField (string) + ImageField (.url)
 #  - _build_subtitle: inatumika kama `name` fallback
-#  - TrashPermanentDeleteView: inaonyesha protected_objects kwenye
-#    ProtectedError; inakubali `force=true` kufuta protected items
-#  - TrashEmptyByTypeView: inaonyesha protected_objects; inakubali `force`
-#  - TrashEmptyAllView: inakubali `force`; bila force protected models
-#    zinabaki (salama), kwa force zinafutwa pia
+#  - _cascade_protected: inafuta related PROTECT rows kwa mpangilio
+#    salama (financial records kwanza, kisha Listing, n.k.)
+#  - TrashPermanentDeleteView: inakubali `force=true`; inatumia
+#    _cascade_protected kufuta related PROTECT rows
+#  - TrashEmptyByTypeView: inakubali `force=true`; inatumia
+#    _cascade_protected
+#  - TrashEmptyAllView: inakubali `force=true`; inatumia
+#    _cascade_protected
 #  - TrashListView: inaonyesha `protected` flag kwa kila item
 # ============================================================
 from django.apps import apps
@@ -71,12 +74,79 @@ def _is_protected(model):
 
 def _wants_force(request):
     """`force` inaweza kuja kwenye query string au body."""
+    if not (request.user and request.user.is_superuser):
+        return False
     raw = request.query_params.get("force")
     if raw is None and isinstance(request.data, dict):
         raw = request.data.get("force")
     if raw is None:
         return False
     return str(raw).lower() in ("1", "true", "yes", "on")
+
+
+# ----------------------------------------------------------------
+# Cascade helper — futa related PROTECT rows
+# ----------------------------------------------------------------
+def _cascade_protected(obj, max_depth=5):
+    """
+    Futa related objects zinazozuia `obj` kufutwa (PROTECT FK).
+
+    Inarudia hadi `max_depth` mara:
+      1. Jaribu `obj.hard_delete()`.
+      2. Kama ProtectedError, futa kila `protected_object`
+         (hard_delete kwa SoftDeleteModel, .delete() vinginevyo).
+      3. Jaribu tena.
+
+    Returns: (success: bool, removed: list[str], error: str|None)
+    """
+    removed = []
+    for _ in range(max_depth):
+        try:
+            obj.hard_delete()
+            return True, removed, None
+        except ProtectedError as e:
+            progressed = False
+            for rel in e.protected_objects:
+                rel_model = rel._meta.model
+                label = f"{rel_model._meta.app_label}.{rel_model.__name__}#{rel.pk}"
+                try:
+                    if isinstance(rel, SoftDeleteModel):
+                        rel.hard_delete()
+                    else:
+                        rel.delete()
+                    removed.append(label)
+                    progressed = True
+                except ProtectedError:
+                    # related object pia ina PROTECT — cascade yake
+                    ok, sub_removed, sub_err = _cascade_protected(
+                        rel, max_depth - 1
+                    )
+                    if ok:
+                        removed.extend(sub_removed)
+                        removed.append(label)
+                        progressed = True
+                    else:
+                        return False, removed, (
+                            f"Imeshindwa kufuta {label}: {sub_err}"
+                        )
+                except Exception as inner:
+                    return False, removed, (
+                        f"Imeshindwa kufuta {label}: {inner}"
+                    )
+            if not progressed:
+                return False, removed, (
+                    "Bado imezuiliwa na: "
+                    + ", ".join(str(o) for o in e.protected_objects)[:500]
+                )
+    # jaribio la mwisho
+    try:
+        obj.hard_delete()
+        return True, removed, None
+    except ProtectedError as e:
+        return False, removed, (
+            "Bado imezuiliwa na: "
+            + ", ".join(str(o) for o in e.protected_objects)[:500]
+        )
 
 
 # ----------------------------------------------------------------
@@ -275,7 +345,24 @@ class TrashPermanentDeleteView(APIView):
                     f"Hard-deleted {model.__name__}#{obj.pk}"
                     + (" [FORCED]" if force else ""),
                 )
-                obj.hard_delete()
+                if force:
+                    ok, removed, err = _cascade_protected(obj)
+                    if not ok:
+                        return Response(
+                            {
+                                "detail": "Haifutiki — inatumika mahali pengine.",
+                                "protected_objects": removed[:10] or [err],
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    if removed:
+                        _audit(
+                            request, "trash.cascade_deleted", model, obj.pk,
+                            f"Cascade-deleted {len(removed)} related: "
+                            + ", ".join(removed[:10]),
+                        )
+                else:
+                    obj.hard_delete()
         except ProtectedError as e:
             return Response(
                 {
@@ -318,7 +405,19 @@ class TrashEmptyByTypeView(APIView):
                         f"Empty-by-type: {model.__name__}#{obj.pk}"
                         + (" [FORCED]" if force else ""),
                     )
-                    obj.hard_delete()
+                    if force:
+                        ok, removed, err = _cascade_protected(obj)
+                        if not ok:
+                            skipped += 1
+                            protected_objs.extend(removed[:5] or [err])
+                            continue
+                        if removed:
+                            _audit(
+                                request, "trash.cascade_deleted", model, obj.pk,
+                                f"Cascade-deleted {len(removed)} related",
+                            )
+                    else:
+                        obj.hard_delete()
                 deleted += 1
             except ProtectedError as e:
                 skipped += 1
@@ -364,7 +463,13 @@ class TrashEmptyAllView(APIView):
                             f"Empty-all: {model.__name__}#{obj.pk}"
                             + (" [FORCED]" if force else ""),
                         )
-                        obj.hard_delete()
+                        if force:
+                            ok, _removed, _err = _cascade_protected(obj)
+                            if not ok:
+                                skipped += 1
+                                continue
+                        else:
+                            obj.hard_delete()
                     deleted += 1
                 except ProtectedError:
                     skipped += 1

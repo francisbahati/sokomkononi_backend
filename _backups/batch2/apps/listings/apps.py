@@ -1,0 +1,11 @@
+from django.apps import AppConfig
+
+
+class ListingsConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.listings"
+    label = "listings"
+    verbose_name = "Matangazo"
+
+    def ready(self):
+        import apps.listings.signals

@@ -58,8 +58,10 @@ class ListingAdmin(SoftDeleteAdminMixin, admin.ModelAdmin):
         "deleted_by",
     )
 
+    # NOTE: `status` intentionally NOT editable from list view — admins
+    # must use the moderation endpoints (approve/reject/request-payment)
+    # so fees, notifications and audit logs are always triggered.
     list_editable = (
-        "status",
         "is_featured",
         "is_boosted",
     )

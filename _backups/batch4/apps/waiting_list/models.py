@@ -1,0 +1,71 @@
+from django.conf import settings
+from django.db import models
+
+from apps.listings.models import Listing
+
+
+class WaitingListEntry(models.Model):
+    class Status(models.TextChoices):
+        WAITING = "WAITING", "Waiting"
+        NOTIFIED = "NOTIFIED", "Notified"
+        CANCELLED = "CANCELLED", "Cancelled"
+        FULFILLED = "FULFILLED", "Fulfilled"
+
+    listing = models.ForeignKey(
+        Listing, on_delete=models.CASCADE,
+        related_name="waiting_list_entries", verbose_name="Tangazo",
+    )
+    buyer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="waiting_list_entries", verbose_name="Mnunuzi",
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices,
+        default=Status.WAITING, verbose_name="Hali",
+    )
+    position = models.PositiveIntegerField(default=1, verbose_name="Nafasi")
+    notified_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Muda wa kutaarifiwa",
+    )
+    respond_by = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name="Jibu kabla ya",
+        help_text="Deadline for the notified buyer to claim the slot.",
+    )
+    joined_at = models.DateTimeField(
+        auto_now_add=True, verbose_name="Muda wa kujiunga",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True, verbose_name="Imesasishwa",
+    )
+
+    class Meta:
+        db_table = "waiting_list_entries"
+        ordering = ["position", "joined_at"]
+        indexes = [
+            models.Index(
+                fields=["listing", "status", "position"],
+                name="wait_listing_status_pos_idx",
+            ),
+            models.Index(
+                fields=["buyer", "status"],
+                name="wait_buyer_status_idx",
+            ),
+            models.Index(
+                fields=["status", "joined_at"],
+                name="wait_status_joined_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["listing", "buyer"],
+                condition=models.Q(status__in=["WAITING", "NOTIFIED"]),
+                name="unique_active_waiting_entry",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Waiting List #{self.pk} - "
+            f"{self.listing.title} - {self.buyer.name}"
+        )

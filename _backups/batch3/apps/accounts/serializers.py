@@ -1,0 +1,400 @@
+# apps/accounts/serializers.py
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework import serializers
+
+from .models import (
+    NotificationPreference,
+    User,
+    UserPreferences,
+)
+from .services import normalize_tanzania_phone
+from .services import get_user_role
+
+
+def _validate_otp_digits(value):
+    value = (value or "").strip()
+    if not value.isdigit() or len(value) != 6:
+        raise serializers.ValidationError("OTP lazima iwe namba sita.")
+    return value
+
+
+def _run_password_validators(value):
+    try:
+        validate_password(value)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError(list(exc.messages))
+    return value
+
+
+# ============================================================
+# REGISTER
+# ============================================================
+
+class RegisterSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=150)
+
+    email = serializers.EmailField()
+
+    phone = serializers.CharField(
+        max_length=20,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+
+    account_type = serializers.ChoiceField(
+        choices=User.AccountType.choices,
+        default=User.AccountType.INDIVIDUAL,
+    )
+
+    password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        max_length=128,
+    )
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        if User.all_objects.filter(email=value).exists():
+            raise serializers.ValidationError(
+                "Barua pepe hii tayari imesajiliwa."
+            )
+        return value
+
+    def validate_phone(self, value):
+        value = (value or "").strip()
+        if not value:
+            return None
+        value = normalize_tanzania_phone(value)
+        if User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError(
+                "Namba hii ya simu tayari imesajiliwa."
+            )
+        return value
+
+    def validate_password(self, value):
+        return _run_password_validators(value)
+
+
+# ============================================================
+# VERIFY OTP (registration)
+# ============================================================
+
+class VerifyOTPSerializer(serializers.Serializer):
+    identifier = serializers.EmailField()
+    otp_code = serializers.CharField(min_length=6, max_length=6)
+
+    def validate_identifier(self, value):
+        return value.strip().lower()
+
+    def validate_otp_code(self, value):
+        return _validate_otp_digits(value)
+
+
+# ============================================================
+# LOGIN
+# ============================================================
+
+class LoginSerializer(serializers.Serializer):
+    identifier = serializers.CharField(max_length=254)
+    password = serializers.CharField(write_only=True, max_length=128)
+
+    def validate(self, attrs):
+        identifier = attrs.get("identifier", "").strip().lower()
+        password = attrs.get("password")
+
+        user = User.objects.filter(email=identifier).first()
+
+        if not user or not user.check_password(password):
+            raise serializers.ValidationError(
+                "Barua pepe au nenosiri si sahihi."
+            )
+
+        if not user.is_active:
+            raise serializers.ValidationError("Akaunti yako haipo hai.")
+
+        if not user.is_verified:
+            raise serializers.ValidationError(
+                "Akaunti yako haijathibitishwa."
+            )
+
+        attrs["user"] = user
+        return attrs
+
+
+# ============================================================
+# PROFILE
+# ============================================================
+
+class ProfileSerializer(serializers.ModelSerializer):
+    seller_status = serializers.SerializerMethodField()
+    buyer_status = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+    bio = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
+    current_role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "name", "email", "phone", "account_type",
+            "avatar", "date_joined", "is_verified", "is_staff",
+            "is_superuser", "seller_status", "buyer_status",
+            "role",
+            "bio", "location",
+            "current_role",
+        ]
+        read_only_fields = [
+            "id", "email", "date_joined", "is_verified",
+            "is_staff", "is_superuser", "seller_status", "buyer_status",
+            "avatar", "role",
+            "bio", "location",
+            "current_role",
+        ]
+
+    def validate_phone(self, value):
+        value = (value or "").strip()
+        if not value:
+            return None
+        value = normalize_tanzania_phone(value)
+        qs = User.objects.filter(phone=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                "Namba hii ya simu tayari imesajiliwa."
+            )
+        return value
+
+    def get_seller_status(self, obj):
+        return obj.can_sell
+
+    def get_buyer_status(self, obj):
+        return obj.can_buy
+
+    def get_role(self, obj):
+        return get_user_role(obj)
+
+    def get_current_role(self, obj):
+        """
+        Rudisha role ya mtumiaji kwa sasa: 'seller', 'buyer', 'both', 'neither'.
+        Inahesabiwa kutoka listings + deals.
+        """
+        try:
+            from apps.listings.models import Listing
+            from apps.deals.models import DealRoom
+
+            has_listings = Listing.objects.filter(
+                seller=obj, is_deleted=False,
+            ).exists()
+            has_deals = DealRoom.objects.filter(buyer=obj).exists()
+
+            if has_listings and has_deals:
+                return "both"
+            if has_listings:
+                return "seller"
+            if has_deals:
+                return "buyer"
+            return "neither"
+        except Exception:
+            return "neither"
+
+    def get_bio(self, obj):
+        try:
+            return obj.preferences.bio or ""
+        except Exception:
+            return ""
+
+    def get_location(self, obj):
+        try:
+            prefs = obj.preferences
+            return prefs.location or prefs.region or ""
+        except Exception:
+            return ""
+# ============================================================
+# ADMIN USER (list) — role inahesabiwa
+# ============================================================
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    """
+    Serializer kwa admin users list (/api/admin/users/).
+    Inahesabu role kutoka listings + deals.
+    """
+    role = serializers.SerializerMethodField()
+    is_seller = serializers.SerializerMethodField()
+    is_buyer = serializers.SerializerMethodField()
+    avatar = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "name", "email", "phone", "account_type",
+            "is_active", "is_verified", "is_staff", "is_superuser",
+            "date_joined", "role", "is_seller", "is_buyer",
+            "avatar",
+        ]
+        read_only_fields = fields
+
+    def get_role(self, obj):
+        return get_user_role(obj)
+
+    def get_is_seller(self, obj):
+        try:
+            from apps.listings.models import Listing
+            return Listing.objects.filter(
+                seller=obj, is_deleted=False,
+            ).exists()
+        except Exception:
+            return False
+
+    def get_is_buyer(self, obj):
+        try:
+            from apps.deals.models import DealRoom
+            return DealRoom.objects.filter(buyer=obj).exists()
+        except Exception:
+            return False
+
+    def get_avatar(self, obj):
+        request = self.context.get("request")
+        if not getattr(obj, "avatar", None):
+            return None
+        try:
+            url = obj.avatar.url
+        except Exception:
+            return None
+        if request:
+            return request.build_absolute_uri(url)
+        return url
+
+# ============================================================
+# FORGOT PASSWORD — step 1
+# ============================================================
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    identifier = serializers.EmailField(
+        help_text="Barua pepe iliyosajiliwa.",
+    )
+
+    def validate_identifier(self, value):
+        return value.strip().lower()
+
+
+# ============================================================
+# FORGOT PASSWORD — step 2
+# ============================================================
+
+class VerifyPasswordResetOTPSerializer(serializers.Serializer):
+    identifier = serializers.EmailField()
+    otp_code = serializers.CharField(min_length=6, max_length=6)
+
+    def validate_identifier(self, value):
+        return value.strip().lower()
+
+    def validate_otp_code(self, value):
+        return _validate_otp_digits(value)
+
+
+# ============================================================
+# FORGOT PASSWORD — step 3
+# ============================================================
+
+class PasswordResetSerializer(serializers.Serializer):
+    reset_token = serializers.CharField()
+
+    new_password = serializers.CharField(
+        write_only=True, min_length=8, max_length=128,
+    )
+
+    confirm_password = serializers.CharField(
+        write_only=True, min_length=8, max_length=128,
+    )
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({
+                "confirm_password": "Manenosiri hayafanani."
+            })
+        return attrs
+
+    def validate_new_password(self, value):
+        return _run_password_validators(value)
+
+
+# ============================================================
+# CHANGE PASSWORD (logged-in user)
+# ============================================================
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(
+        write_only=True, max_length=128,
+    )
+
+    new_password = serializers.CharField(
+        write_only=True, min_length=8, max_length=128,
+    )
+
+    confirm_password = serializers.CharField(
+        write_only=True, min_length=8, max_length=128,
+    )
+
+    def validate_current_password(self, value):
+        user = self.context.get("request").user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Nenosiri la sasa si sahihi.")
+        return value
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({
+                "confirm_password": "Manenosiri hayafanani."
+            })
+        return attrs
+
+    def validate_new_password(self, value):
+        return _run_password_validators(value)
+
+
+# ============================================================
+# USER PREFERENCES
+# ============================================================
+
+class UserPreferencesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserPreferences
+        fields = [
+            "language", "currency", "region",
+            "show_phone", "show_email",
+            "bio", "location",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
+
+
+# ============================================================
+# NOTIFICATION PREFERENCES
+# ============================================================
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = [
+            "email_deals", "email_messages",
+            "email_promotions", "email_newsletter",
+            "sms_deals", "sms_messages", "sms_promotions",
+            "push_deals", "push_messages", "push_promotions",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
+
+
+# ============================================================
+# ACTIVITY
+# ============================================================
+
+class UserActivitySerializer(serializers.Serializer):
+    id = serializers.CharField(read_only=True)
+    type = serializers.CharField(read_only=True)
+    title = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True, allow_blank=True)
+    created_at = serializers.DateTimeField(read_only=True)

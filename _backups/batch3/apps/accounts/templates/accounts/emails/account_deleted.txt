@@ -1,0 +1,10 @@
+Akaunti yako ya SokoMkononi imefutwa
+
+Habari {{ name }},
+
+Akaunti yako imefutwa kabisa. Huwezi kuingia tena kwa barua pepe hii.
+Sababu: {{ reason }}
+
+Kama una maswali, wasiliana nasi: support@sokomkononi.co.tz
+
+— SokoMkononi

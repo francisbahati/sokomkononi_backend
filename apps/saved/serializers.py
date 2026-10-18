@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.listings.models import Listing
+from apps.listings.ownership import PUBLIC_STATUSES
 
 from .models import SavedListing
 
@@ -10,23 +11,16 @@ class SavedListingListingSerializer(serializers.ModelSerializer):
 
     primary_image = serializers.SerializerMethodField()
     category_name = serializers.CharField(
-        source="category.name",
-        read_only=True,
+        source="category.name", read_only=True,
     )
+    category_slug = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
         fields = [
-            "id",
-            "title",
-            "price",
-            "location",
-            "status",
-            "is_boosted",
-            "is_featured",
-            "primary_image",
-            "category_name",
-            "created_at",
+            "id", "title", "price", "location", "status",
+            "is_boosted", "is_featured", "primary_image",
+            "category_name", "category_slug", "created_at",
         ]
 
     def get_primary_image(self, obj):
@@ -46,6 +40,12 @@ class SavedListingListingSerializer(serializers.ModelSerializer):
                     continue
         return None
 
+    def get_category_slug(self, obj):
+        try:
+            return obj.category.slug if obj.category else None
+        except Exception:
+            return None
+
 
 class SavedListingSerializer(serializers.ModelSerializer):
     listing = SavedListingListingSerializer(read_only=True)
@@ -55,14 +55,12 @@ class SavedListingSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "listing",
+            "snapshot_title",     # ← frontend reads snap.title
             "snapshot_price",
             "snapshot_status",
             "saved_at",
         ]
         read_only_fields = fields
-
-
-from apps.listings.ownership import PUBLIC_STATUSES
 
 
 class SavedListingCreateSerializer(serializers.Serializer):

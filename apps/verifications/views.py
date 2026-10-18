@@ -315,6 +315,77 @@ class VerificationViewSet(viewsets.GenericViewSet):
     # ══════════════════════════════════════════════════════════
     # DOCUMENT URL — signed URL mpya (kwa admin preview)
     # ══════════════════════════════════════════════════════════
+
+    @action(
+        detail=True, methods=["get"],
+        url_path="documents/(?P<doc_id>[^/.]+)/stream",
+    )
+    def stream_document(self, request, pk=None, doc_id=None):
+        """
+        Stream the document bytes through Django — bypasses S3 XML errors.
+
+        Auth: standard DRF auth (Authorization: Bearer <jwt>) because the
+        frontend fetches this with an auth header, NOT window.open().
+        Returns:
+          - 200 + FileResponse on success (R2, S3, or local disk)
+          - 404 + JSON {code: "file_missing"} when file is gone
+        """
+        import mimetypes
+        from django.conf import settings as dj_settings
+        from django.http import FileResponse, Http404
+
+        obj = get_object_or_404(self.get_queryset(), pk=pk)
+        try:
+            doc = obj.documents.get(pk=doc_id)
+        except VerificationDocument.DoesNotExist:
+            raise Http404("Document not found")
+
+        if not doc.file:
+            return Response(
+                {"ok": False, "code": "file_missing",
+                 "detail": "Document haina faili."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        file_name = doc.file.name
+        content_type, _ = mimetypes.guess_type(file_name)
+        content_type = content_type or "application/octet-stream"
+
+        # 1. Try storage class (R2 / S3 / default)
+        try:
+            if doc.file.storage.exists(file_name):
+                doc.file.open("rb")
+                response = FileResponse(doc.file, content_type=content_type)
+                response["Content-Disposition"] = (
+                    f'inline; filename="{file_name.split("/")[-1]}"'
+                )
+                response["Cache-Control"] = "private, max-age=300"
+                return response
+        except Exception:
+            logger.exception(
+                "[verifications] stream via storage failed for doc %s",
+                doc.pk,
+            )
+
+        # 2. Fallback: local MEDIA_ROOT (for legacy files)
+        try:
+            local_path = Path(str(dj_settings.MEDIA_ROOT)) / file_name
+            if local_path.exists() and local_path.is_file():
+                return FileResponse(
+                    open(local_path, "rb"), content_type=content_type,
+                )
+        except Exception:
+            pass
+
+        # 3. Not found anywhere — clean JSON, no XML
+        return Response(
+            {"ok": False, "code": "file_missing",
+             "document_id": doc.pk,
+             "detail": "Faili haipatikani kwenye hifadhi. "
+                       "Huenda ilifutwa au haikupakiwa."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
     @action(
         detail=True, methods=["get"],
         url_path="documents/(?P<doc_id>[^/.]+)",
@@ -336,6 +407,24 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 {"detail": "Document haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        # Check the file exists in R2/S3 BEFORE returning a signed URL.
+        # Prevents the frontend opening an S3 <NoSuchKey> XML page.
+        if doc.file:
+            try:
+                _exists = doc.file.storage.exists(doc.file.name)
+            except Exception:
+                logger.exception("[verifications] storage.exists() failed for doc %s", doc.pk)
+                _exists = True
+            if not _exists:
+                return Response(
+                    {"ok": False, "file_missing": True,
+                     "code": "file_missing",
+                     "document_id": doc.pk,
+                     "detail": "Faili haipatikani kwenye hifadhi. "
+                               "Huenda ilifutwa au haikupakiwa."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         serializer = VerificationDocumentSerializer(
             doc, context={"request": request},

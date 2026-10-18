@@ -390,6 +390,7 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             "boost_id": boost.id,
             "payment_status": (data.get("payment_status") or "PENDING"),
             "fimipay": data,
+            "boost": self.get_serializer(boost).data,
         }, status=status.HTTP_201_CREATED)
 
     @extend_schema(

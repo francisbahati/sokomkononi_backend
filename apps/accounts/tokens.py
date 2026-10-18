@@ -45,3 +45,38 @@ def decode_password_reset_token(token_string):
     if not user_id:
         raise ValidationError({"reset_token": "Reset token haina mtumiaji."})
     return user_id
+
+
+# ============================================================
+# 2FA CHALLENGE TOKEN
+# ============================================================
+TWO_FACTOR_PURPOSE = "2fa_challenge"
+
+
+class TwoFactorChallengeToken(Token):
+    token_type = "2fa_challenge"
+    lifetime = timedelta(minutes=5)
+
+
+def create_2fa_challenge_token(user):
+    token = TwoFactorChallengeToken()
+    token["user_id"] = user.pk
+    token["purpose"] = TWO_FACTOR_PURPOSE
+    return str(token)
+
+
+def decode_2fa_challenge_token(token_string):
+    if not token_string:
+        raise ValidationError({"code_token": "code_token inahitajika."})
+    try:
+        token = TwoFactorChallengeToken(token_string)
+    except TokenError:
+        raise ValidationError({
+            "code_token": "Token si sahihi au imeisha muda."
+        })
+    if token.payload.get("purpose") != TWO_FACTOR_PURPOSE:
+        raise ValidationError({"code_token": "Token si sahihi."})
+    user_id = token.payload.get("user_id")
+    if not user_id:
+        raise ValidationError({"code_token": "Token haina mtumiaji."})
+    return user_id

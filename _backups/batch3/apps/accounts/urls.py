@@ -1,0 +1,84 @@
+from django.urls import path
+
+from rest_framework_simplejwt.views import TokenRefreshView
+
+from .social_views import SocialLoginView
+from .views import (
+    AvatarUploadView,
+    ChangePasswordView,
+    DeleteAccountView,
+    ForgotPasswordView,
+    LoginView,
+    LogoutView,
+    MeActivitiesView,
+    MeNotificationPreferencesView,
+    MePreferencesView,
+    MeView,
+    PasswordResetView,
+    ProfileView,
+    RegisterView,
+    VerifyOTPView,
+    VerifyPasswordResetOTPView,
+    ResendOTPView,
+)
+
+
+class ThrottledTokenRefreshView(TokenRefreshView):
+    throttle_scope = "refresh"
+
+
+app_name = "accounts"
+
+
+urlpatterns = [
+    path("register/", RegisterView.as_view(), name="register"),
+    path("verify-otp/", VerifyOTPView.as_view(), name="verify-otp"),
+    path("resend-otp/", ResendOTPView.as_view(), name="resend-otp"),
+
+    path("login/", LoginView.as_view(), name="login"),
+    path("social/", SocialLoginView.as_view(), name="social-login"),
+    path(
+        "token/refresh/",
+        ThrottledTokenRefreshView.as_view(),
+        name="token-refresh",
+    ),
+    path("logout/", LogoutView.as_view(), name="logout"),
+
+    path("password/forgot/", ForgotPasswordView.as_view(), name="password-forgot"),
+    path(
+        "password/verify-otp/",
+        VerifyPasswordResetOTPView.as_view(),
+        name="password-verify-otp",
+    ),
+    path("password/reset/", PasswordResetView.as_view(), name="password-reset"),
+    path(
+        "password/change/",
+        ChangePasswordView.as_view(),
+        name="password-change",
+    ),
+
+    path("me/", MeView.as_view(), name="me"),
+    path(
+        "me/preferences/",
+        MePreferencesView.as_view(),
+        name="me-preferences",
+    ),
+    path(
+        "me/notification-preferences/",
+        MeNotificationPreferencesView.as_view(),
+        name="me-notification-preferences",
+    ),
+    path(
+        "me/activities/",
+        MeActivitiesView.as_view(),
+        name="me-activities",
+    ),
+
+    path("profile/", ProfileView.as_view(), name="profile"),
+    path("profile/avatar/", AvatarUploadView.as_view(), name="profile-avatar"),
+    path(
+        "delete-account/",
+        DeleteAccountView.as_view(),
+        name="delete-account",
+    ),
+]

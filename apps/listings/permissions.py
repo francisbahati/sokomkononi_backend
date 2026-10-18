@@ -23,11 +23,12 @@ class IsOwnerOrAdmin(permissions.BasePermission):
     """
     Admins can manage every listing.
     Normal users can only modify their own listings.
+
+    For child objects without a direct `seller_id` (e.g. ListingImage),
+    resolve ownership via the related `listing.seller_id`.
     """
 
-    message = (
-        "Huna ruhusa ya kubadilisha tangazo ambalo si lako."
-    )
+    message = "Huna ruhusa ya kubadilisha tangazo ambalo si lako."
 
     def has_permission(self, request, view):
         return bool(
@@ -40,4 +41,10 @@ class IsOwnerOrAdmin(permissions.BasePermission):
         if request.user.is_staff:
             return True
 
-        return obj.seller_id == request.user.id
+        seller_id = getattr(obj, "seller_id", None)
+        if seller_id is None:
+            listing = getattr(obj, "listing", None)
+            if listing is not None:
+                seller_id = getattr(listing, "seller_id", None)
+
+        return seller_id == request.user.id

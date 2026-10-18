@@ -1,0 +1,13 @@
+{% extends "accounts/emails/_base.html" %}
+{% block title %}Nambari yako ya uthibitisho{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 8px;font-size:20px;">Uthibitisho wa Akaunti</h1>
+<p style="margin:0 0 20px;font-size:14px;color:#374151;">Habari {{ name }}, karibu SokoMkononi. Tumia nambari hii kukamilisha usajili wako.</p>
+<div style="background:#F5F3EC;border-radius:12px;padding:20px;text-align:center;margin:0 0 20px;">
+<p style="margin:0 0 6px;font-size:11px;letter-spacing:1px;color:#6B7280;text-transform:uppercase;">Nambari ya Uthibitisho</p>
+<p style="margin:0;font-size:34px;font-weight:700;letter-spacing:8px;color:#101A2E;font-family:monospace;">{{ otp }}</p>
+<p style="margin:8px 0 0;font-size:11px;color:#6B7280;">Ni halali kwa dakika 10 pekee</p>
+</div>
+<p style="margin:0 0 12px;font-size:13px;color:#374151;"><strong>Muhimu:</strong> Usimshirikishe mtu mwingine nambari hii.</p>
+<p style="margin:0;font-size:13px;color:#374151;">Kama hukuaomba nambari hii, unaweza kupuuza ujumbe huu.</p>
+{% endblock %}

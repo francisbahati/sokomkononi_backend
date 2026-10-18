@@ -1,0 +1,14 @@
+Uthibitisho wako umeidhinishwa!
+
+Habari {{ name }},
+
+Hongera! Ombi lako la uthibitisho {{ verification_type }} limeidhinishwa na timu ya SokoMkononi.
+
+Sasa unaweza kufanya biashara kwa uhuru kwenye jukwaa letu:
+- Weka matangazo yako
+- Wasiliana na wanunuzi
+- Fanya deals kwa usalama
+
+Nenda kwenye Dashboard: {{ action_url }}
+
+— SokoMkononi

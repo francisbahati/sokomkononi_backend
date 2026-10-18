@@ -13,6 +13,7 @@ import logging
 from decimal import Decimal
 
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import ProgrammingError, IntegrityError, DataError
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.exceptions import ValidationError
@@ -237,6 +238,13 @@ def _route_success(order_id, event):
     except ValidationError:
         logger.exception("Webhook: retryable error for %s", order_id)
         return RETRY
+    except (ProgrammingError, IntegrityError, DataError) as exc:
+        # Permanent — schema drift / constraint violation.
+        logger.exception(
+            "Webhook PERMANENT failure for %s (%s): %s",
+            order_id, type(exc).__name__, exc,
+        )
+        return IGNORED
     except Exception:
         logger.exception(
             "Webhook routing failed for order_id=%s (will retry)", order_id,

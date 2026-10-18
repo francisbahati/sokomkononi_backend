@@ -6,3 +6,6 @@ class ContactConfig(AppConfig):
     name = "apps.contact"
     label = "contact"
     verbose_name = "Mawasiliano"
+
+    def ready(self):
+        from . import signals  # noqa: F401

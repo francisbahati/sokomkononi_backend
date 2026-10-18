@@ -1,0 +1,13 @@
+Nyaraka zaidi zinahitajika
+
+Habari {{ name }},
+
+Ili kuendelea na uthibitisho wako, timu yetu inahitaji nyaraka zaidi kutoka kwako.
+
+Ujumbe kutoka Admin:
+{{ message }}
+
+Tafadhali ingia kwenye dashboard yako na pakia nyaraka zinazohitajika:
+{{ action_url }}
+
+— SokoMkononi

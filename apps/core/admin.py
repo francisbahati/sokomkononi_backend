@@ -1,5 +1,5 @@
 # apps/core/admin.py
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import ProtectedError
 
 
@@ -25,6 +25,10 @@ class DeletedFilter(admin.SimpleListFilter):
 class SoftDeleteAdminMixin:
     """
     Show soft-deleted rows in admin, allow restore / hard-delete.
+
+    Admin anaweza kufuta kila kitu. Models zilizo kwenye
+    AUDIT_PROTECTED_MODEL_NAMES zinaonyeshwa onyo (warning) lakini
+    bado zinafutwa — superuser pekee anapaswa kufanya hivi.
     """
 
     actions = ["restore_selected", "hard_delete_selected"]
@@ -54,6 +58,12 @@ class SoftDeleteAdminMixin:
 
     @admin.action(description="Futa kabisa (mara moja)")
     def hard_delete_selected(self, request, queryset):
+        from apps.core.constants import AUDIT_PROTECTED_MODEL_NAMES
+
+        model = queryset.model
+        key = (model._meta.app_label, model.__name__)
+        is_protected_model = key in AUDIT_PROTECTED_MODEL_NAMES
+
         deleted = 0
         protected = []
         for obj in queryset:
@@ -67,11 +77,21 @@ class SoftDeleteAdminMixin:
                 )
 
         if deleted:
-            self.message_user(request, f"Vitu {deleted} vimefutwa kabisa.")
+            prefix = (
+                "⚠️ Model hii inalindwa, lakini umeifuta kwa tahadhari. "
+                if is_protected_model
+                else ""
+            )
+            self.message_user(
+                request,
+                f"{prefix}Vitu {deleted} vimefutwa kabisa.",
+                level=messages.WARNING if is_protected_model else messages.SUCCESS,
+            )
+
         if protected:
             self.message_user(
                 request,
                 "Vitu vifuatavyo havikufutwa kwa sababu vina "
-                "mahusiano yanayolindwa: " + "; ".join(protected[:10]),
-                level="warning",
+                "mahusiano yanayolindwa (PROTECT): " + "; ".join(protected[:10]),
+                level=messages.WARNING,
             )

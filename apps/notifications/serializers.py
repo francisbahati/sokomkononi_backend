@@ -27,16 +27,11 @@ class NotificationSerializer(serializers.ModelSerializer):
 
     def get_action_url(self, obj):
         """
-        Rudisha URL sahihi ya API (dynamic).
-
-        Inatumia obj.resolved_action_url — ambayo inatengeneza URL
-        kutoka related_object_type + related_object_id.
-
-        Inarudisha None kama object haipo au URL haijasajiliwa.
+        Stored `action_url` is authoritative — the frontend knows how
+        to route it. Only fall back to the reverse-resolved API URL
+        when the stored value is empty.
         """
-        # Prefer the reverse-resolved URL; fall back to the stored
-        # action_url so deep links don't silently become None.
-        return obj.resolved_action_url or (obj.action_url or None)
+        return obj.action_url or obj.resolved_action_url or None
 
 
 class NotificationMarkReadSerializer(serializers.Serializer):

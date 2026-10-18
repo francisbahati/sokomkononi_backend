@@ -99,6 +99,7 @@ class SuccessFeePayment(models.Model):
         PENDING = "PENDING", "Pending"
         PAID = "PAID", "Paid"
         FAILED = "FAILED", "Failed"
+        REFUNDED = "REFUNDED", "Refunded"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -128,6 +129,8 @@ class SuccessFeePayment(models.Model):
     )
 
     paid_at = models.DateTimeField(blank=True, null=True)
+
+    refunded_at = models.DateTimeField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -316,6 +316,7 @@ REST_FRAMEWORK = {
         "support_ticket_admin": "500/hour",
         "contact": "5/hour",
         "refresh": "60/min",
+        "verification_request": "5/hour",
     },
 }
 
@@ -457,6 +458,10 @@ CELERY_BEAT_SCHEDULE = {
     "waiting-list-expire-notified": {"task": "waiting_list.expire_notified", "schedule": crontab(minute="*/15")},
     "announcements-flush-scheduled": {"task": "announcements.flush_scheduled", "schedule": crontab(minute="*/5")},
     "tickets-send-sla-reminders": {"task": "tickets.send_sla_reminders", "schedule": crontab(minute=0)},
+    "expire-stale-listings": {
+        "task": "listings.expire_stale_listings",
+        "schedule": crontab(hour=2, minute=0),
+    },
     "sync-pending-fimipay-statuses": {
         "task": "payments.sync_pending_fimipay_statuses",
         "schedule": crontab(minute="*/5"),

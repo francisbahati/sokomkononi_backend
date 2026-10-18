@@ -76,7 +76,18 @@ class ConversionRateView(APIView):
         return Response({"rate": _aggregate(request).get("conversionRate", 0)})
 
 
+
+
+class OverviewView(APIView):
+    """GET /api/admin/reports/overview/ — full aggregate bundle."""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        return Response(_aggregate(request))
+
+
 urlpatterns = [
+    path("overview/", OverviewView.as_view(), name="admin-reports-overview"),
     path("users-growth/", UsersGrowthView.as_view(), name="admin-reports-users-growth"),
     path("listings-growth/", ListingsGrowthView.as_view(), name="admin-reports-listings-growth"),
     path("revenue-by-month/", RevenueByMonthView.as_view(), name="admin-reports-revenue-month"),

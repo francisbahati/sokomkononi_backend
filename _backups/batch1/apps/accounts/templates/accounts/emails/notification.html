@@ -1,0 +1,12 @@
+{% extends "accounts/emails/_base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 8px;font-size:20px;">{{ title }}</h1>
+<p style="margin:0 0 16px;font-size:14px;color:#374151;">Habari {{ name }},</p>
+<p style="margin:0 0 16px;font-size:14px;color:#374151;">{{ message }}</p>
+{% if action_url %}
+<p style="margin:0;">
+<a href="https://sokomkononi.co.tz{{ action_url }}" style="display:inline-block;background:#2F6D4F;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:10px;font-weight:600;">Fungua</a>
+</p>
+{% endif %}
+{% endblock %}

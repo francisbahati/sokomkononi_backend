@@ -1,8 +1,23 @@
-"""Uniform DRF error envelope."""
+# apps/core/exceptions.py
+from django.db.models import ProtectedError
+from rest_framework import status
+from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_handler
 
 
 def handler(exc, context):
+    if isinstance(exc, ProtectedError):
+        return Response(
+            {
+                "error": {
+                    "code": "PROTECTED_ERROR",
+                    "message": "Haifutiki — inatumika mahali pengine.",
+                    "protected_objects": [str(o) for o in exc.protected_objects][:10],
+                }
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     resp = drf_handler(exc, context)
     if resp is None:
         return None

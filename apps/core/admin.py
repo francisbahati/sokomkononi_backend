@@ -1,5 +1,6 @@
+# apps/core/admin.py
 from django.contrib import admin
-from django.utils.html import format_html
+from django.db.models import ProtectedError
 
 
 class DeletedFilter(admin.SimpleListFilter):
@@ -29,7 +30,6 @@ class SoftDeleteAdminMixin:
     actions = ["restore_selected", "hard_delete_selected"]
 
     def get_queryset(self, request):
-        # Use all_objects so deleted rows are reachable from admin.
         return self.model.all_objects.all()
 
     def get_list_filter(self, request):
@@ -46,12 +46,32 @@ class SoftDeleteAdminMixin:
 
     @admin.action(description="Rejesha vilivyochaguliwa")
     def restore_selected(self, request, queryset):
+        n = 0
         for obj in queryset.filter(is_deleted=True):
             obj.restore()
-        self.message_user(request, "Vitu vilivyochaguliwa vimerejeshwa.")
+            n += 1
+        self.message_user(request, f"Vitu {n} vimerejeshwa.")
 
     @admin.action(description="Futa kabisa (mara moja)")
     def hard_delete_selected(self, request, queryset):
+        deleted = 0
+        protected = []
         for obj in queryset:
-            obj.hard_delete()
-        self.message_user(request, "Vitu vilivyochaguliwa vimefutwa kabisa.")
+            try:
+                obj.hard_delete()
+                deleted += 1
+            except ProtectedError as e:
+                protected.append(
+                    f"{obj._meta.label}#{obj.pk} "
+                    f"({len(e.protected_objects)} related)"
+                )
+
+        if deleted:
+            self.message_user(request, f"Vitu {deleted} vimefutwa kabisa.")
+        if protected:
+            self.message_user(
+                request,
+                "Vitu vifuatavyo havikufutwa kwa sababu vina "
+                "mahusiano yanayolindwa: " + "; ".join(protected[:10]),
+                level="warning",
+            )

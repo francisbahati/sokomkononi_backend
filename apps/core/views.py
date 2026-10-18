@@ -5,8 +5,10 @@
 #  - _build_thumbnail: inasaidia URLField (string) + ImageField (.url)
 #  - _build_subtitle: inatumika kama `name` fallback
 #  - TrashPermanentDeleteView: inaonyesha protected_objects kwenye
-#    ProtectedError
-#  - TrashEmptyByTypeView: inaonyesha protected_objects
+#    ProtectedError; inakubali `force=true` kufuta protected items
+#  - TrashEmptyByTypeView: inaonyesha protected_objects; inakubali `force`
+#  - TrashEmptyAllView: inakubali `force`; bila force protected models
+#    zinabaki (salama), kwa force zinafutwa pia
 #  - TrashListView: inaonyesha `protected` flag kwa kila item
 # ============================================================
 from django.apps import apps
@@ -67,14 +69,20 @@ def _is_protected(model):
     return (model._meta.app_label, model.__name__) in AUDIT_PROTECTED_MODEL_NAMES
 
 
+def _wants_force(request):
+    """`force` inaweza kuja kwenye query string au body."""
+    raw = request.query_params.get("force")
+    if raw is None and isinstance(request.data, dict):
+        raw = request.data.get("force")
+    if raw is None:
+        return False
+    return str(raw).lower() in ("1", "true", "yes", "on")
+
+
 # ----------------------------------------------------------------
 # Trash list presentation helpers
 # ----------------------------------------------------------------
 def _build_subtitle(model, obj):
-    """
-    Rudisha subtitle mafupi kutoka fields za kawaida.
-    Inajaribu: title, name, subject, email, description, location, address.
-    """
     for field in (
         "title", "name", "subject", "email",
         "description", "location", "address",
@@ -87,7 +95,6 @@ def _build_subtitle(model, obj):
             text = str(val).strip()
             if text:
                 return text[:200]
-
     try:
         price = getattr(obj, "price", None)
         if price is not None:
@@ -98,24 +105,19 @@ def _build_subtitle(model, obj):
 
 
 def _build_deleted_by_name(obj):
-    """Jina la mtumiaji aliyeifuta — kutoka `deleted_by` (FK au id)."""
     user = None
     try:
         user = getattr(obj, "deleted_by", None)
     except Exception:
         user = None
-
     if not user:
         return None
-
     name = getattr(user, "name", None)
     if name:
         return name
-
     email = getattr(user, "email", None)
     if email:
         return email
-
     try:
         from django.contrib.auth import get_user_model
         User = get_user_model()
@@ -124,18 +126,13 @@ def _build_deleted_by_name(obj):
             return getattr(u, "name", None) or getattr(u, "email", None)
     except Exception:
         pass
-
     return None
 
 
 def _build_thumbnail(obj):
-    """
-    URL ya picha — kutoka ImageField (.url) au URLField/CharField (string).
-    Marekebisho: inasaidia `image_url` (URLField) pamoja na ImageField.
-    """
     for field in (
         "image", "avatar", "thumbnail", "photo",
-        "logo", "banner", "cover", "image_url",  # ⬅️ image_url imeongezwa
+        "logo", "banner", "cover", "image_url",
     ):
         try:
             f = getattr(obj, field, None)
@@ -143,10 +140,8 @@ def _build_thumbnail(obj):
             f = None
         if not f:
             continue
-        # URLField / CharField — string moja kwa moja
         if isinstance(f, str):
             return f
-        # ImageField — ina `.url`
         if hasattr(f, "url"):
             try:
                 return f.url
@@ -156,7 +151,6 @@ def _build_thumbnail(obj):
 
 
 def _format_protected(e):
-    """Rudisha orodha ya protected_objects kama strings (max 10)."""
     try:
         return [str(o) for o in e.protected_objects][:10]
     except Exception:
@@ -211,7 +205,7 @@ class TrashListView(APIView):
                 "details": getattr(obj, "deletion_reason", "") or "",
                 "thumbnail": _build_thumbnail(obj),
                 "repr": str(obj),
-                "protected": protected,  # ⬅️ MPYA — kwa UI
+                "protected": protected,
             })
 
         return Response({
@@ -256,25 +250,30 @@ class TrashPermanentDeleteView(APIView):
                 {"detail": "Aina ya kikapu haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        if _is_protected(model):
+
+        force = _wants_force(request)
+        if _is_protected(model) and not force:
             return Response(
                 {
-                    "detail": "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa.",
+                    "detail": "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa. Tuma `force=true` kuthibitisha.",
                     "protected": True,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
         obj = model.all_objects.filter(pk=pk, is_deleted=True).first()
         if not obj:
             return Response(
                 {"detail": "Haipatikani kwenye kikapu."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
         try:
             with transaction.atomic():
                 _audit(
                     request, "trash.hard_deleted", model, obj.pk,
-                    f"Hard-deleted {model.__name__}#{obj.pk}",
+                    f"Hard-deleted {model.__name__}#{obj.pk}"
+                    + (" [FORCED]" if force else ""),
                 )
                 obj.hard_delete()
         except ProtectedError as e:
@@ -298,14 +297,17 @@ class TrashEmptyByTypeView(APIView):
                 {"detail": "Aina ya kikapu haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        if _is_protected(model):
+
+        force = _wants_force(request)
+        if _is_protected(model) and not force:
             return Response(
                 {
-                    "detail": "Aina hii ya rekodi haiwezi kufutwa kabisa.",
+                    "detail": "Aina hii ya rekodi haiwezi kufutwa kabisa. Tuma `force=true` kuthibitisha.",
                     "protected": True,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
         deleted = skipped = 0
         protected_objs = []
         for obj in model.all_objects.filter(is_deleted=True).iterator():
@@ -313,7 +315,8 @@ class TrashEmptyByTypeView(APIView):
                 with transaction.atomic():
                     _audit(
                         request, "trash.hard_deleted", model, obj.pk,
-                        f"Empty-by-type: {model.__name__}#{obj.pk}",
+                        f"Empty-by-type: {model.__name__}#{obj.pk}"
+                        + (" [FORCED]" if force else ""),
                     )
                     obj.hard_delete()
                 deleted += 1
@@ -324,6 +327,7 @@ class TrashEmptyByTypeView(APIView):
             "deleted": deleted,
             "skipped": skipped,
             "protected_objects": protected_objs[:10],
+            "forced": force,
         })
 
 
@@ -340,12 +344,14 @@ class TrashEmptyAllView(APIView):
                 )
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        force = _wants_force(request)
+
         deleted = skipped = 0
         blocked_models = []
         for model in apps.get_models():
             if not issubclass(model, SoftDeleteModel) or model._meta.abstract:
                 continue
-            if _is_protected(model):
+            if _is_protected(model) and not force:
                 blocked_models.append(
                     f"{model._meta.app_label}.{model.__name__}"
                 )
@@ -355,7 +361,8 @@ class TrashEmptyAllView(APIView):
                     with transaction.atomic():
                         _audit(
                             request, "trash.hard_deleted", model, obj.pk,
-                            f"Empty-all: {model.__name__}#{obj.pk}",
+                            f"Empty-all: {model.__name__}#{obj.pk}"
+                            + (" [FORCED]" if force else ""),
                         )
                         obj.hard_delete()
                     deleted += 1
@@ -365,4 +372,5 @@ class TrashEmptyAllView(APIView):
             "deleted": deleted,
             "skipped": skipped,
             "protected_models": blocked_models,
+            "forced": force,
         })

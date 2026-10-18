@@ -1,9 +1,12 @@
 # ============================================================
 # apps/core/constants.py
 #
-# Marekebisho:
-#  - Ongeza ("listings", "Listing") kwenye AUDIT_PROTECTED_MODEL_NAMES
-#    ili Listing isifutwe kabisa (ina financial records).
+# AUDIT_PROTECTED_MODEL_NAMES inatumika na:
+#   1. tasks.purge_soft_deleted  → inaruka models hizi (bila force)
+#   2. trash.views._is_protected → inakataa delete bila force=true
+#
+# Admin anaweza kufuta kwa `force=true` kupitia trash API,
+# au kwa `hard_delete_selected` kwenye Django admin.
 # ============================================================
 
 SOFT_DELETE_RETENTION_DAYS = 90
@@ -12,7 +15,7 @@ SOFT_DELETE_RETENTION_DAYS = 90
 # purge_soft_deleted task. Financial and audit records.
 AUDIT_PROTECTED_MODEL_NAMES = {
     # Listings — ina financial records (ListingFee, Boost, Reservation)
-    ("listings", "Listing"),          # ⬅️ MPYA
+    ("listings", "Listing"),
     ("listings", "ListingFee"),
     ("boosting", "ListingBoost"),
 

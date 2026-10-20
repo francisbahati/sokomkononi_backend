@@ -509,7 +509,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "fee_status",
             "is_paid",
             "payment_status",
-            "seller",
             "leading_expires_at",
             "status",
             "is_featured",
@@ -609,21 +608,10 @@ class ListingDetailSerializer(serializers.ModelSerializer):
         return fee.payment_status if fee else "PENDING"
 
     def get_seller(self, obj):
-        u = getattr(obj, "seller", None)
-        if not u:
-            return None
-        return {"id": u.id, "name": getattr(u, "name", "") or ""}
-
-    def get_payment_status(self, obj):
-        fee = getattr(obj, "listing_fee", None)
-        return fee.payment_status if fee else "PENDING"
-
-    def get_seller(self, obj):
         s = getattr(obj, "seller", None)
         if not s:
             return None
         return {"id": s.id, "name": getattr(s, "name", "") or ""}
-
 
 # ============================================================================
 # LISTING WRITE

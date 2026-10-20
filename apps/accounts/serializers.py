@@ -219,11 +219,15 @@ class ProfileSerializer(serializers.ModelSerializer):
 class AdminUserSerializer(serializers.ModelSerializer):
     """
     Serializer kwa admin users list (/api/admin/users/).
-    Inahesabu role kutoka listings + deals.
+    - role inahesabiwa kutoka listings + deals.
+    - is_verified inatokana na VerificationRequest ya APPROVED
+      (sio User.is_verified field — hiyo inawekwa True wakati wa
+      registration, ambayo ni kosa).
     """
     role = serializers.SerializerMethodField()
     is_seller = serializers.SerializerMethodField()
     is_buyer = serializers.SerializerMethodField()
+    is_verified = serializers.SerializerMethodField()
     avatar = serializers.SerializerMethodField()
 
     class Meta:
@@ -255,6 +259,19 @@ class AdminUserSerializer(serializers.ModelSerializer):
         except Exception:
             return False
 
+    def get_is_verified(self, obj):
+        """
+        Verified TU ikiwa kuna VerificationRequest ya APPROVED.
+        """
+        try:
+            from apps.verifications.models import VerificationRequest
+            return VerificationRequest.objects.filter(
+                user=obj,
+                status=VerificationRequest.Status.APPROVED,
+            ).exists()
+        except Exception:
+            return False
+
     def get_avatar(self, obj):
         request = self.context.get("request")
         if not getattr(obj, "avatar", None):
@@ -266,7 +283,6 @@ class AdminUserSerializer(serializers.ModelSerializer):
         if request:
             return request.build_absolute_uri(url)
         return url
-
 # ============================================================
 # FORGOT PASSWORD — step 1
 # ============================================================

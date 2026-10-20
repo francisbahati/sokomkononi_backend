@@ -68,6 +68,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         from django.db.models import Exists, OuterRef, Q as DQ
         from apps.listings.models import Listing
         from apps.deals.models import DealRoom
+        from apps.verifications.models import VerificationRequest
 
         qs = User.all_objects.all().order_by("-created_at")
 
@@ -75,9 +76,17 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             seller=OuterRef("pk"), is_deleted=False,
         )
         has_deals = DealRoom.objects.filter(buyer=OuterRef("pk"))
+
+        # ⬇️ Verified = kuna VerificationRequest ya APPROVED
+        has_verified = VerificationRequest.objects.filter(
+            user=OuterRef("pk"),
+            status=VerificationRequest.Status.APPROVED,
+        )
+
         qs = qs.annotate(
             _has_listings=Exists(has_listings),
             _has_deals=Exists(has_deals),
+            _has_verified=Exists(has_verified),  # ⬅️ MPYA
         )
 
         q = self.request.query_params.get("q")
@@ -110,10 +119,11 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         elif status_filter == "suspended":
             qs = qs.filter(is_active=False)
 
+        # ⬇️ Filter kwa VerificationRequest, sio User.is_verified
         if verified_filter == "verified":
-            qs = qs.filter(is_verified=True)
+            qs = qs.filter(_has_verified=True)
         elif verified_filter == "unverified":
-            qs = qs.filter(is_verified=False)
+            qs = qs.filter(_has_verified=False)
 
         return qs
 

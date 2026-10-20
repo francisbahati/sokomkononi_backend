@@ -4,9 +4,11 @@
 #  - Ongeza @method_decorator(csrf_exempt) kwa ReportsView na
 #    ReportsExportView ili kuepuka CSRF 500 kwenye JWT-only API
 #  - Ondoa DISPUTED kutoka deals_by_status (dispute imeondolewa)
+#  - Ongeza `from` na `to` (custom date range) kwenye ReportsView
+#    na ReportsExportView
 # ============================================================
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import BytesIO
 
 from dateutil.relativedelta import relativedelta
@@ -46,9 +48,50 @@ def _visible_listings_qs():
     )
 
 
-def _period_range(period):
-    """Rudisha (start, end) kutoka period string."""
+def _parse_date(s):
+    """Parse YYYY-MM-DD → datetime (timezone-aware) au None."""
+    if not s:
+        return None
+    try:
+        d = datetime.strptime(s, "%Y-%m-%d").date()
+        return timezone.make_aware(
+            datetime.combine(d, datetime.min.time()),
+            timezone.get_current_timezone(),
+        )
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_end_date(s):
+    """Parse YYYY-MM-DD → mwisho wa siku (23:59:59) timezone-aware."""
+    if not s:
+        return None
+    try:
+        d = datetime.strptime(s, "%Y-%m-%d").date()
+        return timezone.make_aware(
+            datetime.combine(d, datetime.max.time()),
+            timezone.get_current_timezone(),
+        )
+    except (ValueError, TypeError):
+        return None
+
+
+def _period_range(period, date_from=None, date_to=None):
+    """
+    Rudisha (start, end) kutoka period au custom date range.
+
+    - period = "custom" → tumia date_from, date_to
+    - period = "today" | "week" | "month" | "year" | "all"
+    """
     now = timezone.localtime()
+
+    if period == "custom":
+        start = _parse_date(date_from)
+        end = _parse_end_date(date_to) or now
+        if not start:
+            return None, None
+        return start, end
+
     if period == "today":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         return start, now
@@ -73,6 +116,12 @@ class ReportsView(APIView):
 
     def get(self, request):
         now = timezone.now()
+
+        # ── CUSTOM DATE RANGE (optional) ────────────────────
+        period = request.query_params.get("period", "all")
+        date_from = request.query_params.get("from")
+        date_to = request.query_params.get("to")
+        start, end = _period_range(period, date_from, date_to)
 
         # ── USER STATS ──────────────────────────────────────
         user_stats = calculate_user_stats()
@@ -116,11 +165,19 @@ class ReportsView(APIView):
         # ── LISTINGS ────────────────────────────────────────
         visible_qs = _visible_listings_qs()
 
-        total_listings = visible_qs.count()
-        live_listings = visible_qs.filter(
+        # Kama custom date range imetolewa, chuja listings kwa created_at
+        if start and end:
+            visible_qs_in_range = visible_qs.filter(
+                created_at__gte=start, created_at__lte=end,
+            )
+        else:
+            visible_qs_in_range = visible_qs
+
+        total_listings = visible_qs_in_range.count()
+        live_listings = visible_qs_in_range.filter(
             status=Listing.Status.LIVE,
         ).count()
-        sold_listings = visible_qs.filter(
+        sold_listings = visible_qs_in_range.filter(
             status=Listing.Status.SOLD,
         ).count()
 
@@ -134,13 +191,17 @@ class ReportsView(APIView):
             })
 
         # ── DEALS ───────────────────────────────────────────
-        total_deals = DealRoom.objects.count()
-        completed_deals = DealRoom.objects.filter(
+        deals_qs = DealRoom.objects.all()
+        if start and end:
+            deals_qs = deals_qs.filter(created_at__gte=start, created_at__lte=end)
+
+        total_deals = deals_qs.count()
+        completed_deals = deals_qs.filter(
             status=DealRoom.Status.COMPLETED,
         ).count()
 
         deals_by_status = dict(
-            DealRoom.objects.values_list("status")
+            deals_qs.values_list("status")
             .annotate(c=Count("id"))
             .values_list("status", "c")
         )
@@ -163,6 +224,11 @@ class ReportsView(APIView):
         revenue_qs = Transaction.objects.filter(
             status=Transaction.Status.COMPLETED,
         )
+        if start and end:
+            revenue_qs = revenue_qs.filter(
+                completed_at__gte=start, completed_at__lte=end,
+            )
+
         total_gmv = (
             revenue_qs.aggregate(s=Sum("agreed_price"))["s"] or 0
         )
@@ -198,7 +264,7 @@ class ReportsView(APIView):
 
         # ── TOP SELLERS ─────────────────────────────────────
         top_sellers_qs = (
-            visible_qs
+            visible_qs_in_range
             .filter(seller__is_staff=False, seller__is_deleted=False)
             .values("seller__id", "seller__name")
             .annotate(
@@ -217,7 +283,7 @@ class ReportsView(APIView):
         ]
 
         # ── MOST VIEWED ─────────────────────────────────────
-        most_viewed_qs = visible_qs.order_by("-views_count")[:5]
+        most_viewed_qs = visible_qs_in_range.order_by("-views_count")[:5]
         most_viewed = [
             {
                 "id": l.id,
@@ -230,7 +296,7 @@ class ReportsView(APIView):
 
         # ── TOP CATEGORIES ──────────────────────────────────
         cat_qs = (
-            visible_qs
+            visible_qs_in_range
             .values("category__slug", "category__name")
             .annotate(count=Count("id"), views=Sum("views_count"))
             .order_by("-views")[:5]
@@ -247,7 +313,7 @@ class ReportsView(APIView):
 
         # ── TOP LOCATIONS ───────────────────────────────────
         loc_qs = (
-            visible_qs
+            visible_qs_in_range
             .values("location")
             .annotate(count=Count("id"), views=Sum("views_count"))
             .order_by("-views")[:5]
@@ -262,6 +328,9 @@ class ReportsView(APIView):
         ]
 
         return Response({
+            "period": period,
+            "from": date_from,
+            "to": date_to,
             "totalUsers": total_users,
             "totalSellers": total_sellers,
             "totalBuyers": total_buyers,
@@ -299,8 +368,9 @@ class ReportsView(APIView):
 class ReportsExportView(APIView):
     """
     GET /api/finance/reports/export/?format=csv&period=week
+    GET /api/finance/reports/export/?format=csv&period=custom&from=2026-10-15&to=2026-10-17
 
-    Period: today | week | month | year | all
+    Period: today | week | month | year | all | custom
     Format: csv | pdf | doc
     """
     permission_classes = [IsAdminUser]
@@ -308,29 +378,35 @@ class ReportsExportView(APIView):
     def get(self, request):
         fmt = (request.query_params.get("format") or "csv").lower()
         period = (request.query_params.get("period") or "month").lower()
+        date_from = request.query_params.get("from")
+        date_to = request.query_params.get("to")
+
         if fmt not in ("csv", "pdf", "doc"):
             return Response(
                 {"detail": "Format si sahihi. Tumia csv, pdf, au doc."},
                 status=400,
             )
-        if period not in ("today", "week", "month", "year", "all"):
+        if period not in ("today", "week", "month", "year", "all", "custom"):
             return Response(
-                {"detail": "Period si sahihi. Tumia today, week, month, year, all."},
+                {"detail": "Period si sahihi. Tumia today, week, month, year, all, au custom."},
+                status=400,
+            )
+        if period == "custom" and (not date_from or not date_to):
+            return Response(
+                {"detail": "Custom period inahitaji 'from' na 'to' (YYYY-MM-DD)."},
                 status=400,
             )
 
         data = ReportsView().get(request).data
 
-        from .services.revenue import (
-            calculate_financial_dashboard,
-            get_revenue_records,
-        )
+        from .services.revenue import get_revenue_records
         period_map = {
             "today": "today",
             "week": "week",
             "month": "month",
             "year": "all",
             "all": "all",
+            "custom": "all",
         }
         api_period = period_map.get(period, "all")
 
@@ -339,13 +415,30 @@ class ReportsExportView(APIView):
         except Exception:
             records = []
 
+        # Kama custom date range, chuja records kwa tarehe
+        if period == "custom":
+            start = _parse_date(date_from)
+            end = _parse_end_date(date_to)
+            if start and end:
+                filtered = []
+                for r in records:
+                    dt = r.get("paid_at") or r.get("created_at")
+                    if dt and start <= dt <= end:
+                        filtered.append(r)
+                records = filtered
+
         timestamp = timezone.now().strftime("%Y%m%d_%H%M")
+        suffix = (
+            f"{date_from or 'start'}_to_{date_to or 'end'}"
+            if period == "custom"
+            else period
+        )
 
         if fmt == "csv":
-            return self._csv(data, records, period, timestamp)
+            return self._csv(data, records, suffix, timestamp)
         if fmt == "pdf":
-            return self._pdf(data, records, period, timestamp)
-        return self._doc(data, records, period, timestamp)
+            return self._pdf(data, records, suffix, timestamp)
+        return self._doc(data, records, suffix, timestamp)
 
     # ── CSV ─────────────────────────────────────────────────
     def _csv(self, data, records, period, timestamp):

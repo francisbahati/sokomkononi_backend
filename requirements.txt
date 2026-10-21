@@ -80,3 +80,4 @@ sentry-sdk==2.19.2
 pyotp==2.9.0
 
 django-filter>=23.0
+django-cors-headers>=4.3.0

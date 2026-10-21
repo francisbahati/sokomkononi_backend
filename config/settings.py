@@ -72,7 +72,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
+    "corsheaders.middleware.CorsMiddleware",       # ✅ CORS kwanza kabisa
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -233,22 +233,33 @@ else:
     }
 
 # ============================================================
-# CORS
+# CORS — FIX: lazima iwe na `www.sokomkononi.co.tz` KILA MARA
 # ============================================================
-_cors_default = (
-    "http://localhost:3000,http://localhost:5173,"
-    "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz"
-    if DEBUG else
-    "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz"
-)
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", _cors_default)
+# ✅ FIX #1: Ongeza `www.` variants KWA HARDCODE (usitegemee .env pekee)
+#    Kama .env ina `CORS_ALLOWED_ORIGINS` tupu au haipo, hizi zinatumika.
+_CORS_REQUIRED_ORIGINS = [
+    "https://sokomkononi.co.tz",
+    "https://www.sokomkononi.co.tz",
+    "https://api.sokomkononi.co.tz",
+]
+
+if DEBUG:
+    _CORS_REQUIRED_ORIGINS += [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ]
+
+# Chukua kutoka .env (kama ipo) + ongeza required origins
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
+    env_list("CORS_ALLOWED_ORIGINS", "") + _CORS_REQUIRED_ORIGINS
+))
+
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
 CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
 
-# ✅ FIX: "accept-language" ni MUHIMU — frontend inatuma hii kwa KILA request
-#    kupitia api/client.js. Bila hii kwenye CORS_ALLOW_HEADERS, CORS preflight
-#    inashindwa kwa requests zote zenye Accept-Language (notifications, auth/me,
-#    categories, fee-rules, n.k.).
+# ✅ FIX #2: Ruhusu headers zote zinazotumwa na frontend
 CORS_ALLOW_HEADERS = [
     "accept",
     "accept-encoding",
@@ -268,23 +279,32 @@ CORS_ALLOW_HEADERS = [
     "x-request-id",
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
+
+# ✅ FIX #3: USIRUHUSU origins zote (security) — tumia list maalum
 CORS_ALLOW_ALL_ORIGINS = False
+
+# ✅ FIX #4: Ruhusu CORS kwenye errors pia (400, 401, 500)
+CORS_URLS_REGEX = r"^.*$"
 
 # ============================================================
 # CSRF TRUSTED ORIGINS
 # ============================================================
-# Frontend + API origins must be trusted so the SPA can send
-# X-CSRFToken on unsafe methods when a session cookie is present.
-CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(
-    env_list("CSRF_TRUSTED_ORIGINS", "") + [
-        "https://sokomkononi.co.tz",
-        "https://www.sokomkononi.co.tz",
-        "https://api.sokomkononi.co.tz",
+_CSRF_REQUIRED_ORIGINS = [
+    "https://sokomkononi.co.tz",
+    "https://www.sokomkononi.co.tz",
+    "https://api.sokomkononi.co.tz",
+]
+
+if DEBUG:
+    _CSRF_REQUIRED_ORIGINS += [
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
     ]
+
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(
+    env_list("CSRF_TRUSTED_ORIGINS", "") + _CSRF_REQUIRED_ORIGINS
 ))
 
 # ---------------- DRF ----------------
@@ -508,6 +528,7 @@ LOGGING = {
         "csp": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "celery": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "apps": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "corsheaders": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
     },
 }
 

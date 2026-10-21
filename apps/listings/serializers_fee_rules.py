@@ -18,9 +18,14 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(
         source="category.name", read_only=True, allow_null=True,
     )
-    # ✅ FIX: Tumia SerializerMethodField ili kurudisha slug kila mara
-    # (kutoka category FK au category_slug legacy field)
-    category_slug = serializers.SerializerMethodField()
+    # ✅ FIX: CharField inarudisha STRING tu (kutoka category.slug).
+    # Hii inahakikisha frontend inapata string kila mara, sio object.
+    category_slug = serializers.CharField(
+        source="category.slug",
+        read_only=True,
+        allow_null=True,
+        required=False,
+    )
 
     class Meta:
         model = ListingFeeRule
@@ -44,18 +49,6 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
             "id", "category_name", "category_slug",
             "created_at", "updated_at",
         ]
-
-    def get_category_slug(self, obj):
-        """
-        Return slug kutoka category FK ikiwa ipo, vinginevyo
-        tumia `category_slug` (legacy field).
-        Hii inahakikisha frontend inapata slug kila mara.
-        """
-        if not obj:
-            return ""
-        if obj.category_id and obj.category:
-            return obj.category.slug or ""
-        return obj.category_slug or ""
 
     def validate(self, attrs):
         fee_mode = (attrs.get("fee_mode") or "").upper()

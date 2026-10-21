@@ -1,0 +1,12 @@
+Habari {{ buyer_name }},
+
+Reservation yako ya mali "{{ listing_title }}" (Transaction #{{ transaction_id }}) inaisha baada ya dakika {{ minutes_left }}.
+
+Kama unataka kuendelea kureserve, unaweza ku-renew reservation yako.
+Kama hutaki kuendelea, unaweza ku-cancel.
+
+Bofya link hapa chini:
+{{ site_url }}/dashboard/buyer/reservations
+
+Asante,
+SokoMkononi

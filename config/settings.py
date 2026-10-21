@@ -1,10 +1,5 @@
 # ============================================================
 # config/settings.py — SokoMkononi (production-ready)
-#
-# Marekebisho:
-#  - Ongeza CSRF_TRUSTED_ORIGINS kwa api.sokomkononi.co.tz
-#  - CSP: ongeza api.sokomkononi.co.tz kwenye connect-src
-#  - Ondoa duplicate CELERY_BEAT_SCHEDULE keys
 # ============================================================
 import os
 from datetime import timedelta
@@ -466,6 +461,15 @@ CELERY_BEAT_SCHEDULE = {
         "task": "payments.sync_pending_fimipay_statuses",
         "schedule": crontab(minute="*/5"),
         "kwargs": {"since_hours": 720},
+    },
+     "notify-expiring-in-5-minutes": {
+        "task": "transactions.notify_expiring_in_5_minutes",
+        "schedule": crontab(minute="*/2"), 
+    },
+
+    "notify-waiting-list-expiring": {
+        "task": "transactions.notify_waiting_list_expiring",
+        "schedule": crontab(minute="*/2"),  
     },
 }
 

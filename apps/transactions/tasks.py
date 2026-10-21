@@ -10,6 +10,12 @@ Drives time-based transitions:
       has not submitted a decision.
     - ACTIVE reservations approaching their expiry trigger a
       warning notification so the buyer can act in time.
+
+MPYA:
+    - notify_expiring_in_5_minutes: email + in-app 5 min kabla ya
+      reservation kuexpire (buyer).
+    - notify_waiting_list_expiring: waiting list buyers wanaarifiwa
+      reservation inapokaribia kuexpire, ili waweze kureserve.
 """
 
 import logging
@@ -27,14 +33,22 @@ from .services.reservation import (
     expire_inspection_period,
     expire_reservation,
 )
+from .email_notifications import (
+    send_reservation_expiring_email,
+    send_waiting_list_reservation_email,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
 RESERVATION_WARNING_HOURS = 6
+RESERVATION_5MIN_MINUTES = 5
 
 
+# ============================================================
+# EXPIRE STALE RESERVATIONS
+# ============================================================
 @shared_task(name="transactions.expire_stale_reservations")
 def expire_stale_reservations():
     """
@@ -73,6 +87,9 @@ def expire_stale_reservations():
     return {"expired": expired, "failed": failed}
 
 
+# ============================================================
+# EXPIRE STALE INSPECTIONS
+# ============================================================
 @shared_task(name="transactions.expire_stale_inspections")
 def expire_stale_inspections():
     """
@@ -111,6 +128,9 @@ def expire_stale_inspections():
     return {"expired": expired, "failed": failed}
 
 
+# ============================================================
+# WARN EXPIRING RESERVATIONS (6 hours)
+# ============================================================
 @shared_task(name="transactions.warn_expiring_reservations")
 def warn_expiring_reservations():
     """
@@ -184,6 +204,10 @@ def warn_expiring_reservations():
     logger.info("warn_expiring_reservations: warned=%s", warned)
     return {"warned": warned}
 
+
+# ============================================================
+# EXPIRE UNPAID RESERVATIONS
+# ============================================================
 @shared_task(name="transactions.expire_unpaid_reservations")
 def expire_unpaid_reservations():
     """Cancel PENDING_PAYMENT reservations whose payment window closed."""
@@ -248,3 +272,174 @@ def expire_unpaid_reservations():
             logger.exception("Failed to expire unpaid reservation %s", rid)
     logger.info("expire_unpaid_reservations: cancelled=%s failed=%s", cancelled, failed)
     return {"cancelled": cancelled, "failed": failed}
+
+
+# ============================================================
+# NOTIFY EXPIRING IN 5 MINUTES (MPYA)
+# ============================================================
+@shared_task(name="transactions.notify_expiring_in_5_minutes")
+def notify_expiring_in_5_minutes():
+    """
+    Notify buyer 5 minutes before reservation expires.
+    - In-app notification
+    - Email notification
+    - Skip kama tayari amepewa notification hii (using cache)
+    """
+    from django.core.cache import cache
+
+    now = timezone.now()
+    cutoff = now + timedelta(minutes=RESERVATION_5MIN_MINUTES)
+
+    reservations = list(
+        Reservation.objects
+        .filter(
+            status=Reservation.Status.ACTIVE,
+            expires_at__gte=now,
+            expires_at__lte=cutoff,
+        )
+        .select_related(
+            "transaction",
+            "transaction__buyer",
+            "transaction__listing",
+        )
+    )
+
+    notified = 0
+    for reservation in reservations:
+        cache_key = f"notify_5min_resv_{reservation.id}"
+        if not cache.add(cache_key, "1", timeout=600):
+            continue
+
+        transaction = reservation.transaction
+        minutes_left = max(
+            1,
+            int((reservation.expires_at - now).total_seconds() / 60),
+        )
+
+        # In-app
+        create_notification(
+            recipient=transaction.buyer,
+            notification_type=(
+                Notification.NotificationType.RESERVATION_EXPIRING
+            ),
+            title="Reservation inaisha baada ya dakika 5",
+            message=(
+                f"Reservation yako ya Transaction #{transaction.id} "
+                f"ya '{transaction.listing.title}' inaisha baada ya "
+                f"dakika {minutes_left}. "
+                f"Tafadhali renew ili uendelee kureserve, au cancel."
+            ),
+            priority=Notification.Priority.URGENT,
+            related_object_type="Reservation",
+            related_object_id=reservation.id,
+            action_url="/dashboard/buyer/reservations",
+        )
+
+        # Email
+        try:
+            send_reservation_expiring_email(
+                buyer=transaction.buyer,
+                reservation=reservation,
+                minutes_left=minutes_left,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send email for reservation %s", reservation.id
+            )
+
+        notified += 1
+
+    logger.info("notify_expiring_in_5_minutes: notified=%s", notified)
+    return {"notified": notified}
+
+
+# ============================================================
+# NOTIFY WAITING LIST EXPIRING (MPYA)
+# ============================================================
+@shared_task(name="transactions.notify_waiting_list_expiring")
+def notify_waiting_list_expiring():
+    """
+    Notify waiting list buyers kwamba reservation ya mali wanayosubiri
+    inaisha karibu. Inawaomba wareserve.
+    """
+    from django.core.cache import cache
+    from apps.waiting_list.models import WaitingListEntry
+
+    now = timezone.now()
+    cutoff = now + timedelta(minutes=RESERVATION_5MIN_MINUTES)
+
+    reservations = list(
+        Reservation.objects
+        .filter(
+            status=Reservation.Status.ACTIVE,
+            expires_at__gte=now,
+            expires_at__lte=cutoff,
+        )
+        .select_related(
+            "transaction",
+            "transaction__listing",
+        )
+    )
+
+    notified = 0
+    for reservation in reservations:
+        listing = reservation.transaction.listing
+        cache_key = f"notify_waitlist_expiring_{reservation.id}"
+        if not cache.add(cache_key, "1", timeout=600):
+            continue
+
+        entries = (
+            WaitingListEntry.objects
+            .filter(
+                listing=listing,
+                status__in=["WAITING", "NOTIFIED"],
+            )
+            .select_related("user")
+        )
+
+        for entry in entries:
+            try:
+                create_notification(
+                    recipient=entry.user,
+                    notification_type=(
+                        Notification.NotificationType.WAITING_LIST_AVAILABLE
+                    ),
+                    title=f"Nafasi inakaribia kufunguka: {listing.title}",
+                    message=(
+                        f"Mtu aliyekuwa ameshikilia mali "
+                        f"'{listing.title}' anakaribia kumaliza "
+                        f"muda wake wa reservation. "
+                        f"Bofya kuweka reservation yako mapema."
+                    ),
+                    priority=Notification.Priority.HIGH,
+                    related_object_type="Listing",
+                    related_object_id=listing.id,
+                    action_url=(
+                        f"/dashboard/buyer/deals"
+                        f"?listing={listing.id}&action=reserve"
+                    ),
+                )
+
+                # Email kwa waiting list buyer
+                try:
+                    send_waiting_list_reservation_email(
+                        buyer=entry.user,
+                        listing=listing,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to send waiting-list email to user %s",
+                        entry.user_id,
+                    )
+
+                notified += 1
+            except Exception:
+                logger.exception(
+                    "Failed to notify waiting list user %s",
+                    entry.user_id,
+                )
+
+    logger.info(
+        "notify_waiting_list_expiring: notified=%s", notified,
+    )
+    return {"notified": notified}

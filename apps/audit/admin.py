@@ -7,7 +7,7 @@ from .models import AuditLog
 class AuditLogAdmin(admin.ModelAdmin):
     list_display = (
         "id", "action", "admin_name", "target",
-        "target_id", "created_at",
+        "target_id", "created_at", "details_sw", "details_en",
     )
     list_filter = ("action", "created_at")
     search_fields = ("admin_name", "target", "details")

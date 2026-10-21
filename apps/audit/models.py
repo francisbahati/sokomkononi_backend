@@ -34,9 +34,21 @@ class AuditLog(models.Model):
         blank=True,
         verbose_name="ID ya kitu",
     )
+    # `details` inabaki kwa ajili ya logs za zamani na utafutaji (fallback).
+    # Logs mpya zinahifadhi matoleo mawili ili UI ichague kulingana na lugha ya mfumo.
     details = models.TextField(
         blank=True,
         verbose_name="Maelezo",
+    )
+    details_sw = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Maelezo (Kiswahili)",
+    )
+    details_en = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Details (English)",
     )
 
     ip_address = models.GenericIPAddressField(

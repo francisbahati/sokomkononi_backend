@@ -8,13 +8,15 @@ from .models import AuditLog
 class AuditLogSerializer(serializers.ModelSerializer):
     """
     Full serializer — inarudisha fields zote ikiwemo
-    ip_address, user_agent, request_path, request_method.
+    details_sw, details_en, ip_address, user_agent,
+    request_path, request_method.
     """
     class Meta:
         model = AuditLog
         fields = [
             "id", "action", "admin_user", "admin_name",
-            "target", "target_id", "details",
+            "target", "target_id",
+            "details", "details_sw", "details_en",
             "ip_address", "user_agent", "request_path", "request_method",
             "created_at",
         ]

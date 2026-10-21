@@ -8,6 +8,12 @@ from .models import AuditLog
 from .serializers import AuditLogSerializer
 
 
+def _request_lang(request):
+    """Lugha ya mfumo kutoka kwenye Accept-Language (frontend inaituma kila ombi)."""
+    raw = (request.headers.get("Accept-Language") or "sw").lower()
+    return "en" if raw.startswith("en") else "sw"
+
+
 class IsSuperUser(permissions.BasePermission):
     """Kufuta logs — superuser pekee."""
     def has_permission(self, request, view):
@@ -48,6 +54,8 @@ class AuditLogViewSet(viewsets.GenericViewSet):
                 Q(admin_name__icontains=search)
                 | Q(target__icontains=search)
                 | Q(details__icontains=search)
+                | Q(details_sw__icontains=search)
+                | Q(details_en__icontains=search)
                 | Q(action__icontains=search)
             )
         return qs
@@ -83,7 +91,10 @@ class AuditLogViewSet(viewsets.GenericViewSet):
                 action="audit.deleted",
                 target="AuditLog",
                 target_id=obj_id,
-                details=f"Deleted log: action={obj_action} admin={obj_admin}",
+                details={
+                    "sw": f"Log imefutwa: kitendo={obj_action} msimamizi={obj_admin}",
+                    "en": f"Deleted log: action={obj_action} admin={obj_admin}",
+                },
             )
         except Exception:
             pass
@@ -111,12 +122,16 @@ class AuditLogViewSet(viewsets.GenericViewSet):
                 action="audit.cleared",
                 target="AuditLog",
                 target_id=None,
-                details=f"Cleared {count} audit logs.",
+                details={
+                    "sw": f"Logs {count} zimefutwa.",
+                    "en": f"Cleared {count} audit logs.",
+                },
             )
         except Exception:
             pass
 
+        en = _request_lang(request) == "en"
         return Response({
             "deleted": count,
-            "detail": f"Logs {count} zimefutwa.",
+            "detail": f"Cleared {count} logs." if en else f"Logs {count} zimefutwa.",
         })

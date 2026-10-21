@@ -1,4 +1,6 @@
 # apps/listings/serializers_fee_rules.py
+from decimal import Decimal
+
 from django.utils.text import slugify
 from rest_framework import serializers
 
@@ -45,8 +47,6 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        from decimal import Decimal
-
         fee_mode = (attrs.get("fee_mode") or "").upper()
         flat_fee = attrs.get("flat_fee")
         percentage = attrs.get("percentage")
@@ -62,41 +62,59 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
             if not fee_mode:
                 fee_mode = (instance.fee_mode or "").upper()
 
+        # Default to FLAT if fee_mode not provided
+        if not fee_mode:
+            fee_mode = "FLAT"
+
         # Enforce a positive fee for the active mode.
         if fee_mode == "FLAT":
             try:
-                if Decimal(str(flat_fee or 0)) <= Decimal("0"):
-                    raise serializers.ValidationError({
-                        "flat_fee": (
-                            "Ada lazima iwe kubwa kuliko sifuri. "
-                            "Kila listing inatozwa ada."
-                        )
-                    })
+                flat_val = Decimal(str(flat_fee or 0))
             except Exception:
                 raise serializers.ValidationError({
                     "flat_fee": "Ada si sahihi."
                 })
+            if flat_val <= 0:
+                raise serializers.ValidationError({
+                    "flat_fee": (
+                        "Ada lazima iwe kubwa kuliko sifuri. "
+                        "Kila listing inatozwa ada."
+                    )
+                })
         elif fee_mode == "PERCENTAGE":
             try:
-                if Decimal(str(percentage or 0)) <= Decimal("0"):
-                    raise serializers.ValidationError({
-                        "percentage": (
-                            "Asilimia lazima iwe kubwa kuliko sifuri. "
-                            "Kila listing inatozwa ada."
-                        )
-                    })
+                pct_val = Decimal(str(percentage or 0))
             except Exception:
                 raise serializers.ValidationError({
                     "percentage": "Asilimia si sahihi."
                 })
+            if pct_val <= 0:
+                raise serializers.ValidationError({
+                    "percentage": (
+                        "Asilimia lazima iwe kubwa kuliko sifuri. "
+                        "Kila listing inatozwa ada."
+                    )
+                })
+
+        # Ensure category is set when creating
+        if instance is None and not attrs.get("category"):
+            raise serializers.ValidationError({
+                "category": "Category inahitajika."
+            })
 
         return attrs
 
     def _ensure_category_slug(self, validated_data, instance=None):
         category = validated_data.get("category")
-        # If `category` (FK id) is supplied, always mirror it to category_slug.
+        # If `category` (FK id) is supplied, mirror it to category_slug.
+        # `category_slug` is read_only in serializer, but we set it
+        # directly on the model so it lands in the DB.
         if category is not None:
             validated_data["category_slug"] = category.slug
+            return validated_data
+
+        if instance is not None and instance.category is not None:
+            validated_data["category_slug"] = instance.category.slug
             return validated_data
 
         if not validated_data.get("category_slug"):

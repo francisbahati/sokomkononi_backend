@@ -20,7 +20,6 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 
 
 def _log(request, action, target="", target_id=None, details=""):
-    """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -59,8 +58,11 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
     # ── CREATE ──────────────────────────────────────────────
     def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
         try:
-            response = super().create(request, *args, **kwargs)
+            self.perform_create(serializer)
         except IntegrityError as exc:
             msg = str(exc)
             if "unique_active_rule_per_category" in msg:
@@ -80,21 +82,24 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=drf_status.HTTP_400_BAD_REQUEST,
             )
 
-        if response.status_code == drf_status.HTTP_201_CREATED:
-            data = response.data or {}
-            name = (
-                data.get("name")
-                or data.get("category_slug")
-                or data.get("category")
-                or "—"
-            )
-            _log(
-                request,
-                action="fee.created",
-                target="ListingFeeRule",
-                target_id=data.get("id"),
-                details=f"Created listing fee rule: {name}",
-            )
+        response = Response(serializer.data, status=drf_status.HTTP_201_CREATED)
+        headers = self.get_success_headers(serializer.data)
+        response.headers.update(headers)
+
+        data = response.data or {}
+        name = (
+            data.get("name")
+            or data.get("category_slug")
+            or data.get("category")
+            or "—"
+        )
+        _log(
+            request,
+            action="fee.created",
+            target="ListingFeeRule",
+            target_id=data.get("id"),
+            details=f"Created listing fee rule: {name}",
+        )
 
         return response
 
@@ -103,8 +108,15 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         instance = self.get_object()
         old_snapshot = self._snapshot(instance)
 
+        serializer = self.get_serializer(
+            instance,
+            data=request.data,
+            partial=kwargs.pop("partial", False),
+        )
+        serializer.is_valid(raise_exception=True)
+
         try:
-            response = super().update(request, *args, **kwargs)
+            self.perform_update(serializer)
         except IntegrityError as exc:
             msg = str(exc)
             if "unique_active_rule_per_category" in msg:
@@ -123,28 +135,21 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=drf_status.HTTP_400_BAD_REQUEST,
             )
 
-        if response.status_code in (
-            drf_status.HTTP_200_OK,
-            drf_status.HTTP_202_ACCEPTED,
-        ):
-            try:
-                instance.refresh_from_db()
-                diff = self._diff(old_snapshot, self._snapshot(instance))
-            except Exception:
-                diff = "diff haipatikani"
-            _log(
-                request,
-                action="fee.updated",
-                target="ListingFeeRule",
-                target_id=instance.id,
-                details=(
-                    f"Updated listing fee rule: "
-                    f"{instance.name or instance.category_slug or '—'} "
-                    f"({diff})"
-                ),
-            )
+        instance.refresh_from_db()
+        diff = self._diff(old_snapshot, self._snapshot(instance))
+        _log(
+            request,
+            action="fee.updated",
+            target="ListingFeeRule",
+            target_id=instance.id,
+            details=(
+                f"Updated listing fee rule: "
+                f"{instance.name or instance.category_slug or '—'} "
+                f"({diff})"
+            ),
+        )
 
-        return response
+        return Response(serializer.data)
 
     def partial_update(self, request, *args, **kwargs):
         kwargs["partial"] = True

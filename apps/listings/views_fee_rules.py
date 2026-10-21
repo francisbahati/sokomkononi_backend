@@ -1,4 +1,5 @@
 from django.db import IntegrityError
+from django_filters.rest_framework import DjangoFilterBackend   # ⬅️ ONGEZA
 from rest_framework import permissions, status as drf_status, viewsets
 from rest_framework.response import Response
 
@@ -40,6 +41,10 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     serializer_class = ListingFeeRuleSerializer
     permission_classes = [IsAdminOrReadOnly]
     staff_can_restore_any = True
+
+    # ✅ FIX: Ongeza filter backends ili ?category=X ifanye kazi
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["category", "is_active", "is_deleted"]
 
     def get_queryset(self):
         qs = ListingFeeRule.objects.all()

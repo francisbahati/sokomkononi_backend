@@ -78,3 +78,5 @@ sentry-sdk==2.19.2
 
 # --- 2FA ---
 pyotp==2.9.0
+
+django-filter>=23.0

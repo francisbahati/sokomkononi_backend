@@ -17,23 +17,9 @@ from .services.listing_fee import calculate_listing_fee
 
 
 # ============================================================================
-# RESERVATION COUNT — mara ambazo tangazo limewekewa reservation
+# RESERVATION COUNT
 # ============================================================================
-
 def _reserved_times(obj):
-    """
-    Idadi ya mara tangazo hili limewekewa reservation (zilizolipwa au
-    kuwashwa; pending-bila-malipo hazihesabiwi).
-
-    Kwa orodha kubwa, annotate kwenye queryset ya view ili kuepuka
-    query moja kwa kila tangazo:
-        .annotate(reserved_times_annot=Count(
-            "transactions__reservation",
-            filter=Q(transactions__reservation__payment_status__in=["PAID", "REFUNDED"])
-                 | Q(transactions__reservation__status__in=["ACTIVE", "EXPIRED", "COMPLETED"]),
-            distinct=True,
-        ))
-    """
     cached = getattr(obj, "reserved_times_annot", None)
     if cached is not None:
         return cached
@@ -61,7 +47,6 @@ def _reserved_times(obj):
 # ============================================================================
 # LISTING IMAGE
 # ============================================================================
-
 class ListingImageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
     thumb = serializers.SerializerMethodField()
@@ -117,29 +102,13 @@ class ListingImageSerializer(serializers.ModelSerializer):
 class ListingCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = [
-            "id",
-            "name",
-            "slug",
-        ]
+        fields = ["id", "name", "slug"]
 
 
 # ============================================================================
 # HELPER — seller contact visibility
 # ============================================================================
-
 def _seller_contact_visible(request, seller, field_name):
-    """
-    Rudisha True kama mwombaji anaruhusiwa kuona contact ya seller.
-
-    field_name: "phone" au "email".
-
-    Sheria:
-      - Mmiliki (seller mwenyewe) — ona kila kitu
-      - Staff — ona kila kitu
-      - Wengine — ona TU kama seller.preferences.show_{field_name} == True
-        (au kama hakuna prefs, default ni kuonyesha)
-    """
     if not seller:
         return False
 
@@ -162,27 +131,17 @@ def _seller_contact_visible(request, seller, field_name):
 # ============================================================================
 # LISTING LIST
 # ============================================================================
-
 class ListingListSerializer(serializers.ModelSerializer):
-    seller_name = serializers.CharField(
-        source="seller.name",
-        read_only=True,
-    )
-
+    seller_name = serializers.CharField(source="seller.name", read_only=True)
     seller_phone = serializers.SerializerMethodField()
     seller_email = serializers.SerializerMethodField()
-
-    category = ListingCategorySerializer(
-        read_only=True,
-    )
-
+    category = ListingCategorySerializer(read_only=True)
     primary_image = serializers.SerializerMethodField()
     status_label = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
     payment_label = serializers.SerializerMethodField()
     fee_amount = serializers.SerializerMethodField()
     is_paid = serializers.SerializerMethodField()
-    payment_status = serializers.SerializerMethodField()
     leading_expires_at = serializers.DateTimeField(
         source="leading_until", read_only=True,
     )
@@ -205,7 +164,6 @@ class ListingListSerializer(serializers.ModelSerializer):
             "payment_label",
             "fee_amount",
             "is_paid",
-            "payment_status",
             "leading_expires_at",
             "is_featured",
             "is_boosted",
@@ -281,202 +239,95 @@ class ListingListSerializer(serializers.ModelSerializer):
             image = obj.images.order_by("ordering", "created_at").first()
         if not image:
             return None
-        # Prefer the WebP variant; fall back through sizes then original.
         for attr in ("card", "detail", "image"):
             f = getattr(image, attr, None)
             if f:
                 try:
                     url = f.url
                     request = self.context.get("request")
-                    return (
-                        request.build_absolute_uri(url)
-                        if request else url
-                    )
+                    return request.build_absolute_uri(url) if request else url
                 except Exception:
                     continue
         return None
 
 
+# ============================================================================
+# PROPERTY / LAND / VEHICLE / BUSINESS / EQUIPMENT DETAILS
+# ============================================================================
 class PropertyDetailsSerializer(serializers.ModelSerializer):
     class Meta:
         model = PropertyDetails
         fields = [
-            "id",
-            "listing",
-            "property_type",
-            "bedrooms",
-            "bathrooms",
-            "floors",
-            "area_sqm",
-            "furnished",
-            "has_electricity",
-            "has_water",
-            "has_parking",
-            "ownership_document",
+            "id", "listing", "property_type", "bedrooms", "bathrooms",
+            "floors", "area_sqm", "furnished", "has_electricity",
+            "has_water", "has_parking", "ownership_document",
         ]
-        read_only_fields = [
-            "id",
-            "listing",
-        ]
+        read_only_fields = ["id", "listing"]
 
-
-# ============================================================================
-# LAND DETAILS
-# ============================================================================
 
 class LandDetailsSerializer(serializers.ModelSerializer):
     class Meta:
         model = LandDetails
         fields = [
-            "id",
-            "listing",
-            "land_type",
-            "size",
-            "size_unit",
-            "region",
-            "district",
-            "ward",
-            "village_or_street",
-            "title_document",
-            "surveyed",
-            "road_access",
-            "electricity_nearby",
-            "water_nearby",
+            "id", "listing", "land_type", "size", "size_unit",
+            "region", "district", "ward", "village_or_street",
+            "title_document", "surveyed", "road_access",
+            "electricity_nearby", "water_nearby",
         ]
-        read_only_fields = [
-            "id",
-            "listing",
-        ]
+        read_only_fields = ["id", "listing"]
 
-
-# ============================================================================
-# VEHICLE DETAILS
-# ============================================================================
 
 class VehicleDetailsSerializer(serializers.ModelSerializer):
     class Meta:
         model = VehicleDetails
         fields = [
-            "id",
-            "listing",
-            "make",
-            "model",
-            "year",
-            "vehicle_type",
-            "fuel_type",
-            "transmission",
-            "mileage_km",
-            "engine_capacity_cc",
-            "color",
-            "seats",
-            "registration_number",
-            "has_logbook",
-            "has_valid_insurance",
+            "id", "listing", "make", "model", "year", "vehicle_type",
+            "fuel_type", "transmission", "mileage_km", "engine_capacity_cc",
+            "color", "seats", "registration_number",
+            "has_logbook", "has_valid_insurance",
         ]
-        read_only_fields = [
-            "id",
-            "listing",
-        ]
+        read_only_fields = ["id", "listing"]
 
-
-# ============================================================================
-# BUSINESS DETAILS
-# ============================================================================
 
 class BusinessDetailsSerializer(serializers.ModelSerializer):
     class Meta:
         model = BusinessDetails
         fields = [
-            "id",
-            "listing",
-            "business_type",
-            "years_operating",
-            "number_of_employees",
-            "monthly_revenue",
-            "monthly_expenses",
-            "has_business_license",
-            "has_tin",
-            "premises_included",
-            "stock_included",
-            "reason_for_sale",
+            "id", "listing", "business_type", "years_operating",
+            "number_of_employees", "monthly_revenue", "monthly_expenses",
+            "has_business_license", "has_tin", "premises_included",
+            "stock_included", "reason_for_sale",
         ]
-        read_only_fields = [
-            "id",
-            "listing",
-        ]
+        read_only_fields = ["id", "listing"]
 
-
-# ============================================================================
-# EQUIPMENT DETAILS
-# ============================================================================
 
 class EquipmentDetailsSerializer(serializers.ModelSerializer):
     class Meta:
         model = EquipmentDetails
         fields = [
-            "id",
-            "listing",
-            "equipment_type",
-            "manufacturer",
-            "model",
-            "year",
-            "condition",
-            "operating_hours",
-            "fuel_type",
-            "engine_capacity",
-            "weight_kg",
-            "serial_number",
+            "id", "listing", "equipment_type", "manufacturer", "model",
+            "year", "condition", "operating_hours", "fuel_type",
+            "engine_capacity", "weight_kg", "serial_number",
             "country_of_origin",
         ]
-        read_only_fields = [
-            "id",
-            "listing",
-        ]
+        read_only_fields = ["id", "listing"]
 
 
 # ============================================================================
 # LISTING DETAIL
 # ============================================================================
-
 class ListingDetailSerializer(serializers.ModelSerializer):
-    seller_name = serializers.CharField(
-        source="seller.name",
-        read_only=True,
-    )
-
+    seller_name = serializers.CharField(source="seller.name", read_only=True)
     seller_phone = serializers.SerializerMethodField()
     seller_email = serializers.SerializerMethodField()
+    category = ListingCategorySerializer(read_only=True)
+    images = ListingImageSerializer(many=True, read_only=True)
+    property_details = PropertyDetailsSerializer(read_only=True)
+    land_details = LandDetailsSerializer(read_only=True)
+    vehicle_details = VehicleDetailsSerializer(read_only=True)
+    business_details = BusinessDetailsSerializer(read_only=True)
+    equipment_details = EquipmentDetailsSerializer(read_only=True)
 
-    category = ListingCategorySerializer(
-        read_only=True,
-    )
-
-    images = ListingImageSerializer(
-        many=True,
-        read_only=True,
-    )
-
-    property_details = PropertyDetailsSerializer(
-        read_only=True,
-    )
-
-    land_details = LandDetailsSerializer(
-        read_only=True,
-    )
-
-    vehicle_details = VehicleDetailsSerializer(
-        read_only=True,
-    )
-
-    business_details = BusinessDetailsSerializer(
-        read_only=True,
-    )
-
-    equipment_details = EquipmentDetailsSerializer(
-        read_only=True,
-    )
-
-    fee_required = serializers.SerializerMethodField()
     fee_amount = serializers.SerializerMethodField()
     fee_status = serializers.SerializerMethodField()
     is_paid = serializers.SerializerMethodField()
@@ -504,7 +355,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "longitude",
             "address_text",
             "attributes",
-            "fee_required",
             "fee_amount",
             "fee_status",
             "is_paid",
@@ -530,33 +380,7 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-
-        read_only_fields = [
-            "id",
-            "seller",
-            "seller_name",
-            "seller_phone",
-            "seller_email",
-            "category",
-            "status",
-            "is_featured",
-            "is_boosted",
-            "boosted_until",
-            "views_count",
-            "approved_by",
-            "approved_at",
-            "rejected_by",
-            "rejected_at",
-            "rejection_reason",
-            "images",
-            "property_details",
-            "land_details",
-            "vehicle_details",
-            "business_details",
-            "equipment_details",
-            "created_at",
-            "updated_at",
-        ]
+        read_only_fields = fields
 
     def get_reservation_count(self, obj):
         return _reserved_times(obj)
@@ -573,27 +397,19 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             return None
         return getattr(obj.seller, "email", None)
 
-    def get_fee_required(self, obj):
-        from .services.listing_moderation import _is_listing_fee_required_for
-        try:
-            return _is_listing_fee_required_for(obj)
-        except Exception:
-            return False
-
     def get_fee_amount(self, obj):
-        fee = getattr(obj, "listing_fee", None)
-        if fee is None:
-            try:
-                from .services.listing_fee import calculate_listing_fee
+        try:
+            fee = getattr(obj, "listing_fee", None)
+            if fee is None:
                 cat = obj.category if obj.category_id else None
                 slug = getattr(cat, "slug", None)
                 result = calculate_listing_fee(
                     obj.price, category_slug=slug, category=cat,
                 )
                 return str(result["fee_amount"])
-            except Exception:
-                return None
-        return str(fee.amount)
+            return str(fee.amount)
+        except Exception:
+            return None
 
     def get_fee_status(self, obj):
         fee = getattr(obj, "listing_fee", None)
@@ -613,10 +429,10 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             return None
         return {"id": s.id, "name": getattr(s, "name", "") or ""}
 
+
 # ============================================================================
 # LISTING WRITE
 # ============================================================================
-
 class ListingWriteSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.filter(is_active=True),
@@ -627,15 +443,8 @@ class ListingWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Listing
         fields = [
-            "category",
-            "title",
-            "description",
-            "price",
-            "location",
-            "latitude",
-            "longitude",
-            "address_text",
-            "attributes",
+            "category", "title", "description", "price", "location",
+            "latitude", "longitude", "address_text", "attributes",
         ]
 
     def to_internal_value(self, data):
@@ -692,12 +501,11 @@ class ListingWriteSerializer(serializers.ModelSerializer):
         return value
 
 
+# ============================================================================
+# LISTING FEE
+# ============================================================================
 class ListingFeeSerializer(serializers.ModelSerializer):
-    listing_id = serializers.IntegerField(
-        source="listing.id",
-        read_only=True,
-    )
-
+    listing_id = serializers.IntegerField(source="listing.id", read_only=True)
     currency = serializers.SerializerMethodField()
     is_disabled = serializers.SerializerMethodField()
     amount_display = serializers.SerializerMethodField()
@@ -708,60 +516,25 @@ class ListingFeeSerializer(serializers.ModelSerializer):
         decimal_places=2,
         read_only=True,
     )
-
-    listing_title = serializers.CharField(
-        source="listing.title",
-        read_only=True,
-    )
-
+    listing_title = serializers.CharField(source="listing.title", read_only=True)
     listing_price = serializers.DecimalField(
         source="listing.price",
         max_digits=15,
         decimal_places=2,
         read_only=True,
     )
-
     fee_percentage = serializers.SerializerMethodField()
 
     class Meta:
         model = ListingFee
         fields = [
-            "id",
-            "listing_id",
-            "listing_title",
-            "listing_price",
-            "fee_percentage",
-            "amount",
-            "fee_amount",
-            "amount_display",
-            "currency",
-            "is_disabled",
-            "pay_endpoint",
-            "payment_status",
-            "payment_reference",
-            "paid_at",
-            "created_at",
-            "updated_at",
+            "id", "listing_id", "listing_title", "listing_price",
+            "fee_percentage", "amount", "fee_amount", "amount_display",
+            "currency", "is_disabled", "pay_endpoint",
+            "payment_status", "payment_reference", "paid_at",
+            "created_at", "updated_at",
         ]
-
-        read_only_fields = [
-            "id",
-            "listing_id",
-            "listing_title",
-            "listing_price",
-            "fee_percentage",
-            "amount",
-            "fee_amount",
-            "amount_display",
-            "currency",
-            "is_disabled",
-            "pay_endpoint",
-            "payment_status",
-            "payment_reference",
-            "paid_at",
-            "created_at",
-            "updated_at",
-        ]
+        read_only_fields = fields
 
     def get_fee_percentage(self, obj):
         return obj.percentage
@@ -783,9 +556,8 @@ class ListingFeeSerializer(serializers.ModelSerializer):
 
 
 # ============================================================================
-# LISTING FEE PAYMENT SERIALIZER
+# LISTING FEE PAYMENT
 # ============================================================================
-
 class ListingFeePaymentSerializer(serializers.Serializer):
     payment_reference = serializers.CharField(
         max_length=150,
@@ -795,96 +567,61 @@ class ListingFeePaymentSerializer(serializers.Serializer):
 
     def validate_payment_reference(self, value):
         value = value.strip()
-
         if not value:
             raise serializers.ValidationError(
                 "Payment reference inahitajika."
             )
-
         return value
 
 
 # ============================================================================
 # LISTING MODERATION — REJECTION
 # ============================================================================
-
 class ListingRejectionSerializer(serializers.Serializer):
     rejection_reason = serializers.CharField(
         required=True,
         allow_blank=False,
         trim_whitespace=True,
-        help_text="Sababu ya kukataa tangazo.",
     )
 
     def validate_rejection_reason(self, value):
         value = value.strip()
-
         if not value:
             raise serializers.ValidationError(
                 "Sababu ya kukataa tangazo inahitajika."
             )
-
         if len(value) < 5:
             raise serializers.ValidationError(
                 "Sababu ya kukataa lazima iwe na angalau herufi 5."
             )
-
         return value
 
 
 # ============================================================================
 # ADMIN PENDING LISTING
 # ============================================================================
-
 class AdminPendingListingSerializer(serializers.ModelSerializer):
-    seller_name = serializers.CharField(
-        source="seller.name",
-        read_only=True,
-    )
-
-    seller_email = serializers.CharField(
-        source="seller.email",
-        read_only=True,
-    )
-
-    category = ListingCategorySerializer(
-        read_only=True,
-    )
-
+    seller_name = serializers.CharField(source="seller.name", read_only=True)
+    seller_email = serializers.CharField(source="seller.email", read_only=True)
+    category = ListingCategorySerializer(read_only=True)
     primary_image = serializers.SerializerMethodField()
-
+    status_label = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
+    payment_label = serializers.SerializerMethodField()
     fee_status = serializers.SerializerMethodField()
-
     fee_amount = serializers.SerializerMethodField()
+    is_paid = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
         fields = [
-            "id",
-            "title",
-            "description",
-            "price",
-            "location",
-            "latitude",
-            "longitude",
-            "address_text",
-            "attributes",
-            "status",
-            "seller",
-            "seller_name",
-            "seller_email",
-            "category",
-            "primary_image",
-            "fee_status",
-            "fee_amount",
-            "status_label",
-            "payment_status",
-            "payment_label",
-            "is_paid",
-            "created_at",
-            "updated_at",
+            "id", "title", "description", "price", "location",
+            "latitude", "longitude", "address_text", "attributes",
+            "status", "status_label", "seller", "seller_name",
+            "seller_email", "category", "primary_image",
+            "payment_status", "payment_label", "fee_status",
+            "fee_amount", "is_paid", "created_at", "updated_at",
         ]
-
         read_only_fields = fields
 
     def get_status_label(self, obj):
@@ -918,9 +655,13 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
         }
         return labels.get(fee.payment_status, fee.payment_status)
 
+    def get_fee_status(self, obj):
+        fee = getattr(obj, "listing_fee", None)
+        return fee.payment_status if fee else None
+
     def get_fee_amount(self, obj):
         fee = getattr(obj, "listing_fee", None)
-        return str(fee.amount) if fee else None
+        return fee.amount if fee else None
 
     def get_is_paid(self, obj):
         fee = getattr(obj, "listing_fee", None)
@@ -934,25 +675,13 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
             image = obj.images.order_by("ordering", "created_at").first()
         if not image:
             return None
-        # Prefer the WebP variant; fall back through sizes then original.
         for attr in ("card", "detail", "image"):
             f = getattr(image, attr, None)
             if f:
                 try:
                     url = f.url
                     request = self.context.get("request")
-                    return (
-                        request.build_absolute_uri(url)
-                        if request else url
-                    )
+                    return request.build_absolute_uri(url) if request else url
                 except Exception:
                     continue
         return None
-
-    def get_fee_status(self, obj):
-        fee = getattr(obj, "listing_fee", None)
-        return fee.payment_status if fee else None
-
-    def get_fee_amount(self, obj):
-        fee = getattr(obj, "listing_fee", None)
-        return fee.amount if fee else None

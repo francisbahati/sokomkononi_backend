@@ -1,4 +1,6 @@
-from rest_framework import permissions, viewsets
+from django.db import IntegrityError
+from rest_framework import permissions, status as drf_status, viewsets
+from rest_framework.response import Response
 
 from apps.core.mixins import SoftDeleteViewSetMixin
 
@@ -17,9 +19,6 @@ class IsAdminOrReadOnly(permissions.BasePermission):
         )
 
 
-# ============================================================
-# AUDIT LOG HELPER
-# ============================================================
 def _log(request, action, target="", target_id=None, details=""):
     """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
     try:
@@ -58,12 +57,28 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             and self.request.user.is_staff
         )
 
-    # ══════════════════════════════════════════════════════════
-    # CREATE — log fee.created
-    # ══════════════════════════════════════════════════════════
+    # ── CREATE ──────────────────────────────────────────────
     def create(self, request, *args, **kwargs):
-        from rest_framework import status as drf_status
-        response = super().create(request, *args, **kwargs)
+        try:
+            response = super().create(request, *args, **kwargs)
+        except IntegrityError as exc:
+            msg = str(exc)
+            if "unique_active_rule_per_category" in msg:
+                return Response(
+                    {
+                        "detail": (
+                            "Kuna kanuni ya ada (fee rule) tayari inatumika "
+                            "kwa category hii. Zima au futa ile ya zamani kwanza, "
+                            "kisha uunde mpya."
+                        ),
+                        "code": "DUPLICATE_ACTIVE_RULE",
+                    },
+                    status=drf_status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"detail": "Imeshindwa kuunda fee rule."},
+                status=drf_status.HTTP_400_BAD_REQUEST,
+            )
 
         if response.status_code == drf_status.HTTP_201_CREATED:
             data = response.data or {}
@@ -83,23 +98,35 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         return response
 
-    # ══════════════════════════════════════════════════════════
-    # UPDATE / PARTIAL_UPDATE — log fee.updated
-    # ══════════════════════════════════════════════════════════
+    # ── UPDATE / PARTIAL_UPDATE ─────────────────────────────
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         old_snapshot = self._snapshot(instance)
 
-        response = super().update(request, *args, **kwargs)
+        try:
+            response = super().update(request, *args, **kwargs)
+        except IntegrityError as exc:
+            msg = str(exc)
+            if "unique_active_rule_per_category" in msg:
+                return Response(
+                    {
+                        "detail": (
+                            "Kuna kanuni ya ada (fee rule) tayari inatumika "
+                            "kwa category hii. Zima au futa ile ya zamani kwanza."
+                        ),
+                        "code": "DUPLICATE_ACTIVE_RULE",
+                    },
+                    status=drf_status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"detail": "Imeshindwa kusasisha fee rule."},
+                status=drf_status.HTTP_400_BAD_REQUEST,
+            )
 
-        from rest_framework import status as drf_status
         if response.status_code in (
             drf_status.HTTP_200_OK,
             drf_status.HTTP_202_ACCEPTED,
         ):
-            # `super().update()` inapakia kitu chake kipya kutoka database,
-            # kwa hiyo `instance` yetu ni ya zamani — i-refresh la sivyo
-            # diff itasema "no change" kila mara.
             try:
                 instance.refresh_from_db()
                 diff = self._diff(old_snapshot, self._snapshot(instance))
@@ -111,7 +138,8 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 target="ListingFeeRule",
                 target_id=instance.id,
                 details=(
-                    f"Updated listing fee rule: {instance.name or instance.category_slug or '—'} "
+                    f"Updated listing fee rule: "
+                    f"{instance.name or instance.category_slug or '—'} "
                     f"({diff})"
                 ),
             )
@@ -119,19 +147,12 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         return response
 
     def partial_update(self, request, *args, **kwargs):
-        # MUHIMU: PATCH lazima iwe `partial=True`. DRF inaiweka hivi kwa
-        # default; kuiandika upya bila hiyo kunafanya serializer idai fields
-        # ZOTE zinazohitajika, kwa hiyo toggle ya `is_active` peke yake
-        # inarudi 400 Bad Request.
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
 
-    # ══════════════════════════════════════════════════════════
-    # DESTROY — log fee.deleted
-    # ══════════════════════════════════════════════════════════
+    # ── DESTROY ─────────────────────────────────────────────
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-
         rule_id = instance.id
         rule_name = (
             instance.name
@@ -142,7 +163,6 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         response = super().destroy(request, *args, **kwargs)
 
-        from rest_framework import status as drf_status
         if response.status_code in (
             drf_status.HTTP_204_NO_CONTENT,
             drf_status.HTTP_200_OK,
@@ -157,12 +177,9 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         return response
 
-    # ══════════════════════════════════════════════════════════
-    # HELPERS
-    # ══════════════════════════════════════════════════════════
+    # ── HELPERS ─────────────────────────────────────────────
     @staticmethod
     def _snapshot(instance):
-        """Chukua snapshot ya fields za fee kwa diff."""
         return {
             "fee_mode": getattr(instance, "fee_mode", None),
             "flat_fee": str(getattr(instance, "flat_fee", "") or ""),
@@ -174,7 +191,6 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
     @staticmethod
     def _diff(old, new):
-        """Rudisha mabadiliko kama string fupi."""
         changes = []
         for key in old:
             if old[key] != new[key]:

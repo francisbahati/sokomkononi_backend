@@ -232,7 +232,9 @@ else:
         "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
     }
 
-# ---------------- CORS ----------------
+# ============================================================
+# CORS
+# ============================================================
 _cors_default = (
     "http://localhost:3000,http://localhost:5173,"
     "https://sokomkononi.co.tz,https://www.sokomkononi.co.tz"
@@ -243,13 +245,20 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", _cors_default)
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
 CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
 
+# ✅ FIX: "accept-language" ni MUHIMU — frontend inatuma hii kwa KILA request
+#    kupitia api/client.js. Bila hii kwenye CORS_ALLOW_HEADERS, CORS preflight
+#    inashindwa kwa requests zote zenye Accept-Language (notifications, auth/me,
+#    categories, fee-rules, n.k.).
 CORS_ALLOW_HEADERS = [
     "accept",
     "accept-encoding",
+    "accept-language",          # ⬅️ MUHIMU — frontend inatuma hii
     "authorization",
+    "cache-control",
     "content-type",
     "dnt",
     "origin",
+    "pragma",
     "user-agent",
     "x-csrftoken",
     "x-requested-with",
@@ -259,6 +268,7 @@ CORS_ALLOW_HEADERS = [
     "x-request-id",
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
+CORS_ALLOW_ALL_ORIGINS = False
 
 # ============================================================
 # CSRF TRUSTED ORIGINS
@@ -313,9 +323,6 @@ REST_FRAMEWORK = {
         "refresh": "60/min",
         "verification_request": "5/hour",
     },
-    "DEFAULT_FILTER_BACKENDS": (
-        "django_filters.rest_framework.DjangoFilterBackend",
-    ),
 }
 
 SIMPLE_JWT = {
@@ -465,14 +472,13 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute="*/5"),
         "kwargs": {"since_hours": 720},
     },
-     "notify-expiring-in-5-minutes": {
+    "notify-expiring-in-5-minutes": {
         "task": "transactions.notify_expiring_in_5_minutes",
-        "schedule": crontab(minute="*/2"), 
+        "schedule": crontab(minute="*/2"),
     },
-
     "notify-waiting-list-expiring": {
         "task": "transactions.notify_waiting_list_expiring",
-        "schedule": crontab(minute="*/2"),  
+        "schedule": crontab(minute="*/2"),
     },
 }
 

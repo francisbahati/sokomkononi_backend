@@ -244,8 +244,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
         if not reservation:
             raise ValidationError("Transaction hii haina Reservation.")
 
-        # Idempotent: already paid (e.g. the fee is disabled, so the
-        # reservation was activated as soon as it was created).
+
         if reservation.payment_status == Reservation.PaymentStatus.PAID:
             return Response(
                 ReservationSerializer(

@@ -44,7 +44,7 @@ class Bundle(models.Model):
         verbose_name="Bei",
     )
 
-    # Either an integer or an object {"listing": 10, "boost": 3, ...}
+    
     credits = models.JSONField(default=dict, blank=True, verbose_name="Credits")
 
     validity_days = models.PositiveIntegerField(

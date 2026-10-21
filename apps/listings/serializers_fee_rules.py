@@ -18,10 +18,9 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(
         source="category.name", read_only=True, allow_null=True,
     )
-    category_slug = serializers.CharField(
-        source="category.slug", read_only=True,
-        allow_null=True, required=False,
-    )
+    # ✅ FIX: Tumia SerializerMethodField ili kurudisha slug kila mara
+    # (kutoka category FK au category_slug legacy field)
+    category_slug = serializers.SerializerMethodField()
 
     class Meta:
         model = ListingFeeRule
@@ -45,6 +44,18 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
             "id", "category_name", "category_slug",
             "created_at", "updated_at",
         ]
+
+    def get_category_slug(self, obj):
+        """
+        Return slug kutoka category FK ikiwa ipo, vinginevyo
+        tumia `category_slug` (legacy field).
+        Hii inahakikisha frontend inapata slug kila mara.
+        """
+        if not obj:
+            return ""
+        if obj.category_id and obj.category:
+            return obj.category.slug or ""
+        return obj.category_slug or ""
 
     def validate(self, attrs):
         fee_mode = (attrs.get("fee_mode") or "").upper()
@@ -107,8 +118,8 @@ class ListingFeeRuleSerializer(serializers.ModelSerializer):
     def _ensure_category_slug(self, validated_data, instance=None):
         category = validated_data.get("category")
         # If `category` (FK id) is supplied, mirror it to category_slug.
-        # `category_slug` is read_only in serializer, but we set it
-        # directly on the model so it lands in the DB.
+        # `category_slug` is read_only in serializer output, but we set it
+        # directly on the model so it lands in the DB (legacy compat).
         if category is not None:
             validated_data["category_slug"] = category.slug
             return validated_data

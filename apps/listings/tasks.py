@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 @shared_task(name="listings.expire_stale_listings")
 def expire_stale_listings():
-    """Archive LIVE listings older than PlatformPolicy.listing_lifetime_days."""
+    """
+    Mark LIVE listings older than PlatformPolicy.listing_lifetime_days
+    as EXPIRED (not ARCHIVED — archived is reserved for manual admin action).
+    """
     try:
         from apps.system_settings.models import PlatformPolicy
         days = PlatformPolicy.get_solo().listing_lifetime_days
@@ -24,8 +27,8 @@ def expire_stale_listings():
         status=Listing.Status.LIVE,
         created_at__lt=cutoff,
     ).update(
-        status=Listing.Status.ARCHIVED,
+        status=Listing.Status.EXPIRED,   # ⬅️ FIX: EXPIRED, sio ARCHIVED
         updated_at=timezone.now(),
     )
-    logger.info("expire_stale_listings: archived=%s", count)
-    return {"archived": count}
+    logger.info("expire_stale_listings: expired=%s", count)
+    return {"expired": count}

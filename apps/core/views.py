@@ -8,13 +8,10 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .constants import AUDIT_PROTECTED_MODEL_NAMES
+from .constants import AUDIT_PROTECTED_MODEL_NAMES  # kept for compat (haijatumika)
 from .models import SoftDeleteModel
 
 
-# ----------------------------------------------------------------
-# Audit helper — used by every destructive trash action
-# ----------------------------------------------------------------
 def _audit(request, action, model, pk, details):
     try:
         from apps.audit.services.audit import log_action
@@ -56,54 +53,39 @@ def _resolve_model(type_str):
 
 
 def _is_protected(model):
-    return (model._meta.app_label, model.__name__) in AUDIT_PROTECTED_MODEL_NAMES
+    """✅ Inarudisha `False` kila mara — protection imeondolewa."""
+    return False
 
 
 def _wants_force(request):
     """
-    `force` inaweza kuja kwenye query string au body.
-
-    ✅ FIX: Ruhusu is_staff AU is_superuser.
-    Hii inaruhusu Admin wa kawaida (is_staff=True, is_superuser=False)
-    kufuta protected items kwa `force=true` — kama ilivyoonyeshwa kwenye
-    UI ya Trash (kitufe cha "Futa Kabisa" kinaonekana kila mara).
+    ✅ PROTECTION IMEONDOLWA: `force` ni `True` kila mara
+    kwa admin (is_staff) au superuser.
     """
     user = request.user
     if not user or not user.is_authenticated:
         return False
     if not (user.is_staff or user.is_superuser):
         return False
-
-    # Chukua `force` kutoka query string kwanza
-    raw = request.query_params.get("force")
-
-    # Fallback kwa body (kama request.data ni dict)
-    if raw is None and isinstance(request.data, dict):
-        raw = request.data.get("force")
-
-    if raw is None:
-        return False
-
-    return str(raw).lower() in ("1", "true", "yes", "on")
+    return True
 
 
-# ----------------------------------------------------------------
-# Cascade helper — futa related PROTECT rows
-# ----------------------------------------------------------------
 def _cascade_protected(obj, max_depth=5):
     """
     Futa related objects zinazozuia `obj` kufutwa (PROTECT FK).
 
     Inarudia hadi `max_depth` mara:
       1. Jaribu `obj.hard_delete()`.
-      2. Kama ProtectedError, futa kila `protected_object`
-         (hard_delete kwa SoftDeleteModel, .delete() vinginevyo).
+      2. Kama ProtectedError, futa kila `protected_object`.
       3. Jaribu tena.
 
     Returns: (success: bool, removed: list[str], error: str|None)
     """
+    import logging
+    log = logging.getLogger(__name__)
+
     removed = []
-    for _ in range(max_depth):
+    for attempt in range(max_depth):
         try:
             obj.hard_delete()
             return True, removed, None
@@ -120,7 +102,6 @@ def _cascade_protected(obj, max_depth=5):
                     removed.append(label)
                     progressed = True
                 except ProtectedError:
-                    # related object pia ina PROTECT — cascade yake
                     ok, sub_removed, sub_err = _cascade_protected(
                         rel, max_depth - 1
                     )
@@ -129,10 +110,16 @@ def _cascade_protected(obj, max_depth=5):
                         removed.append(label)
                         progressed = True
                     else:
+                        log.warning(
+                            "[trash] cascade failed for %s: %s", label, sub_err
+                        )
                         return False, removed, (
                             f"Imeshindwa kufuta {label}: {sub_err}"
                         )
                 except Exception as inner:
+                    log.exception(
+                        "[trash] cascade exception for %s: %s", label, inner
+                    )
                     return False, removed, (
                         f"Imeshindwa kufuta {label}: {inner}"
                     )
@@ -141,7 +128,6 @@ def _cascade_protected(obj, max_depth=5):
                     "Bado imezuiliwa na: "
                     + ", ".join(str(o) for o in e.protected_objects)[:500]
                 )
-    # jaribio la mwisho
     try:
         obj.hard_delete()
         return True, removed, None
@@ -150,11 +136,11 @@ def _cascade_protected(obj, max_depth=5):
             "Bado imezuiliwa na: "
             + ", ".join(str(o) for o in e.protected_objects)[:500]
         )
+    except Exception as e:
+        log.exception("[trash] final hard_delete failed: %s", e)
+        return False, removed, f"Hitilafu: {e}"
 
 
-# ----------------------------------------------------------------
-# Trash list presentation helpers
-# ----------------------------------------------------------------
 def _build_subtitle(model, obj):
     for field in (
         "title", "name", "subject", "email",
@@ -243,7 +229,8 @@ class TrashOverviewView(APIView):
                 "app": model._meta.app_label,
                 "model": model.__name__,
                 "count": model.all_objects.filter(is_deleted=True).count(),
-                "protected": _is_protected(model),
+                # ✅ PROTECTION IMEONDOLWA — kila model inaruhusiwa
+                "protected": False,
             })
         out.sort(key=lambda r: (-r["count"], r["model"]))
         return Response({"totals": out})
@@ -260,7 +247,6 @@ class TrashListView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        protected = _is_protected(model)
         qs = model.all_objects.filter(is_deleted=True).order_by("-deleted_at")
 
         results = []
@@ -278,13 +264,14 @@ class TrashListView(APIView):
                 "details": getattr(obj, "deletion_reason", "") or "",
                 "thumbnail": _build_thumbnail(obj),
                 "repr": str(obj),
-                "protected": protected,
+                # ✅ Kila item inaruhusiwa kufutwa
+                "protected": False,
             })
 
         return Response({
             "type": type,
             "count": qs.count(),
-            "protected": protected,
+            "protected": False,
             "results": results,
         })
 
@@ -317,24 +304,14 @@ class TrashPermanentDeleteView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def delete(self, request, type, pk):
+        import logging
+        log = logging.getLogger(__name__)
+
         model = _resolve_model(type)
         if not model or not issubclass(model, SoftDeleteModel):
             return Response(
                 {"detail": "Aina ya kikapu haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
-            )
-
-        force = _wants_force(request)
-        if _is_protected(model) and not force:
-            return Response(
-                {
-                    "detail": (
-                        "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa. "
-                        "Tuma `force=true` kuthibitisha."
-                    ),
-                    "protected": True,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
             )
 
         obj = model.all_objects.filter(pk=pk, is_deleted=True).first()
@@ -344,31 +321,32 @@ class TrashPermanentDeleteView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # ✅ PROTECTION IMEONDOLWA — force kila mara
         try:
             with transaction.atomic():
                 _audit(
                     request, "trash.hard_deleted", model, obj.pk,
-                    f"Hard-deleted {model.__name__}#{obj.pk}"
-                    + (" [FORCED]" if force else ""),
+                    f"Hard-deleted {model.__name__}#{obj.pk} [FORCED]",
                 )
-                if force:
-                    ok, removed, err = _cascade_protected(obj)
-                    if not ok:
-                        return Response(
-                            {
-                                "detail": "Haifutiki — inatumika mahali pengine.",
-                                "protected_objects": removed[:10] or [err],
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-                    if removed:
-                        _audit(
-                            request, "trash.cascade_deleted", model, obj.pk,
-                            f"Cascade-deleted {len(removed)} related: "
-                            + ", ".join(removed[:10]),
-                        )
-                else:
-                    obj.hard_delete()
+                ok, removed, err = _cascade_protected(obj)
+                if not ok:
+                    transaction.set_rollback(True)
+                    return Response(
+                        {
+                            "detail": (
+                                err
+                                or "Haifutiki — inatumika mahali pengine."
+                            ),
+                            "protected_objects": removed[:10] or [],
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if removed:
+                    _audit(
+                        request, "trash.cascade_deleted", model, obj.pk,
+                        f"Cascade-deleted {len(removed)} related: "
+                        + ", ".join(removed[:10]),
+                    )
         except ProtectedError as e:
             return Response(
                 {
@@ -377,6 +355,20 @@ class TrashPermanentDeleteView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except Exception as e:
+            log.exception(
+                "[trash] permanent delete failed for %s#%s: %s",
+                model.__name__, obj.pk, e,
+            )
+            return Response(
+                {
+                    "detail": f"Hitilafu ya mfumo: {e}",
+                    "type": type,
+                    "id": pk,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -384,24 +376,14 @@ class TrashEmptyByTypeView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, type):
+        import logging
+        log = logging.getLogger(__name__)
+
         model = _resolve_model(type)
         if not model or not issubclass(model, SoftDeleteModel):
             return Response(
                 {"detail": "Aina ya kikapu haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
-            )
-
-        force = _wants_force(request)
-        if _is_protected(model) and not force:
-            return Response(
-                {
-                    "detail": (
-                        "Aina hii ya rekodi haiwezi kufutwa kabisa. "
-                        "Tuma `force=true` kuthibitisha."
-                    ),
-                    "protected": True,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
             )
 
         deleted = skipped = 0
@@ -411,31 +393,35 @@ class TrashEmptyByTypeView(APIView):
                 with transaction.atomic():
                     _audit(
                         request, "trash.hard_deleted", model, obj.pk,
-                        f"Empty-by-type: {model.__name__}#{obj.pk}"
-                        + (" [FORCED]" if force else ""),
+                        f"Empty-by-type: {model.__name__}#{obj.pk} [FORCED]",
                     )
-                    if force:
-                        ok, removed, err = _cascade_protected(obj)
-                        if not ok:
-                            skipped += 1
-                            protected_objs.extend(removed[:5] or [err])
-                            continue
-                        if removed:
-                            _audit(
-                                request, "trash.cascade_deleted", model, obj.pk,
-                                f"Cascade-deleted {len(removed)} related",
-                            )
-                    else:
-                        obj.hard_delete()
+                    ok, removed, err = _cascade_protected(obj)
+                    if not ok:
+                        transaction.set_rollback(True)
+                        skipped += 1
+                        protected_objs.extend(removed[:5] or [err])
+                        continue
+                    if removed:
+                        _audit(
+                            request, "trash.cascade_deleted", model, obj.pk,
+                            f"Cascade-deleted {len(removed)} related",
+                        )
                 deleted += 1
             except ProtectedError as e:
                 skipped += 1
                 protected_objs.extend(_format_protected(e))
+            except Exception as e:
+                log.exception(
+                    "[trash] empty-by-type failed for %s#%s: %s",
+                    model.__name__, obj.pk, e,
+                )
+                skipped += 1
+                protected_objs.append(f"{model.__name__}#{obj.pk}: {e}")
         return Response({
             "deleted": deleted,
             "skipped": skipped,
             "protected_objects": protected_objs[:10],
-            "forced": force,
+            "forced": True,
         })
 
 
@@ -443,6 +429,9 @@ class TrashEmptyAllView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request):
+        import logging
+        log = logging.getLogger(__name__)
+
         body = request.data if isinstance(request.data, dict) else {}
         if body.get("confirm") != "DELETE ALL":
             return Response({
@@ -452,39 +441,34 @@ class TrashEmptyAllView(APIView):
                 )
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        force = _wants_force(request)
-
         deleted = skipped = 0
-        blocked_models = []
         for model in apps.get_models():
             if not issubclass(model, SoftDeleteModel) or model._meta.abstract:
-                continue
-            if _is_protected(model) and not force:
-                blocked_models.append(
-                    f"{model._meta.app_label}.{model.__name__}"
-                )
                 continue
             for obj in model.all_objects.filter(is_deleted=True).iterator():
                 try:
                     with transaction.atomic():
                         _audit(
                             request, "trash.hard_deleted", model, obj.pk,
-                            f"Empty-all: {model.__name__}#{obj.pk}"
-                            + (" [FORCED]" if force else ""),
+                            f"Empty-all: {model.__name__}#{obj.pk} [FORCED]",
                         )
-                        if force:
-                            ok, _removed, _err = _cascade_protected(obj)
-                            if not ok:
-                                skipped += 1
-                                continue
-                        else:
-                            obj.hard_delete()
+                        ok, _removed, _err = _cascade_protected(obj)
+                        if not ok:
+                            transaction.set_rollback(True)
+                            skipped += 1
+                            continue
                     deleted += 1
                 except ProtectedError:
+                    skipped += 1
+                except Exception as e:
+                    log.exception(
+                        "[trash] empty-all failed for %s#%s: %s",
+                        model.__name__, obj.pk, e,
+                    )
                     skipped += 1
         return Response({
             "deleted": deleted,
             "skipped": skipped,
-            "protected_models": blocked_models,
-            "forced": force,
+            "protected_models": [],
+            "forced": True,
         })

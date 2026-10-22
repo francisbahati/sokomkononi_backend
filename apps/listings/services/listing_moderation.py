@@ -196,7 +196,7 @@ def request_payment_listing(listing_id, admin_user, reason=""):
 
 # ============================================================
 # 4. FINALIZE APPROVAL — admin analidhinisha mwisho
-# ============================================================
+# # ============================================================
 @transaction.atomic
 def finalize_approval_listing(listing_id, admin_user):
     _require_admin(admin_user)
@@ -208,14 +208,8 @@ def finalize_approval_listing(listing_id, admin_user):
             "Tangazo hili halipo kwenye hali ya kusubiri idhini ya mwisho."
         )
 
-    try:
-        fee = ListingFee.objects.select_for_update().get(listing=listing)
-    except ListingFee.DoesNotExist:
-        raise ValidationError(
-            "Tangazo hili halina rekodi ya ada."
-        )
-
-    if fee.payment_status != ListingFee.PaymentStatus.PAID:
+    fee = getattr(listing, "listing_fee", None)
+    if fee is not None and fee.payment_status != ListingFee.PaymentStatus.PAID:
         raise ValidationError(
             "Ada ya tangazo hili haijalipwa bado."
         )
@@ -241,11 +235,8 @@ def finalize_approval_listing(listing_id, admin_user):
 
     return listing
 
-
 # ============================================================
-# 5. APPROVE (legacy) — idhinisha moja kwa moja (in_review → live)
-#    Inatumika kwa listings ambazo fee haijalipwa bado, LAKINI
-#    admin anataka kuidhinisha moja kwa moja (mfano free category).
+
 # ============================================================
 @transaction.atomic
 def approve_listing(listing_id, admin_user):
@@ -258,21 +249,20 @@ def approve_listing(listing_id, admin_user):
             "Tangazo hili halipo kwenye hali ya kusubiri idhini."
         )
 
-    # Check fee if required
-    try:
-        listing_fee = ListingFee.objects.select_for_update().get(listing=listing)
-    except ListingFee.DoesNotExist:
-        listing_fee = None
+    # ── Zuia approve isiruke malipo ──────────────────────────
+    listing_fee = getattr(listing, "listing_fee", None)
+    fee_is_paid = (
+        listing_fee is not None
+        and listing_fee.payment_status == ListingFee.PaymentStatus.PAID
+    )
+    fee_is_free = listing_fee is None or listing_fee.amount == 0
 
-    if (
-        listing_fee
-        and listing_fee.amount > 0
-        and listing_fee.payment_status != ListingFee.PaymentStatus.PAID
-    ):
+    if not fee_is_paid and not fee_is_free:
         raise ValidationError(
-            "Ada ya tangazo hili haijalipwa. "
-            "Tumia 'Omba Malipo' kwanza, au fanya kama fee haihitajiki."
+            "Tangazo hili linahitaji malipo. Tumia 'Omba Malipo' "
+            "kwanza, kisha 'Idhinisha Mwisho' baada ya seller kulipa."
         )
+    # ─────────────────────────────────────────────────────────
 
     listing.status = Listing.Status.LIVE
     listing.approved_by = admin_user

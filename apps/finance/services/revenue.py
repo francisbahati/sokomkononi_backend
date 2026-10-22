@@ -4,6 +4,7 @@ Revenue aggregation for the admin dashboard and detailed reports.
 Sources:
     - ListingFee         (listing_fee)
     - ListingBoost       (boosting)
+    - ListingLeading     (leading)   ⬅️ IMEONGEZWA
     - Reservation        (reservation)
     - BannerAd           (advertisement)
     - BundlePurchase     (bundle)
@@ -20,6 +21,7 @@ from django.utils import timezone
 from apps.banners.models import BannerAd
 from apps.boosting.models import ListingBoost
 from apps.bundles.models import BundlePurchase
+from apps.leading_fees.models import ListingLeading
 from apps.listings.models import ListingFee
 from apps.transactions.models import Reservation
 
@@ -113,6 +115,22 @@ def calculate_financial_dashboard(period="all"):
     boosting_revenue = boosts.aggregate(total=Sum("amount"))["total"] or ZERO
     paid_boosts = boosts.count()
 
+    # ---------------- Leading ----------------
+    # ⬅️ IMEONGEZWA: ListingLeading model halisi
+    leadings = ListingLeading.objects.filter(
+        payment_status=ListingLeading.PaymentStatus.PAID,
+    ).annotate(
+        effective_paid=Coalesce("paid_at", "created_at"),
+    )
+    if start and end:
+        leadings = leadings.filter(
+            effective_paid__gte=start, effective_paid__lt=end,
+        )
+    leading_revenue = leadings.aggregate(
+        total=Sum("price"),
+    )["total"] or ZERO
+    paid_leadings = leadings.count()
+
     # ---------------- Advertisement (banners) ----------------
     banners = BannerAd.objects.filter(payment_status="PAID").annotate(
         effective_paid=Coalesce("paid_at", "created_at"),
@@ -142,7 +160,6 @@ def calculate_financial_dashboard(period="all"):
     paid_bundles = bundle_purchases.count()
 
     # ---------------- Success Fee ----------------
-    # Success fee ni ada inayotozwa kwa kupakua ripoti ya miamala.
     success_fees = SuccessFeePayment.objects.filter(
         payment_status="PAID",
     ).annotate(
@@ -171,15 +188,13 @@ def calculate_financial_dashboard(period="all"):
     refund_count = refunds.count()
 
     # ---------------- Totals ----------------
-    leading_revenue = ZERO  # No leading model — always zero.
-
     total_revenue = (
         listing_fee_revenue
         + reservation_revenue
         + boosting_revenue
+        + leading_revenue
         + advertisement_revenue
         + bundle_revenue
-        + leading_revenue
         + success_fee_revenue
     )
     net_revenue = total_revenue - refund_amount
@@ -192,15 +207,16 @@ def calculate_financial_dashboard(period="all"):
         "listing_fee_revenue": listing_fee_revenue,
         "reservation_revenue": reservation_revenue,
         "boosting_revenue": boosting_revenue,
+        "leading_revenue": leading_revenue,
         "advertisement_revenue": advertisement_revenue,
         "bundle_revenue": bundle_revenue,
-        "leading_revenue": leading_revenue,
         "success_fee_revenue": success_fee_revenue,
         "refunds": refund_amount,
         "net_revenue": net_revenue,
         "paid_listing_fees": paid_listing_fees,
         "paid_reservations": paid_reservations,
         "paid_boosts": paid_boosts,
+        "paid_leadings": paid_leadings,
         "paid_banners": paid_banners,
         "paid_bundles": paid_bundles,
         "paid_success_fees": paid_success_fees,
@@ -315,9 +331,46 @@ def get_revenue_records(period="all", source="all"):
                 "created_at": item.created_at,
             })
 
+    # ---------------- Leading ----------------
+    # ⬅️ IMEONGEZWA
+    if source in {"all", "leading"}:
+        qs = ListingLeading.objects.filter(
+            payment_status=ListingLeading.PaymentStatus.PAID,
+        ).select_related("seller", "listing", "package").annotate(
+            effective_paid=Coalesce("paid_at", "created_at"),
+        )
+        if start and end:
+            qs = qs.filter(
+                effective_paid__gte=start, effective_paid__lt=end,
+            )
+        for item in qs:
+            records.append({
+                "id": item.id,
+                "source": "leading",
+                "source_label": (
+                    f"Leading: {item.package.name}"
+                    if item.package
+                    else "Leading Fee"
+                ),
+                "amount": item.price,
+                "payment_status": item.payment_status,
+                "payment_reference": item.payment_reference or "",
+                "paid_at": item.paid_at,
+                "refunded_at": None,
+                "seller_id": item.seller_id,
+                "seller_name": getattr(item.seller, "name", ""),
+                "seller_email": getattr(item.seller, "email", "") or "",
+                "listing_id": item.listing_id,
+                "listing_title": getattr(item.listing, "title", ""),
+                "status": item.status,
+                "created_at": item.created_at,
+            })
+
     # ---------------- Advertisements ----------------
     if source in {"all", "advertisement"}:
-        qs = BannerAd.objects.filter(payment_status="PAID").select_related("seller", "listing").annotate(
+        qs = BannerAd.objects.filter(payment_status="PAID").select_related(
+            "seller", "listing",
+        ).annotate(
             effective_paid=Coalesce("paid_at", "created_at"),
         )
         if start and end:

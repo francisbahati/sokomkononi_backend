@@ -90,7 +90,10 @@ class RevenueReportView(APIView):
             ),
             OpenApiParameter(
                 name="source", type=str, required=False,
-                enum=["all", "listing_fee", "reservation", "boosting", "advertisement", "bundle", "refund"],
+                enum=[
+                    "all", "listing_fee", "reservation", "boosting",
+                    "leading", "advertisement", "bundle", "refund",
+                ],
             ),
         ],
         responses=RevenueRecordSerializer(many=True),
@@ -104,7 +107,7 @@ class RevenueReportView(APIView):
 
         if source not in {
             "all", "listing_fee", "reservation", "boosting",
-            "advertisement", "bundle", "refund",
+            "leading", "advertisement", "bundle", "refund",
         }:
             return Response({"detail": "Invalid source."}, status=400)
 
@@ -148,7 +151,7 @@ class MyTransactionsView(APIView):
         ).select_related("listing").order_by("-created_at"):
             records.append({
                 "id": f"lf_{item.pk}",
-                "raw_id": item.pk,          # ⬅️ MPYA: backend ID (integer)
+                "raw_id": item.pk,
                 "source": "listing_fee",
                 "ref": item.payment_reference or f"LF-{item.pk}",
                 "type": "listing_fee",
@@ -170,7 +173,7 @@ class MyTransactionsView(APIView):
         ).select_related("listing", "package").order_by("-created_at"):
             records.append({
                 "id": f"b_{item.pk}",
-                "raw_id": item.pk,          # ⬅️ MPYA
+                "raw_id": item.pk,
                 "source": "boosting",
                 "ref": item.payment_reference or f"B-{item.pk}",
                 "type": "boost",
@@ -178,6 +181,31 @@ class MyTransactionsView(APIView):
                 "listing_id": item.listing_id,
                 "listing_title": item.listing.title,
                 "amount": item.amount,
+                "status": self._map_status(item.payment_status),
+                "payment_status": item.payment_status,
+                "payment_reference": item.payment_reference,
+                "method": None,
+                "paid_at": item.paid_at,
+                "created_at": item.created_at,
+            })
+
+        # LEADINGS — ⬅️ MPYA
+        from apps.leading_fees.models import ListingLeading
+
+        for item in ListingLeading.objects.filter(
+            seller=user,
+        ).select_related("listing", "package").order_by("-created_at"):
+            package_name = item.package.name if item.package else "Leading"
+            records.append({
+                "id": f"l_{item.pk}",
+                "raw_id": item.pk,
+                "source": "leading",
+                "ref": item.payment_reference or f"L-{item.pk}",
+                "type": "leading",
+                "title": f"Leading — {item.listing.title} ({package_name})",
+                "listing_id": item.listing_id,
+                "listing_title": item.listing.title,
+                "amount": item.price,
                 "status": self._map_status(item.payment_status),
                 "payment_status": item.payment_status,
                 "payment_reference": item.payment_reference,
@@ -195,7 +223,7 @@ class MyTransactionsView(APIView):
             listing = item.transaction.listing
             records.append({
                 "id": f"r_{item.pk}",
-                "raw_id": item.pk,          # ⬅️ MPYA
+                "raw_id": item.pk,
                 "source": "reservation",
                 "ref": item.payment_reference or f"R-{item.pk}",
                 "type": "reservation",
@@ -241,7 +269,7 @@ class MyTransactionsView(APIView):
 
             records.append({
                 "id": f"bp_{item.pk}",
-                "raw_id": item.pk,          # ⬅️ MPYA
+                "raw_id": item.pk,
                 "source": "bundle_purchase",
                 "ref": item.payment_reference or f"BP-{item.pk}",
                 "type": "bundle_purchase",
@@ -284,7 +312,6 @@ class MyTransactionsView(APIView):
             "REFUNDED": "REFUNDED",
         }
         return mapping.get(payment_status, "PENDING")
-
 
 # ============================================================
 # SUCCESS FEE CONFIG VIEW (Singleton) — na LOG

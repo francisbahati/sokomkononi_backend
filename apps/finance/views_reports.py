@@ -6,9 +6,12 @@
 #  - Ondoa DISPUTED kutoka deals_by_status (dispute imeondolewa)
 #  - Ongeza `from` na `to` (custom date range) kwenye ReportsView
 #    na ReportsExportView
+#  - Revenue by month itumie revenue halisi (sio GMV)  ⬅️ MPYA
+#  - Ongeza leading_revenue kwenye revenue sources  ⬅️ MPYA
 # ============================================================
 from collections import defaultdict
 from datetime import datetime, timedelta
+from decimal import Decimal
 from io import BytesIO
 
 from dateutil.relativedelta import relativedelta
@@ -105,6 +108,62 @@ def _period_range(period, date_from=None, date_to=None):
         start = (now - relativedelta(years=1))
         return start, now
     return None, None  # all
+
+
+# ============================================================
+# REVENUE-BY-MONTH HELPER (revenue halisi, sio GMV)
+# ============================================================
+def _revenue_for_month(month_start, month_end):
+    """
+    Hesabu revenue halisi kwa mwezi mmoja kutoka vyanzo vyote.
+    ⬅️ MPYA: hutumia fee models moja kwa moja, sio `agreed_price` (GMV).
+    """
+    from apps.banners.models import BannerAd
+    from apps.boosting.models import ListingBoost
+    from apps.bundles.models import BundlePurchase
+    from apps.leading_fees.models import ListingLeading
+    from apps.listings.models import ListingFee
+    from apps.transactions.models import Reservation
+    from .models import SuccessFeePayment
+
+    total = Decimal("0.00")
+
+    total += ListingFee.objects.filter(
+        payment_status="PAID",
+        paid_at__gte=month_start, paid_at__lt=month_end,
+    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+
+    total += ListingBoost.objects.filter(
+        payment_status="PAID",
+        paid_at__gte=month_start, paid_at__lt=month_end,
+    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+
+    total += ListingLeading.objects.filter(
+        payment_status=ListingLeading.PaymentStatus.PAID,
+        paid_at__gte=month_start, paid_at__lt=month_end,
+    ).aggregate(s=Sum("price"))["s"] or Decimal("0.00")
+
+    total += Reservation.objects.filter(
+        payment_status="PAID",
+        paid_at__gte=month_start, paid_at__lt=month_end,
+    ).aggregate(s=Sum("deposit_amount"))["s"] or Decimal("0.00")
+
+    total += BannerAd.objects.filter(
+        payment_status="PAID",
+        paid_at__gte=month_start, paid_at__lt=month_end,
+    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+
+    total += BundlePurchase.objects.filter(
+        status=BundlePurchase.Status.PAID,
+        paid_at__gte=month_start, paid_at__lt=month_end,
+    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+
+    total += SuccessFeePayment.objects.filter(
+        payment_status="PAID",
+        paid_at__gte=month_start, paid_at__lt=month_end,
+    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+
+    return total
 
 
 # ============================================================
@@ -240,6 +299,7 @@ class ReportsView(APIView):
         except Exception:
             total_revenue = 0.0
 
+        # ⬅️ REKEBISHO: revenueByMonth itumie revenue halisi (sio GMV)
         revenue_by_month = []
         _anchor = now.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0,
@@ -247,15 +307,10 @@ class ReportsView(APIView):
         for i in range(5, -1, -1):
             month_start = _anchor - relativedelta(months=i)
             month_end = month_start + relativedelta(months=1)
-            total = (
-                revenue_qs.filter(
-                    completed_at__gte=month_start,
-                    completed_at__lt=month_end,
-                ).aggregate(s=Sum("agreed_price"))["s"] or 0
-            )
+            month_total = _revenue_for_month(month_start, month_end)
             revenue_by_month.append({
                 "label": month_start.strftime("%b"),
-                "total": float(total),
+                "total": float(month_total),
             })
 
         conversion_rate = (
@@ -644,7 +699,7 @@ class ReportsExportView(APIView):
         h.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         sub = doc.add_paragraph(
-            f"Kipindi: {period} · Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+            f"Kipimo: {period} · Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}"
         )
         sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
 

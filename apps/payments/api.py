@@ -15,7 +15,10 @@ from django.conf import settings
 from django.shortcuts import get_object_or_404
 
 from rest_framework import generics, permissions, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import (
+    api_view, permission_classes, throttle_classes,
+)
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -40,10 +43,14 @@ from .serializers import (
 
 logger = logging.getLogger(__name__)
 
-# Aina zote za malipo zinazotumia order_id ya FimiPay. Polling inatumia
-# malipo moja kwa moja pale FimiPay inaposema SUCCESS (kama webhook imekosa).
-# Kuzima aina fulani: settings.PAYMENTS_RECONCILE_EXCLUDE = {"BST"}
-# Kuzima zote:        settings.PAYMENTS_RECONCILE_ON_POLL = False
+
+class PaymentPollThrottle(UserRateThrottle):
+    """
+    Polling ya order-status isiingie kwenye kikomo cha jumla cha "user"
+    (kilikuwa 1000/saa) — mteja alikuwa anakwama akishakifikia.
+    """
+    scope = "payment_poll"
+
 RECONCILE_ON_POLL_PREFIXES = {"LSF", "BST", "LDS", "BND", "ADV", "SFE", "RSV"}
 
 
@@ -133,6 +140,7 @@ def create_order_view(request):
 
 
 @api_view(["POST"])
+@throttle_classes([PaymentPollThrottle])
 @permission_classes([permissions.IsAuthenticated])
 def order_status_view(request):
     from .order_ids import parse_order_id

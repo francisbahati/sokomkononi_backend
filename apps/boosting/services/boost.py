@@ -391,8 +391,10 @@ def pay_boost_with_credits(*, boost, user):
     ]:
         raise ValidationError("Boost hii haiwezi kulipiwa.")
 
-    # Consume 1 boost credit (raises ValidationError if not enough)
-    consume_credit(user=user, service_key="boost", required=1)
+    # consume_credit() HAIRUSHI error — inarudisha True/False.
+    # Awali jibu lilipuuzwa, kwa hiyo boost ilihesabiwa PAID hata bila credit.
+    if not consume_credit(user=user, service_key="boost", required=1):
+        raise ValidationError("Hakuna boost credits za kutosha au zimeisha muda.")
 
     boost.payment_status = ListingBoost.PaymentStatus.PAID
     boost.payment_reference = f"credits_{boost.pk}_{timezone.now().timestamp()}"
@@ -508,7 +510,11 @@ def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
 
-
+    # Activate right away. Without this, a customer who pays and then
+    # closes the browser is charged but never boosted, because the
+    # frontend is the only other place that calls /activate/.
+    # A failure here (e.g. listing no longer AVAILABLE) must not undo
+    # the recorded payment, so it is logged and left for review.
     try:
         boost = activate_boost(boost=boost)
     except ValidationError:

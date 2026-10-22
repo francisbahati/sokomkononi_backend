@@ -71,15 +71,12 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
     #   • DRAFT / PENDING_PAYMENT — anaunda na analipa papo (legacy)
     #   • APPROVED_PENDING_PAYMENT — admin ameomba malipo
     #   • REJECTED — retry baada ya kukataliwa (kama ameamua kubadilisha)
-    allowed_states = (
-        Listing.Status.DRAFT,
-        Listing.Status.PENDING_PAYMENT,
-        Listing.Status.APPROVED_PENDING_PAYMENT,
-        Listing.Status.REJECTED,
-    )
+    # Seller analipa TU baada ya admin kukagua na kuomba malipo.
+    allowed_states = (Listing.Status.APPROVED_PENDING_PAYMENT,)
     if listing.status not in allowed_states:
         raise ValidationError(
-            f"Ada haiwezi kulipwa kwa tangazo lenye hali ya {listing.status}."
+            "Admin bado hajakagua tangazo hili. "
+            "Utaombwa kulipa ada baada ya kukaguliwa."
         )
 
     try:

@@ -483,9 +483,11 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[IsVerifiedUser, IsOwnerOrAdmin],
     )
     def publish(self, request, pk=None):
-        from .services.listing_fee import create_listing_fee
-        from .services.listing_moderation import _is_listing_fee_required_for
-
+        # Mtiririko: seller anawasilisha -> admin anakagua -> admin anaomba
+        # malipo -> seller analipa -> admin anaidhinisha mwisho.
+        # Hakuna malipo wala kuhesabu ada hapa. (Awali import ya
+        # `_is_listing_fee_required_for` isiyokuwepo ilifanya endpoint hii
+        # irudishe 500 kila mara.)
         listing = self.get_object()
         self.check_object_permissions(request, listing)
 
@@ -501,23 +503,10 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         fee = getattr(listing, "listing_fee", None)
 
-        if fee is None:
-            try:
-                fee = create_listing_fee(listing)
-            except Exception as exc:
-                logger.exception(
-                    "Could not create listing fee for %s: %s",
-                    listing.pk, exc,
-                )
-                return Response(
-                    {"detail": (
-                        "Imeshindwa kuhesabu ada ya tangazo. "
-                        "Wasiliana na msimamizi."
-                    )},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-        if fee.payment_status == ListingFee.PaymentStatus.PAID:
+        if (
+            fee is not None
+            and fee.payment_status == ListingFee.PaymentStatus.PAID
+        ):
             listing.status = Listing.Status.PENDING_APPROVAL
             listing.save(update_fields=["status", "updated_at"])
             return Response(
@@ -1497,6 +1486,23 @@ class ListingFeePaymentView(APIView):
                 status=status.HTTP_200_OK,
             )
 
+        # Malipo yanaruhusiwa TU baada ya admin kukagua na kuomba malipo.
+        if (
+            listing.status != Listing.Status.APPROVED_PENDING_PAYMENT
+            and not request.user.is_staff
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Admin bado hajakagua tangazo hili. "
+                        "Utaombwa kulipa ada baada ya kukaguliwa."
+                    ),
+                    "code": "AWAITING_ADMIN_REVIEW",
+                    "status": listing.status,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if existing_fee is None:
             try:
                 from .services.listing_fee import create_listing_fee
@@ -1541,8 +1547,14 @@ class ListingFeePaymentView(APIView):
                     "updated_at",
                 ])
 
-                # Free → admin anaona kama kawaida
-                listing.status = Listing.Status.PENDING_APPROVAL
+                # Admin tayari amekagua (APPROVED_PENDING_PAYMENT) -> anabaki
+                # kuidhinisha mwisho. Awali ilirudi PENDING_APPROVAL na
+                # kusababisha mzunguko usioisha wa "Omba Malipo".
+                listing.status = (
+                    Listing.Status.PAID_PENDING_APPROVAL
+                    if listing.status == Listing.Status.APPROVED_PENDING_PAYMENT
+                    else Listing.Status.PENDING_APPROVAL
+                )
                 listing.save(update_fields=["status", "updated_at"])
 
             try:
@@ -2044,6 +2056,16 @@ def publish_listing(request, pk):
         return Response(
             {"detail": "Huna ruhusa ya kuchapisha tangazo hili."},
             status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if listing.status not in (
+        Listing.Status.DRAFT,
+        Listing.Status.REJECTED,
+        Listing.Status.NEEDS_EDIT,
+    ):
+        return Response(
+            {"detail": f"Tangazo haliwezi kuwasilishwa. Hali: {listing.status}."},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     listing.status = Listing.Status.PENDING_APPROVAL

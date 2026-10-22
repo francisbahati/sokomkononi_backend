@@ -130,12 +130,29 @@ def _seller_contact_visible(request, seller, field_name):
 
 # ============================================================================
 # LISTING LIST
+# ✅ FIX: category = STRING (slug) — sio object. React Error #31 fix.
+# ✅ category_id = number kwa filtering.
+# ✅ category_name = string kwa display (kama inahitajika).
 # ============================================================================
 class ListingListSerializer(serializers.ModelSerializer):
     seller_name = serializers.CharField(source="seller.name", read_only=True)
     seller_phone = serializers.SerializerMethodField()
     seller_email = serializers.SerializerMethodField()
-    category = ListingCategorySerializer(read_only=True)
+
+    # ✅ category ni STRING (slug) — frontend ina-render kama text
+    category = serializers.SlugRelatedField(
+        slug_field="slug",
+        read_only=True,
+    )
+    # ✅ category_id ni number — kwa filtering/reference
+    category_id = serializers.IntegerField(
+        source="category.id", read_only=True,
+    )
+    # ✅ category_name ni string — kwa display (badala ya object)
+    category_name = serializers.CharField(
+        source="category.name", read_only=True,
+    )
+
     primary_image = serializers.SerializerMethodField()
     status_label = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
@@ -172,7 +189,10 @@ class ListingListSerializer(serializers.ModelSerializer):
             "seller_name",
             "seller_phone",
             "seller_email",
+            # ✅ category string fields
             "category",
+            "category_id",
+            "category_name",
             "primary_image",
             "created_at",
         ]
@@ -315,12 +335,27 @@ class EquipmentDetailsSerializer(serializers.ModelSerializer):
 
 # ============================================================================
 # LISTING DETAIL
+# ✅ FIX: category = STRING (slug) — sio object. React Error #31 fix.
 # ============================================================================
 class ListingDetailSerializer(serializers.ModelSerializer):
     seller_name = serializers.CharField(source="seller.name", read_only=True)
     seller_phone = serializers.SerializerMethodField()
     seller_email = serializers.SerializerMethodField()
-    category = ListingCategorySerializer(read_only=True)
+
+    # ✅ category ni STRING (slug)
+    category = serializers.SlugRelatedField(
+        slug_field="slug",
+        read_only=True,
+    )
+    # ✅ category_id ni number
+    category_id = serializers.IntegerField(
+        source="category.id", read_only=True,
+    )
+    # ✅ category_name ni string
+    category_name = serializers.CharField(
+        source="category.name", read_only=True,
+    )
+
     images = ListingImageSerializer(many=True, read_only=True)
     property_details = PropertyDetailsSerializer(read_only=True)
     land_details = LandDetailsSerializer(read_only=True)
@@ -346,7 +381,10 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "seller_name",
             "seller_phone",
             "seller_email",
+            # ✅ category string fields
             "category",
+            "category_id",
+            "category_name",
             "title",
             "description",
             "price",
@@ -599,11 +637,24 @@ class ListingRejectionSerializer(serializers.Serializer):
 
 # ============================================================================
 # ADMIN PENDING LISTING
+# ✅ FIX: category = STRING (slug) — sio object.
 # ============================================================================
 class AdminPendingListingSerializer(serializers.ModelSerializer):
     seller_name = serializers.CharField(source="seller.name", read_only=True)
     seller_email = serializers.CharField(source="seller.email", read_only=True)
-    category = ListingCategorySerializer(read_only=True)
+
+    # ✅ category ni STRING (slug)
+    category = serializers.SlugRelatedField(
+        slug_field="slug",
+        read_only=True,
+    )
+    category_id = serializers.IntegerField(
+        source="category.id", read_only=True,
+    )
+    category_name = serializers.CharField(
+        source="category.name", read_only=True,
+    )
+
     primary_image = serializers.SerializerMethodField()
     status_label = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
@@ -618,7 +669,10 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
             "id", "title", "description", "price", "location",
             "latitude", "longitude", "address_text", "attributes",
             "status", "status_label", "seller", "seller_name",
-            "seller_email", "category", "primary_image",
+            "seller_email",
+            # ✅ category string fields
+            "category", "category_id", "category_name",
+            "primary_image",
             "payment_status", "payment_label", "fee_status",
             "fee_amount", "is_paid", "created_at", "updated_at",
         ]

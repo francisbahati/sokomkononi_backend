@@ -156,6 +156,18 @@ def request_payment_listing(listing_id, admin_user, reason=""):
             "Tangazo hili halipo kwenye hali ya kusubiri idhini."
         )
 
+    # Hakikisha ada ipo kabla ya kumwomba seller alipe. Hapa ndipo admin
+    # anaarifiwa kama kundi (category) halina fee rule.
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from .listing_fee import create_listing_fee
+    try:
+        create_listing_fee(listing)
+    except DjangoValidationError:
+        raise ValidationError(
+            "Ada ya kundi hili haijasanidiwa. Weka fee rule kwa kundi hili "
+            "(Revenue -> Listing Fee) kisha ujaribu tena."
+        )
+
     listing.status = Listing.Status.APPROVED_PENDING_PAYMENT
     listing.approved_by = admin_user
     listing.approved_at = timezone.now()
@@ -252,7 +264,11 @@ def approve_listing(listing_id, admin_user):
     except ListingFee.DoesNotExist:
         listing_fee = None
 
-    if listing_fee and listing_fee.payment_status != ListingFee.PaymentStatus.PAID:
+    if (
+        listing_fee
+        and listing_fee.amount > 0
+        and listing_fee.payment_status != ListingFee.PaymentStatus.PAID
+    ):
         raise ValidationError(
             "Ada ya tangazo hili haijalipwa. "
             "Tumia 'Omba Malipo' kwanza, au fanya kama fee haihitajiki."

@@ -315,7 +315,9 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    # DefaultPagination inakubali ?page_size= (max 500). PageNumberPagination
+    # ya kawaida inapuuza page_size, kwa hiyo ?page_size=200 ilirudisha 20 tu.
+    "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.DefaultPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -336,7 +338,8 @@ REST_FRAMEWORK = {
         "otp_verify": "10/hour",
         "password_reset": "5/hour",
         "anon": "100/min",
-        "user": "1000/hour",
+        "user": "5000/hour",
+        "payment_poll": "120/min",
         "support_ticket": "5/hour",
         "support_ticket_admin": "500/hour",
         "contact": "5/hour",
@@ -558,7 +561,10 @@ CSRF_COOKIE_SECURE = not DEBUG
 # ============================================================
 # LISTING FEE BEHAVIOUR
 # ============================================================
-LISTING_FEE_ALLOW_FALLBACK = env_bool("LISTING_FEE_ALLOW_FALLBACK", True)
+# False = kundi lisilo na fee rule HALIPEWI ada ya kubahatisha (3000). Admin
+# anaonywa anapoomba malipo. Weka LISTING_FEE_ALLOW_FALLBACK=true kwenye .env
+# kurudisha tabia ya zamani.
+LISTING_FEE_ALLOW_FALLBACK = env_bool("LISTING_FEE_ALLOW_FALLBACK", False)
 LISTING_FEE_REPRICE_AFTER_HOURS = env_int("LISTING_FEE_REPRICE_AFTER_HOURS", 24)
 
 # ============================================================

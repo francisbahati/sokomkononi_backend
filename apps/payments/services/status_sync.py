@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 SYNC_SOURCES = [
     {"model":"listings.ListingFee","pending_field":"payment_status","pending_value":"PENDING",
      "reference_field":"payment_reference","user_field":"seller",
+     "ref_attr":"listing_id",
      "handler":("apps.listings.services.listing_payment","mark_listing_fee_as_paid_from_webhook")},
     {"model":"boosting.ListingBoost","pending_field":"payment_status","pending_value":"PENDING",
      "reference_field":"payment_reference","user_field":"seller",
@@ -63,9 +64,22 @@ def _sync_source(src, user=None, since_hours=48, dry_run=False, no_time_filter=F
         if not ref: continue
         try:
             if _fimipay_success(ref):
-                if not dry_run:
-                    getattr(importlib.import_module(mod), fn)(ref_id=o.pk, payment_reference=ref)
-                updated += 1
+                if dry_run:
+                    updated += 1
+                else:
+                    ref_id = getattr(o, src.get("ref_attr", "pk"))
+                    result = getattr(importlib.import_module(mod), fn)(
+                        ref_id=ref_id, payment_reference=ref,
+                    )
+                    # Handler inarudisha None kama rekodi haikupatikana:
+                    # usihesabu hiyo kama "updated".
+                    if result is not None:
+                        updated += 1
+                    else:
+                        logger.warning(
+                            "sync %s#%s: handler returned None (ref_id=%s)",
+                            src["model"], o.pk, ref_id,
+                        )
         except Exception:
             errors += 1; logger.exception("sync %s#%s failed", src["model"], o.pk)
     return {"checked": checked, "updated": updated, "errors": errors}

@@ -1,12 +1,25 @@
 from django.db import IntegrityError
-from django_filters.rest_framework import DjangoFilterBackend   # ⬅️ ONGEZA
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions, status as drf_status, viewsets
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from apps.core.mixins import SoftDeleteViewSetMixin
 
 from .models import ListingFeeRule
 from .serializers_fee_rules import ListingFeeRuleSerializer
+
+
+class FeeRulePagination(PageNumberPagination):
+    """
+    Frontend inaomba /fee-rules/?page_size=200. Bila page_size_query_param,
+    DRF inapuuza parameter hiyo na kurudisha rules 20 tu — rules za
+    kategoria mpya (zilizo mwishoni) hazionekani, na kujaribu kuziongeza
+    kunaleta 400 DUPLICATE_ACTIVE_RULE.
+    """
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 500
 
 
 class IsAdminOrReadOnly(permissions.BasePermission):
@@ -18,7 +31,6 @@ class IsAdminOrReadOnly(permissions.BasePermission):
             and request.user.is_authenticated
             and request.user.is_staff
         )
-
 
 def _log(request, action, target="", target_id=None, details=""):
     try:
@@ -36,13 +48,12 @@ def _log(request, action, target="", target_id=None, details=""):
             "Failed to write audit log: %s", action,
         )
 
-
 class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     serializer_class = ListingFeeRuleSerializer
     permission_classes = [IsAdminOrReadOnly]
+    pagination_class = FeeRulePagination
     staff_can_restore_any = True
 
-    # ✅ FIX: Ongeza filter backends ili ?category=X ifanye kazi
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["category", "is_active", "is_deleted"]
 
@@ -52,8 +63,8 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             self.request.user.is_authenticated
             and self.request.user.is_staff
         ):
-            return qs.order_by("priority", "min_price")
-        return qs.filter(is_active=True).order_by("priority", "min_price")
+            return qs.order_by("priority", "min_price", "id")
+        return qs.filter(is_active=True).order_by("priority", "min_price", "id")
 
     def _can_restore(self, instance):
         return bool(

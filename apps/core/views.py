@@ -1,18 +1,5 @@
 # ============================================================
 # apps/trash/views.py
-#
-# Marekebisho:
-#  - _build_thumbnail: inasaidia URLField (string) + ImageField (.url)
-#  - _build_subtitle: inatumika kama `name` fallback
-#  - _cascade_protected: inafuta related PROTECT rows kwa mpangilio
-#    salama (financial records kwanza, kisha Listing, n.k.)
-#  - TrashPermanentDeleteView: inakubali `force=true`; inatumia
-#    _cascade_protected kufuta related PROTECT rows
-#  - TrashEmptyByTypeView: inakubali `force=true`; inatumia
-#    _cascade_protected
-#  - TrashEmptyAllView: inakubali `force=true`; inatumia
-#    _cascade_protected
-#  - TrashListView: inaonyesha `protected` flag kwa kila item
 # ============================================================
 from django.apps import apps
 from django.db import transaction
@@ -73,14 +60,30 @@ def _is_protected(model):
 
 
 def _wants_force(request):
-    """`force` inaweza kuja kwenye query string au body."""
-    if not (request.user and request.user.is_superuser):
+    """
+    `force` inaweza kuja kwenye query string au body.
+
+    ✅ FIX: Ruhusu is_staff AU is_superuser.
+    Hii inaruhusu Admin wa kawaida (is_staff=True, is_superuser=False)
+    kufuta protected items kwa `force=true` — kama ilivyoonyeshwa kwenye
+    UI ya Trash (kitufe cha "Futa Kabisa" kinaonekana kila mara).
+    """
+    user = request.user
+    if not user or not user.is_authenticated:
         return False
+    if not (user.is_staff or user.is_superuser):
+        return False
+
+    # Chukua `force` kutoka query string kwanza
     raw = request.query_params.get("force")
+
+    # Fallback kwa body (kama request.data ni dict)
     if raw is None and isinstance(request.data, dict):
         raw = request.data.get("force")
+
     if raw is None:
         return False
+
     return str(raw).lower() in ("1", "true", "yes", "on")
 
 
@@ -325,7 +328,10 @@ class TrashPermanentDeleteView(APIView):
         if _is_protected(model) and not force:
             return Response(
                 {
-                    "detail": "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa. Tuma `force=true` kuthibitisha.",
+                    "detail": (
+                        "Aina hii ya rekodi inalindwa dhidi ya kufutwa kabisa. "
+                        "Tuma `force=true` kuthibitisha."
+                    ),
                     "protected": True,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -389,7 +395,10 @@ class TrashEmptyByTypeView(APIView):
         if _is_protected(model) and not force:
             return Response(
                 {
-                    "detail": "Aina hii ya rekodi haiwezi kufutwa kabisa. Tuma `force=true` kuthibitisha.",
+                    "detail": (
+                        "Aina hii ya rekodi haiwezi kufutwa kabisa. "
+                        "Tuma `force=true` kuthibitisha."
+                    ),
                     "protected": True,
                 },
                 status=status.HTTP_400_BAD_REQUEST,

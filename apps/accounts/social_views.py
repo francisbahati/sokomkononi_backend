@@ -1,7 +1,7 @@
 """
 Social login (Google / Apple).
 
-POST /api/auth/social/  { provider, id_token, code? }
+POST /api/auth/social/  { provider, id_token, code?, user? }
 """
 import logging
 
@@ -24,9 +24,10 @@ GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 APPLE_ISSUER = "https://appleid.apple.com"
 APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
 
+# JWKS client with cache — Apple rotates keys but caches for performance
 try:
     from jwt import PyJWKClient as _PyJWKClient
-    _APPLE_JWKS_CLIENT = _PyJWKClient(APPLE_KEYS_URL)
+    _APPLE_JWKS_CLIENT = _PyJWKClient(APPLE_KEYS_URL, cache_keys=True)
 except Exception:
     _APPLE_JWKS_CLIENT = None
 
@@ -38,6 +39,8 @@ class SocialLoginView(APIView):
     def post(self, request):
         provider = (request.data.get("provider") or "").strip().lower()
         id_token = (request.data.get("id_token") or "").strip()
+        user_data = request.data.get("user") or {}
+        code = request.data.get("code")
 
         if provider not in ("google", "apple"):
             raise ValidationError(
@@ -49,7 +52,7 @@ class SocialLoginView(APIView):
         if provider == "google":
             email, name = self._verify_google(id_token)
         else:
-            email, name = self._verify_apple(id_token)
+            email, name = self._verify_apple(id_token, user_data)
 
         email = email.strip().lower()
         user = (
@@ -118,7 +121,7 @@ class SocialLoginView(APIView):
 
         return email, data.get("name", "")
 
-    def _verify_apple(self, id_token):
+    def _verify_apple(self, id_token, user_data=None):
         try:
             import jwt
             from jwt import PyJWKClient
@@ -126,7 +129,7 @@ class SocialLoginView(APIView):
             raise ValidationError({"id_token": "PyJWT haijasakinishwa."})
 
         try:
-            jwks_client = _APPLE_JWKS_CLIENT or PyJWKClient(APPLE_KEYS_URL)
+            jwks_client = _APPLE_JWKS_CLIENT or PyJWKClient(APPLE_KEYS_URL, cache_keys=True)
             signing_key = jwks_client.get_signing_key_from_jwt(id_token)
         except Exception:
             logger.exception("Apple JWKS lookup failed")
@@ -156,10 +159,26 @@ class SocialLoginView(APIView):
                 {"id_token": "ID token haikubaliani na client."}
             )
 
+        # Apple returns email in `id_token` on first sign-in, but may omit it
+        # on subsequent sign-ins. The frontend passes the `user` object which
+        # contains email + name on first sign-in only.
         email = payload.get("email")
+        if not email and user_data:
+            email = user_data.get("email")
         if not email:
             raise ValidationError(
                 {"id_token": "Barua pepe haipo kwenye token."}
             )
 
-        return email, ""
+        # Name: `user_data.name` is { firstName, lastName } on first sign-in
+        name = ""
+        if user_data:
+            name_obj = user_data.get("name") or {}
+            if isinstance(name_obj, dict):
+                first = (name_obj.get("firstName") or "").strip()
+                last = (name_obj.get("lastName") or "").strip()
+                name = f"{first} {last}".strip()
+            elif isinstance(name_obj, str):
+                name = name_obj.strip()
+
+        return email, name

@@ -450,12 +450,24 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
 
     # ── Phase 2: HTTP calls (NO lock, NO transaction) ──
     if existing_ref:
+        sd = None
         try:
             sd = _fp_get_status(existing_ref)
-            if (sd.get("payment_status") or "").upper() in ("PENDING", "INPROGRESS", "SUCCESS"):
-                return sd
         except Exception:
-            pass
+            sd = None
+        if sd:
+            ps = (sd.get("payment_status") or "").upper()
+            if ps == "SUCCESS":
+                # Tayari imelipwa FimiPay: itumie na uwashe boost sasa
+                # (webhook inaweza kuwa imekosa). Errors zinapita juu kwa
+                # makusudi — usiunde order ya pili.
+                mark_boost_as_paid_from_webhook(
+                    ref_id=_snapshot["pk"],
+                    payment_reference=sd.get("transid") or existing_ref,
+                )
+                return sd
+            if ps in ("PENDING", "INPROGRESS"):
+                return sd
 
     order_id = make_order_id("BST", _snapshot["pk"])
     data = _fp_create_order(
@@ -496,11 +508,7 @@ def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
 
-    # Activate right away. Without this, a customer who pays and then
-    # closes the browser is charged but never boosted, because the
-    # frontend is the only other place that calls /activate/.
-    # A failure here (e.g. listing no longer AVAILABLE) must not undo
-    # the recorded payment, so it is logged and left for review.
+
     try:
         boost = activate_boost(boost=boost)
     except ValidationError:

@@ -9,6 +9,9 @@ Public DRF endpoints exposing FimiPay to SokoMkononi staff and users.
   GET  /api/payments/payouts/<id>/       retrieve one payout (staff)
   POST /api/payments/payouts/<id>/sync/  force status refresh (staff)
 """
+import logging
+
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 
 from rest_framework import generics, permissions, status
@@ -33,6 +36,53 @@ from .serializers import (
 )
 
 
+
+
+logger = logging.getLogger(__name__)
+
+# Aina zote za malipo zinazotumia order_id ya FimiPay. Polling inatumia
+# malipo moja kwa moja pale FimiPay inaposema SUCCESS (kama webhook imekosa).
+# Kuzima aina fulani: settings.PAYMENTS_RECONCILE_EXCLUDE = {"BST"}
+# Kuzima zote:        settings.PAYMENTS_RECONCILE_ON_POLL = False
+RECONCILE_ON_POLL_PREFIXES = {"LSF", "BST", "LDS", "BND", "ADV", "SFE", "RSV"}
+
+
+def _reconcile_if_paid(prefix, order_id, data):
+    """
+    Kama FimiPay inasema SUCCESS lakini webhook haikutumia malipo,
+    yatumie sasa. Kama kutumia kumeshindikana, rudisha PENDING ili
+    frontend iendelee kujaribu (badala ya kuonyesha mafanikio ya uongo).
+    """
+    if not getattr(settings, "PAYMENTS_RECONCILE_ON_POLL", True):
+        return data
+    excluded = set(getattr(settings, "PAYMENTS_RECONCILE_EXCLUDE", set()) or ())
+    if (
+        prefix not in RECONCILE_ON_POLL_PREFIXES
+        or prefix in excluded
+        or not isinstance(data, dict)
+    ):
+        return data
+
+    status_str = str(
+        data.get("payment_status") or data.get("status") or ""
+    ).upper()
+    if status_str != "SUCCESS":
+        return data
+
+    from .views import OK, apply_success_from_status
+    try:
+        result = apply_success_from_status(order_id, data)
+    except Exception:
+        logger.exception("Reconcile-from-poll crashed for %s", order_id)
+        result = None
+
+    if result == OK:
+        return data
+
+    patched = dict(data)
+    patched["payment_status"] = "PENDING"
+    patched["reconcile_pending"] = True
+    return patched
 
 
 def _user_owns_order(user, prefix, ref_id):
@@ -94,10 +144,24 @@ def order_status_view(request):
     if not prefix or ref_id is None:
         return Response({"detail": "order_id si sahihi."}, status=400)
 
+    if prefix not in RECONCILE_ON_POLL_PREFIXES:
+        # Aina ya malipo isiyojulikana (mfano ripoti/credits) — haitakuwa na
+        # handler ya webhook wala ukaguzi wa umiliki: malipo hayatatumika.
+        logger.warning(
+            "order_status: UNKNOWN order prefix %r (order_id=%s) — "
+            "no ownership check / webhook handler exists for it",
+            prefix, order_id,
+        )
+
     if not _user_owns_order(request.user, prefix, ref_id):
+        logger.warning(
+            "order_status: ownership check failed user=%s order_id=%s",
+            request.user.id, order_id,
+        )
         return Response({"detail": "Haipatikani."}, status=404)
 
     data = get_order_status(order_id)
+    data = _reconcile_if_paid(prefix, order_id, data)
     return Response(data)
 
 

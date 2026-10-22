@@ -116,16 +116,31 @@ from apps.payments.order_ids import make_order_id
 def initiate_purchase_payment(*, purchase, user, payment_method='mobile', phone=''):
     if purchase.user_id != user.id:
         raise ValidationError("Huruhusiwi kulipia ununuzi huu.")
+    if purchase.status == BundlePurchase.Status.PAID:
+        # Bila hii, order mpya ingeundwa na mteja angelipa mara ya pili.
+        raise ValidationError("Ununuzi huu tayari umelipiwa.")
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
     existing_ref = (purchase.payment_reference or "").strip()
     if existing_ref:
+        sd = None
         try:
             sd = _fp_get_status(existing_ref)
-            if (sd.get("payment_status") or "").upper() in ("PENDING", "INPROGRESS", "SUCCESS"):
-                return sd
         except Exception:
-            pass
+            sd = None
+        if sd:
+            ps = (sd.get("payment_status") or "").upper()
+            if ps == "SUCCESS":
+                # Tayari imelipwa FimiPay: itumie sasa (webhook inaweza kuwa
+                # imekosa). Errors zinapita juu kwa makusudi — usiunde order
+                # ya pili kwa malipo yaliyokwisha kufanyika.
+                mark_purchase_paid_from_webhook(
+                    ref_id=purchase.pk,
+                    payment_reference=sd.get("transid") or existing_ref,
+                )
+                return sd
+            if ps in ("PENDING", "INPROGRESS"):
+                return sd
 
     # FIX: FimiPay rejects an order_id it has seen before, so every new
     # attempt gets a unique id (BND-<pk>-<random>). The webhook parses the pk.

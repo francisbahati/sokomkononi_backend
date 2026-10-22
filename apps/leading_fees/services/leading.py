@@ -166,17 +166,32 @@ def initiate_leading_payment(*, leading, user, payment_method='mobile', phone=''
     )
     if leading.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia leading hii.")
+    if leading.payment_status == ListingLeading.PaymentStatus.PAID:
+        # Bila hii, order mpya ingeundwa na mteja angelipa mara ya pili.
+        raise ValidationError("Leading hii tayari imelipiwa.")
 
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
     existing_ref = (leading.payment_reference or "").strip()
     if existing_ref:
+        sd = None
         try:
             sd = _fp_get_status(existing_ref)
-            if (sd.get("payment_status") or "").upper() in ("PENDING", "INPROGRESS", "SUCCESS"):
-                return sd
         except Exception:
-            pass
+            sd = None
+        if sd:
+            ps = (sd.get("payment_status") or "").upper()
+            if ps == "SUCCESS":
+                # Tayari imelipwa FimiPay: itumie sasa (webhook inaweza kuwa
+                # imekosa). Errors hapa zinapita juu kwa makusudi — kamwe
+                # usiunde order ya pili kwa malipo yaliyokwisha kufanyika.
+                mark_leading_paid_from_webhook(
+                    ref_id=leading.pk,
+                    payment_reference=sd.get("transid") or existing_ref,
+                )
+                return sd
+            if ps in ("PENDING", "INPROGRESS"):
+                return sd
 
     order_id = make_order_id("LDS", leading.pk)
     data = _fp_create_order(

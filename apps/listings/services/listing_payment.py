@@ -104,6 +104,14 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
             if ps in ("PENDING", "INPROGRESS"):
                 return status_data
             if ps == "SUCCESS":
+                # Tayari imelipwa FimiPay — itumie sasa, usirudishe SUCCESS
+                # bila kuiwezesha listing (webhook inaweza kuwa imekosa).
+                mark_listing_fee_as_paid_from_webhook(
+                    ref_id=listing.id,
+                    payment_reference=(
+                        status_data.get("transid") or existing_ref
+                    ),
+                )
                 return status_data
         except Exception:
             pass

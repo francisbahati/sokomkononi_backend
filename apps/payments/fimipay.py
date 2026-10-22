@@ -23,7 +23,9 @@ def _resolve_test_outcome():
     """
     import os
     return os.environ.get("SOKO_FIMIPAY_TEST_OUTCOME", "").strip() or None
-REQUEST_TIMEOUT = 30
+# (connect, read) — lazima ziwe chini ya gunicorn --timeout (chaguo-msingi 30s),
+# vinginevyo FimiPay ikichelewa worker inauawa na browser inaona 502/"CORS".
+REQUEST_TIMEOUT = (5, 15)
 
 
 def _headers():

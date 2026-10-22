@@ -167,7 +167,10 @@ def _lookup_expected_amount(prefix, ref_id_int):
     try:
         if prefix == "LSF":
             from apps.listings.models import ListingFee
-            return ListingFee.objects.get(pk=ref_id_int).amount
+            # order_id "LSF-<listing_id>-xxxx" ina ID ya LISTING, si ya ListingFee.
+            # (Awali ilitumia pk=ref_id_int -> ilitafuta fee ya listing nyingine
+            # au haikupatikana kabisa, na malipo yalikataliwa kimya kimya.)
+            return ListingFee.objects.get(listing_id=ref_id_int).amount
         if prefix == "BST":
             from apps.boosting.models import ListingBoost
             return ListingBoost.objects.get(pk=ref_id_int).amount
@@ -225,12 +228,18 @@ def _route_success(order_id, event):
         )
         return IGNORED
 
+    return _call_success_handler(
+        order_id, target, ref_id_int, event.get("transid") or order_id,
+    )
+
+
+def _call_success_handler(order_id, target, ref_id_int, payment_reference):
     module_path, func_name = target
     try:
         handler = getattr(importlib.import_module(module_path), func_name)
         handler(
             ref_id=ref_id_int,
-            payment_reference=event.get("transid") or order_id,
+            payment_reference=payment_reference,
         )
     except ObjectDoesNotExist:
         logger.exception("Webhook: record missing for %s", order_id)
@@ -251,6 +260,36 @@ def _route_success(order_id, event):
         )
         return RETRY
     return OK
+
+
+def apply_success_from_status(order_id, data):
+    """
+    PULL reconciliation: inaitwa na order_status_view pale FimiPay inasema
+    SUCCESS (jibu la server-to-server kwa kutumia secret key yetu), ili
+    malipo yatumike hata kama webhook haikufika au ilikataliwa.
+
+    Handlers ni idempotent, kwa hiyo kuita mara nyingi ni salama.
+    Inarudisha OK / IGNORED / RETRY.
+    """
+    try:
+        prefix, ref_id_int = parse_order_id(order_id)
+    except (ValueError, TypeError):
+        return IGNORED
+    if ref_id_int is None:
+        return IGNORED
+
+    target = _SUCCESS_HANDLERS.get(prefix)
+    if not target:
+        return IGNORED
+
+    data = data or {}
+    logger.info(
+        "Reconcile-from-poll: applying SUCCESS for order_id=%s", order_id,
+    )
+    return _call_success_handler(
+        order_id, target, ref_id_int,
+        data.get("transid") or order_id,
+    )
 
 
 @csrf_exempt
@@ -280,8 +319,8 @@ def fimipay_webhook(request):
     ).upper()
 
     logger.info(
-        "FimiPay webhook: event=%s order_id=%s status=%s",
-        event, order_id, payment_status,
+        "FimiPay webhook: event=%s order_id=%s status=%s keys=%s",
+        event, order_id, payment_status, sorted(payload.keys()),
     )
 
     if event == "payment.refunded" or payment_status == "REFUNDED":
@@ -301,6 +340,12 @@ def fimipay_webhook(request):
         if result == RETRY:
             return JsonResponse(
                 {"detail": "Temporary error, please retry."}, status=500,
+            )
+        if result == IGNORED:
+            logger.error(
+                "PAID BUT NOT APPLIED: order_id=%s amount=%s transid=%s "
+                "(see WebhookDiscrepancy / run reconcile_payments)",
+                order_id, payload.get("amount"), payload.get("transid"),
             )
 
     return JsonResponse({"received": True}, status=200)

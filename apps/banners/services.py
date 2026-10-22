@@ -127,17 +127,32 @@ from apps.payments.fimipay import (
 def initiate_banner_payment(*, banner, user, payment_method='mobile', phone=''):
     if banner.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia banner hii.")
+    if banner.payment_status == "PAID":
+        # Bila hii, order mpya ingeundwa na mteja angelipa mara ya pili.
+        raise ValidationError("Banner hii tayari imelipiwa.")
 
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
     existing_ref = (banner.payment_reference or "").strip()
     if existing_ref:
+        sd = None
         try:
             sd = _fp_get_status(existing_ref)
-            if (sd.get("payment_status") or "").upper() in ("PENDING", "INPROGRESS", "SUCCESS"):
-                return sd
         except Exception:
-            pass
+            sd = None
+        if sd:
+            ps = (sd.get("payment_status") or "").upper()
+            if ps == "SUCCESS":
+                # Tayari imelipwa FimiPay: itumie na uwashe banner sasa
+                # (webhook inaweza kuwa imekosa). Errors zinapita juu kwa
+                # makusudi — usiunde order ya pili.
+                mark_banner_paid_from_webhook(
+                    ref_id=banner.pk,
+                    payment_reference=sd.get("transid") or existing_ref,
+                )
+                return sd
+            if ps in ("PENDING", "INPROGRESS"):
+                return sd
 
     order_id = make_order_id("ADV", banner.pk)
     data = _fp_create_order(

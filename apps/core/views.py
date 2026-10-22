@@ -1,5 +1,14 @@
 # ============================================================
 # apps/trash/views.py
+#
+# ✅ PROTECTION IMEONDOLWA KABISA
+#    - Kila admin (is_staff) anaweza kufuta kila kitu
+#    - Hakuna check ya _is_protected
+#    - force ni True kila mara
+#
+# ✅ FIX: _cascade_protected inatumia hasattr(rel, "hard_delete")
+#    badala ya isinstance(rel, SoftDeleteModel) — Transaction,
+#    ListingFee, Reservation hazina hard_delete() → AttributeError
 # ============================================================
 from django.apps import apps
 from django.db import transaction
@@ -70,12 +79,27 @@ def _wants_force(request):
     return True
 
 
+def _hard_delete_obj(obj):
+    """
+    ✅ FIX: Futa object moja (hard) — inatumia `hasattr` badala ya
+    `isinstance(obj, SoftDeleteModel)`.
+
+    Sababu: `Transaction`, `ListingFee`, `Reservation`, n.k. ni
+    SoftDeleteModel au la, lakini `hard_delete()` inaweza kuwa
+    haijafafanuliwa au imeoverride — hivyo `hasattr` ni salama zaidi.
+    """
+    if hasattr(obj, "hard_delete") and callable(getattr(obj, "hard_delete")):
+        obj.hard_delete()
+    else:
+        obj.delete()
+
+
 def _cascade_protected(obj, max_depth=5):
     """
     Futa related objects zinazozuia `obj` kufutwa (PROTECT FK).
 
     Inarudia hadi `max_depth` mara:
-      1. Jaribu `obj.hard_delete()`.
+      1. Jaribu `_hard_delete_obj(obj)`.
       2. Kama ProtectedError, futa kila `protected_object`.
       3. Jaribu tena.
 
@@ -87,7 +111,7 @@ def _cascade_protected(obj, max_depth=5):
     removed = []
     for attempt in range(max_depth):
         try:
-            obj.hard_delete()
+            _hard_delete_obj(obj)
             return True, removed, None
         except ProtectedError as e:
             progressed = False
@@ -95,10 +119,8 @@ def _cascade_protected(obj, max_depth=5):
                 rel_model = rel._meta.model
                 label = f"{rel_model._meta.app_label}.{rel_model.__name__}#{rel.pk}"
                 try:
-                    if isinstance(rel, SoftDeleteModel):
-                        rel.hard_delete()
-                    else:
-                        rel.delete()
+                    # ✅ FIX: hasattr badala ya isinstance
+                    _hard_delete_obj(rel)
                     removed.append(label)
                     progressed = True
                 except ProtectedError:
@@ -129,7 +151,7 @@ def _cascade_protected(obj, max_depth=5):
                     + ", ".join(str(o) for o in e.protected_objects)[:500]
                 )
     try:
-        obj.hard_delete()
+        _hard_delete_obj(obj)
         return True, removed, None
     except ProtectedError as e:
         return False, removed, (

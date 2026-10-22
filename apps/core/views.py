@@ -103,6 +103,7 @@ _LISTING_RELATED_TABLES = [
 
     # 3. `deal_rooms` (ina watoto: messages)
     "deal_rooms",
+    "messages", 
 
     # 4. Details (one-to-one)
     "property_details",
@@ -119,7 +120,6 @@ _LISTING_RELATED_TABLES = [
 def _cleanup_listing_relations(listing_id):
     """
     ✅ Futa related records za listing kwa SQL moja kwa moja.
-    Inatumia SQL kwa sababu Django ORM inaweza kuzuia kwa PROTECT.
     Returns: list[str] ya items zilizofutwa (kwa audit).
     """
     import logging
@@ -127,7 +127,30 @@ def _cleanup_listing_relations(listing_id):
     removed = []
 
     with connection.cursor() as cur:
+        # ─────────────────────────────────────────────────────
+        # ✅ FIX: `messages` haina `listing_id` — ina `conversation_id`.
+        # Kwa hivyo futa kwa `conversation_id IN (SELECT ...)`.
+        # ─────────────────────────────────────────────────────
+        try:
+            cur.execute("""
+                DELETE FROM messages
+                WHERE conversation_id IN (
+                    SELECT id FROM conversations WHERE listing_id = %s
+                )
+            """, [listing_id])
+            if cur.rowcount > 0:
+                removed.append(f"messages({cur.rowcount})")
+        except Exception as e:
+            log.debug("[trash] messages cleanup skipped: %s", e)
+
+        # ─────────────────────────────────────────────────────
+        # Kisha futa tables zilizobaki kwa `listing_id`
+        # (isipokuwa `messages` — tumeifuta juu)
+        # ─────────────────────────────────────────────────────
         for table in _LISTING_RELATED_TABLES:
+            if table == "messages":
+                continue  # ✅ tumeifuta juu
+
             try:
                 # Kwanza futa watoto wa `transactions` kama ipo
                 if table == "transactions":
@@ -155,7 +178,7 @@ def _cleanup_listing_relations(listing_id):
                     except Exception as e:
                         log.debug("[trash] inspection_periods cleanup skipped: %s", e)
 
-                # Futa table yenyewe
+                # Futa table yenyewe (kwa `listing_id`)
                 cur.execute(
                     f'DELETE FROM "{table}" WHERE listing_id = %s',
                     [listing_id],
@@ -163,13 +186,11 @@ def _cleanup_listing_relations(listing_id):
                 if cur.rowcount > 0:
                     removed.append(f"{table}({cur.rowcount})")
             except Exception as e:
-                # Table haipo, column haipo, au jina la table ni reserved
                 log.debug(
                     "[trash] cleanup %s skipped: %s", table, e,
                 )
 
     return removed
-
 
 def _cascade_protected(obj, max_depth=5):
     """

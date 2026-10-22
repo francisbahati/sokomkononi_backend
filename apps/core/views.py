@@ -2,16 +2,10 @@
 # apps/trash/views.py
 #
 # ✅ PROTECTION IMEONDOLWA KABISA
-#    - Kila admin (is_staff) anaweza kufuta kila kitu
-#    - force ni True kila mara
-#
-# ✅ FIX #1: _cascade_protected inatumia hasattr(rel, "hard_delete")
-#    badala ya isinstance — Transaction, ListingFee hazina hard_delete()
-#
-# ✅ FIX #2: Cleanup ya manual kwa `conversations` (na
-#    conversation_messages) kabla ya kufuta Listing. Hii ni
-#    kwa sababu `Conversation` haiko kwenye `_meta` ya Listing
-#    kama related manager (FK haiko kwenye e.protected_objects).
+# ✅ FIX #1: hasattr() badala ya isinstance() kwa hard_delete
+# ✅ FIX #2: _cleanup_listing_relations() inafuta tables zote 18
+#    zinazorejelea `listings` bila CASCADE, kwa mpangilio salama:
+#    watoto kwanza, wazazi baadaye.
 # ============================================================
 from django.apps import apps
 from django.db import connection, transaction
@@ -20,7 +14,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .constants import AUDIT_PROTECTED_MODEL_NAMES  # kept for compat (haijatumika)
+from .constants import AUDIT_PROTECTED_MODEL_NAMES  # kept for compat
 from .models import SoftDeleteModel
 
 
@@ -70,10 +64,7 @@ def _is_protected(model):
 
 
 def _wants_force(request):
-    """
-    ✅ PROTECTION IMEONDOLWA: `force` ni `True` kila mara
-    kwa admin (is_staff) au superuser.
-    """
+    """✅ `force` ni `True` kila mara kwa admin."""
     user = request.user
     if not user or not user.is_authenticated:
         return False
@@ -83,70 +74,99 @@ def _wants_force(request):
 
 
 def _hard_delete_obj(obj):
-    """
-    ✅ FIX: Futa object moja (hard) — inatumia `hasattr` badala ya
-    `isinstance(obj, SoftDeleteModel)`.
-    """
+    """✅ Tumia hasattr badala ya isinstance kwa hard_delete."""
     if hasattr(obj, "hard_delete") and callable(getattr(obj, "hard_delete")):
         obj.hard_delete()
     else:
         obj.delete()
 
 
-def _cleanup_conversations(listing_id):
-    """
-    ✅ FIX: Futa `conversations` (na `conversation_messages`) zinazorejelea
-    Listing hii kabla ya hard_delete. Hii ni kwa sababu `Conversation`
-    haiko kwenye `_meta` ya Listing kama related manager, hivyo
-    `e.protected_objects` haizijumuishi — na PostgreSQL inazuia.
+# ============================================================
+# ✅ CLEANUP — tables 18 zinazorejelea `listings` bila CASCADE
+# Mpangilio: watoto kwanza, wazazi baadaye.
+# ============================================================
+_LISTING_RELATED_TABLES = [
+    # 1. Watoto wa `transactions` / `deal_rooms` (kwanza kabisa)
+    "saved_search_matches",
+    "conversations",  # messages zake zitafutwa kwa cascade ya FK (kama ipo)
+    "feedback",
+    "leads",
+    "waiting_list_entries",
+    "saved_listings",
+    "banner_ads",
+    "listing_boosts",
+    "listing_leadings",
+    "listing_fees",
 
+    # 2. `transactions` (ina watoto wake: reservations, inspections)
+    "transactions",
+
+    # 3. `deal_rooms` (ina watoto: messages)
+    "deal_rooms",
+
+    # 4. Details (one-to-one)
+    "property_details",
+    "land_details",
+    "vehicle_details",
+    "business_details",
+    "equipment_details",
+
+    # 5. Images (mwisho)
+    "listing_images",
+]
+
+
+def _cleanup_listing_relations(listing_id):
+    """
+    ✅ Futa related records za listing kwa SQL moja kwa moja.
+    Inatumia SQL kwa sababu Django ORM inaweza kuzuia kwa PROTECT.
     Returns: list[str] ya items zilizofutwa (kwa audit).
     """
     import logging
     log = logging.getLogger(__name__)
     removed = []
 
-    # ── 1. Jaribu model `Conversation` (kama ipo) ─────────
-    try:
-        Conversation = apps.get_model("conversations", "Conversation")
-        qs = Conversation.objects.filter(listing_id=listing_id)
-        count = qs.count()
-        if count > 0:
-            qs.delete()
-            removed.append(f"conversations({count})")
-    except LookupError:
-        pass  # App haipo — ruka
-    except Exception as e:
-        log.warning(
-            "[trash] Conversation model cleanup failed for listing#%s: %s",
-            listing_id, e,
-        )
+    with connection.cursor() as cur:
+        for table in _LISTING_RELATED_TABLES:
+            try:
+                # Kwanza futa watoto wa `transactions` kama ipo
+                if table == "transactions":
+                    try:
+                        cur.execute("""
+                            DELETE FROM reservations
+                            WHERE transaction_id IN (
+                                SELECT id FROM transactions WHERE listing_id = %s
+                            )
+                        """, [listing_id])
+                        if cur.rowcount > 0:
+                            removed.append(f"reservations({cur.rowcount})")
+                    except Exception as e:
+                        log.debug("[trash] reservations cleanup skipped: %s", e)
 
-    # ── 2. Direct SQL fallback (kama model cleanup haikufanya kazi) ──
-    try:
-        with connection.cursor() as cur:
-            # Futa messages (kama zipo)
-            cur.execute("""
-                DELETE FROM conversation_messages
-                WHERE conversation_id IN (
-                    SELECT id FROM conversations WHERE listing_id = %s
+                    try:
+                        cur.execute("""
+                            DELETE FROM inspection_periods
+                            WHERE transaction_id IN (
+                                SELECT id FROM transactions WHERE listing_id = %s
+                            )
+                        """, [listing_id])
+                        if cur.rowcount > 0:
+                            removed.append(f"inspection_periods({cur.rowcount})")
+                    except Exception as e:
+                        log.debug("[trash] inspection_periods cleanup skipped: %s", e)
+
+                # Futa table yenyewe
+                cur.execute(
+                    f'DELETE FROM "{table}" WHERE listing_id = %s',
+                    [listing_id],
                 )
-            """, [listing_id])
-            if cur.rowcount > 0:
-                removed.append(f"conversation_messages({cur.rowcount})")
-
-            # Futa conversations
-            cur.execute("""
-                DELETE FROM conversations WHERE listing_id = %s
-            """, [listing_id])
-            if cur.rowcount > 0:
-                removed.append(f"conversations_sql({cur.rowcount})")
-    except Exception as e:
-        # Table haipo au column haipo — ruka
-        log.debug(
-            "[trash] conversations SQL cleanup skipped for listing#%s: %s",
-            listing_id, e,
-        )
+                if cur.rowcount > 0:
+                    removed.append(f"{table}({cur.rowcount})")
+            except Exception as e:
+                # Table haipo, column haipo, au jina la table ni reserved
+                log.debug(
+                    "[trash] cleanup %s skipped: %s", table, e,
+                )
 
     return removed
 
@@ -161,9 +181,9 @@ def _cascade_protected(obj, max_depth=5):
 
     removed = []
 
-    # ── MANUAL CLEANUP kwa `conversations` (Listing pekee) ──
+    # ✅ MANUAL CLEANUP kwa Listing
     if obj._meta.model_name == "listing":
-        removed.extend(_cleanup_conversations(obj.pk))
+        removed.extend(_cleanup_listing_relations(obj.pk))
 
     for attempt in range(max_depth):
         try:

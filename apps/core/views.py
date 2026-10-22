@@ -3,15 +3,18 @@
 #
 # ✅ PROTECTION IMEONDOLWA KABISA
 #    - Kila admin (is_staff) anaweza kufuta kila kitu
-#    - Hakuna check ya _is_protected
 #    - force ni True kila mara
 #
-# ✅ FIX: _cascade_protected inatumia hasattr(rel, "hard_delete")
-#    badala ya isinstance(rel, SoftDeleteModel) — Transaction,
-#    ListingFee, Reservation hazina hard_delete() → AttributeError
+# ✅ FIX #1: _cascade_protected inatumia hasattr(rel, "hard_delete")
+#    badala ya isinstance — Transaction, ListingFee hazina hard_delete()
+#
+# ✅ FIX #2: Cleanup ya manual kwa `conversations` (na
+#    conversation_messages) kabla ya kufuta Listing. Hii ni
+#    kwa sababu `Conversation` haiko kwenye `_meta` ya Listing
+#    kama related manager (FK haiko kwenye e.protected_objects).
 # ============================================================
 from django.apps import apps
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import ProtectedError
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -83,10 +86,6 @@ def _hard_delete_obj(obj):
     """
     ✅ FIX: Futa object moja (hard) — inatumia `hasattr` badala ya
     `isinstance(obj, SoftDeleteModel)`.
-
-    Sababu: `Transaction`, `ListingFee`, `Reservation`, n.k. ni
-    SoftDeleteModel au la, lakini `hard_delete()` inaweza kuwa
-    haijafafanuliwa au imeoverride — hivyo `hasattr` ni salama zaidi.
     """
     if hasattr(obj, "hard_delete") and callable(getattr(obj, "hard_delete")):
         obj.hard_delete()
@@ -94,21 +93,78 @@ def _hard_delete_obj(obj):
         obj.delete()
 
 
+def _cleanup_conversations(listing_id):
+    """
+    ✅ FIX: Futa `conversations` (na `conversation_messages`) zinazorejelea
+    Listing hii kabla ya hard_delete. Hii ni kwa sababu `Conversation`
+    haiko kwenye `_meta` ya Listing kama related manager, hivyo
+    `e.protected_objects` haizijumuishi — na PostgreSQL inazuia.
+
+    Returns: list[str] ya items zilizofutwa (kwa audit).
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    removed = []
+
+    # ── 1. Jaribu model `Conversation` (kama ipo) ─────────
+    try:
+        Conversation = apps.get_model("conversations", "Conversation")
+        qs = Conversation.objects.filter(listing_id=listing_id)
+        count = qs.count()
+        if count > 0:
+            qs.delete()
+            removed.append(f"conversations({count})")
+    except LookupError:
+        pass  # App haipo — ruka
+    except Exception as e:
+        log.warning(
+            "[trash] Conversation model cleanup failed for listing#%s: %s",
+            listing_id, e,
+        )
+
+    # ── 2. Direct SQL fallback (kama model cleanup haikufanya kazi) ──
+    try:
+        with connection.cursor() as cur:
+            # Futa messages (kama zipo)
+            cur.execute("""
+                DELETE FROM conversation_messages
+                WHERE conversation_id IN (
+                    SELECT id FROM conversations WHERE listing_id = %s
+                )
+            """, [listing_id])
+            if cur.rowcount > 0:
+                removed.append(f"conversation_messages({cur.rowcount})")
+
+            # Futa conversations
+            cur.execute("""
+                DELETE FROM conversations WHERE listing_id = %s
+            """, [listing_id])
+            if cur.rowcount > 0:
+                removed.append(f"conversations_sql({cur.rowcount})")
+    except Exception as e:
+        # Table haipo au column haipo — ruka
+        log.debug(
+            "[trash] conversations SQL cleanup skipped for listing#%s: %s",
+            listing_id, e,
+        )
+
+    return removed
+
+
 def _cascade_protected(obj, max_depth=5):
     """
     Futa related objects zinazozuia `obj` kufutwa (PROTECT FK).
-
-    Inarudia hadi `max_depth` mara:
-      1. Jaribu `_hard_delete_obj(obj)`.
-      2. Kama ProtectedError, futa kila `protected_object`.
-      3. Jaribu tena.
-
     Returns: (success: bool, removed: list[str], error: str|None)
     """
     import logging
     log = logging.getLogger(__name__)
 
     removed = []
+
+    # ── MANUAL CLEANUP kwa `conversations` (Listing pekee) ──
+    if obj._meta.model_name == "listing":
+        removed.extend(_cleanup_conversations(obj.pk))
+
     for attempt in range(max_depth):
         try:
             _hard_delete_obj(obj)
@@ -119,7 +175,6 @@ def _cascade_protected(obj, max_depth=5):
                 rel_model = rel._meta.model
                 label = f"{rel_model._meta.app_label}.{rel_model.__name__}#{rel.pk}"
                 try:
-                    # ✅ FIX: hasattr badala ya isinstance
                     _hard_delete_obj(rel)
                     removed.append(label)
                     progressed = True
@@ -150,6 +205,7 @@ def _cascade_protected(obj, max_depth=5):
                     "Bado imezuiliwa na: "
                     + ", ".join(str(o) for o in e.protected_objects)[:500]
                 )
+
     try:
         _hard_delete_obj(obj)
         return True, removed, None
@@ -251,7 +307,6 @@ class TrashOverviewView(APIView):
                 "app": model._meta.app_label,
                 "model": model.__name__,
                 "count": model.all_objects.filter(is_deleted=True).count(),
-                # ✅ PROTECTION IMEONDOLWA — kila model inaruhusiwa
                 "protected": False,
             })
         out.sort(key=lambda r: (-r["count"], r["model"]))
@@ -286,7 +341,6 @@ class TrashListView(APIView):
                 "details": getattr(obj, "deletion_reason", "") or "",
                 "thumbnail": _build_thumbnail(obj),
                 "repr": str(obj),
-                # ✅ Kila item inaruhusiwa kufutwa
                 "protected": False,
             })
 
@@ -343,7 +397,6 @@ class TrashPermanentDeleteView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # ✅ PROTECTION IMEONDOLWA — force kila mara
         try:
             with transaction.atomic():
                 _audit(

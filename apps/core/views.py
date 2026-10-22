@@ -1,12 +1,3 @@
-# ============================================================
-# apps/trash/views.py
-#
-# ✅ PROTECTION IMEONDOLWA KABISA
-# ✅ FIX #1: hasattr() badala ya isinstance() kwa hard_delete
-# ✅ FIX #2: _cleanup_listing_relations() inafuta tables zote 18
-#    zinazorejelea `listings` bila CASCADE, kwa mpangilio salama:
-#    watoto kwanza, wazazi baadaye.
-# ============================================================
 from django.apps import apps
 from django.db import connection, transaction
 from django.db.models import ProtectedError
@@ -59,12 +50,10 @@ def _resolve_model(type_str):
 
 
 def _is_protected(model):
-    """✅ Inarudisha `False` kila mara — protection imeondolewa."""
     return False
 
 
 def _wants_force(request):
-    """✅ `force` ni `True` kila mara kwa admin."""
     user = request.user
     if not user or not user.is_authenticated:
         return False
@@ -74,7 +63,6 @@ def _wants_force(request):
 
 
 def _hard_delete_obj(obj):
-    """✅ Tumia hasattr badala ya isinstance kwa hard_delete."""
     if hasattr(obj, "hard_delete") and callable(getattr(obj, "hard_delete")):
         obj.hard_delete()
     else:
@@ -82,13 +70,12 @@ def _hard_delete_obj(obj):
 
 
 # ============================================================
-# ✅ CLEANUP — tables 18 zinazorejelea `listings` bila CASCADE
+# ✅ CLEANUP — majedwali yanayorejelea `listings` bila CASCADE
 # Mpangilio: watoto kwanza, wazazi baadaye.
 # ============================================================
 _LISTING_RELATED_TABLES = [
-    # 1. Watoto wa `transactions` / `deal_rooms` (kwanza kabisa)
+    # Majedwali yanayorejelea listings kwa `listing_id` moja kwa moja
     "saved_search_matches",
-    "conversations",  # messages zake zitafutwa kwa cascade ya FK (kama ipo)
     "feedback",
     "leads",
     "waiting_list_entries",
@@ -97,29 +84,19 @@ _LISTING_RELATED_TABLES = [
     "listing_boosts",
     "listing_leadings",
     "listing_fees",
-
-    # 2. `transactions` (ina watoto wake: reservations, inspections)
-    "transactions",
-
-    # 3. `deal_rooms` (ina watoto: messages)
-    "deal_rooms",
-    "messages", 
-
-    # 4. Details (one-to-one)
+    "listing_images",
+    # Details (one-to-one)
     "property_details",
     "land_details",
     "vehicle_details",
     "business_details",
     "equipment_details",
-
-    # 5. Images (mwisho)
-    "listing_images",
 ]
 
 
 def _cleanup_listing_relations(listing_id):
     """
-    ✅ Futa related records za listing kwa SQL moja kwa moja.
+    Futa related records za listing kwa SQL moja kwa moja.
     Returns: list[str] ya items zilizofutwa (kwa audit).
     """
     import logging
@@ -127,10 +104,7 @@ def _cleanup_listing_relations(listing_id):
     removed = []
 
     with connection.cursor() as cur:
-        # ─────────────────────────────────────────────────────
-        # ✅ FIX: `messages` haina `listing_id` — ina `conversation_id`.
-        # Kwa hivyo futa kwa `conversation_id IN (SELECT ...)`.
-        # ─────────────────────────────────────────────────────
+        # 1. messages — kupitia conversations
         try:
             cur.execute("""
                 DELETE FROM messages
@@ -143,42 +117,37 @@ def _cleanup_listing_relations(listing_id):
         except Exception as e:
             log.debug("[trash] messages cleanup skipped: %s", e)
 
-        # ─────────────────────────────────────────────────────
-        # Kisha futa tables zilizobaki kwa `listing_id`
-        # (isipokuwa `messages` — tumeifuta juu)
-        # ─────────────────────────────────────────────────────
-        for table in _LISTING_RELATED_TABLES:
-            if table == "messages":
-                continue  # ✅ tumeifuta juu
-
+        # 2. watoto wa transactions (reservations, inspection_periods)
+        for child in ("reservations", "inspection_periods"):
             try:
-                # Kwanza futa watoto wa `transactions` kama ipo
-                if table == "transactions":
-                    try:
-                        cur.execute("""
-                            DELETE FROM reservations
-                            WHERE transaction_id IN (
-                                SELECT id FROM transactions WHERE listing_id = %s
-                            )
-                        """, [listing_id])
-                        if cur.rowcount > 0:
-                            removed.append(f"reservations({cur.rowcount})")
-                    except Exception as e:
-                        log.debug("[trash] reservations cleanup skipped: %s", e)
+                cur.execute(f"""
+                    DELETE FROM {child}
+                    WHERE transaction_id IN (
+                        SELECT id FROM transactions WHERE listing_id = %s
+                    )
+                """, [listing_id])
+                if cur.rowcount > 0:
+                    removed.append(f"{child}({cur.rowcount})")
+            except Exception as e:
+                log.debug("[trash] %s cleanup skipped: %s", child, e)
 
-                    try:
-                        cur.execute("""
-                            DELETE FROM inspection_periods
-                            WHERE transaction_id IN (
-                                SELECT id FROM transactions WHERE listing_id = %s
-                            )
-                        """, [listing_id])
-                        if cur.rowcount > 0:
-                            removed.append(f"inspection_periods({cur.rowcount})")
-                    except Exception as e:
-                        log.debug("[trash] inspection_periods cleanup skipped: %s", e)
+        # 3. watoto wa deal_rooms (deal_messages, negotiation_offers, tickets)
+        for child in ("deal_messages", "negotiation_offers", "tickets"):
+            try:
+                cur.execute(f"""
+                    DELETE FROM {child}
+                    WHERE deal_room_id IN (
+                        SELECT id FROM deal_rooms WHERE listing_id = %s
+                    )
+                """, [listing_id])
+                if cur.rowcount > 0:
+                    removed.append(f"{child}({cur.rowcount})")
+            except Exception as e:
+                log.debug("[trash] %s cleanup skipped: %s", child, e)
 
-                # Futa table yenyewe (kwa `listing_id`)
+        # 4. Majedwali yanayorejelea listings kwa listing_id
+        for table in _LISTING_RELATED_TABLES:
+            try:
                 cur.execute(
                     f'DELETE FROM "{table}" WHERE listing_id = %s',
                     [listing_id],
@@ -186,11 +155,34 @@ def _cleanup_listing_relations(listing_id):
                 if cur.rowcount > 0:
                     removed.append(f"{table}({cur.rowcount})")
             except Exception as e:
-                log.debug(
-                    "[trash] cleanup %s skipped: %s", table, e,
-                )
+                log.debug("[trash] cleanup %s skipped: %s", table, e)
+
+        # 5. transactions (baada ya watoto wake)
+        try:
+            cur.execute("DELETE FROM transactions WHERE listing_id = %s", [listing_id])
+            if cur.rowcount > 0:
+                removed.append(f"transactions({cur.rowcount})")
+        except Exception as e:
+            log.debug("[trash] transactions cleanup skipped: %s", e)
+
+        # 6. deal_rooms (baada ya watoto wake)
+        try:
+            cur.execute("DELETE FROM deal_rooms WHERE listing_id = %s", [listing_id])
+            if cur.rowcount > 0:
+                removed.append(f"deal_rooms({cur.rowcount})")
+        except Exception as e:
+            log.debug("[trash] deal_rooms cleanup skipped: %s", e)
+
+        # 7. conversations (baada ya messages)
+        try:
+            cur.execute("DELETE FROM conversations WHERE listing_id = %s", [listing_id])
+            if cur.rowcount > 0:
+                removed.append(f"conversations({cur.rowcount})")
+        except Exception as e:
+            log.debug("[trash] conversations cleanup skipped: %s", e)
 
     return removed
+
 
 def _cascade_protected(obj, max_depth=5):
     """
@@ -202,7 +194,7 @@ def _cascade_protected(obj, max_depth=5):
 
     removed = []
 
-    # ✅ MANUAL CLEANUP kwa Listing
+    # MANUAL CLEANUP kwa Listing
     if obj._meta.model_name == "listing":
         removed.extend(_cleanup_listing_relations(obj.pk))
 
@@ -455,7 +447,7 @@ class TrashPermanentDeleteView(APIView):
                             ),
                             "protected_objects": removed[:10] or [],
                         },
-                        status=status.HTTP_400_BAD_REQUEST,
+                        status=status.HTTP_409_CONFLICT,
                     )
                 if removed:
                     _audit(
@@ -469,7 +461,7 @@ class TrashPermanentDeleteView(APIView):
                     "detail": "Haifutiki — inatumika mahali pengine.",
                     "protected_objects": _format_protected(e),
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_409_CONFLICT,
             )
         except Exception as e:
             log.exception(

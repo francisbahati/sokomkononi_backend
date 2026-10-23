@@ -28,6 +28,7 @@ urlpatterns = [
     ),
 
     # Auth & apps
+    path("api/stats/", include("apps.stats.urls")),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/contact/", include("apps.contact.urls")),
     path("api/categories/", include("apps.categories.urls")),

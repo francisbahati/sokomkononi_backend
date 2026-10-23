@@ -61,7 +61,7 @@ INSTALLED_APPS = [
     "rest_framework", "rest_framework_simplejwt", "rest_framework_simplejwt.token_blacklist",
     "corsheaders", "django_filters", "drf_spectacular",
     "drf_spectacular_sidecar", "storages", "csp",
-    "apps.core",
+    "apps.core", "apps.stats",
     "apps.payments", "apps.contact", "apps.accounts", "apps.categories", "apps.listings",
     "apps.boosting", "apps.deals", "apps.transactions", "apps.finance",
     "apps.notifications", "apps.waiting_list", "apps.saved", "apps.searches",

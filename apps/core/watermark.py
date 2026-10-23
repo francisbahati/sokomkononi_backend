@@ -43,16 +43,16 @@ def _rounded_rectangle(draw, xy, radius, fill):
     )
 
 
-def add_watermark(image_file, text=None, position="bottom-right"):
+def add_watermark(image_file, text=None, position="bottom-left"):
     """
     Ongeza watermark kwenye picha bila kuondoa ubora na bila kuficha.
 
-    position: "bottom-right" | "bottom-left" | "top-right" | "top-left" | "center"
+    position: "bottom-left" (default) | "bottom-right" | "top-left" | "top-right" | "center"
     """
     if text is None:
         text = WATERMARK_TEXT
 
-    # ⬇️ Seek(0) kabla ya Image.open() — muhimu kwa InMemoryUploadedFile
+    # Seek(0) kabla ya Image.open() — muhimu kwa InMemoryUploadedFile
     try:
         image_file.seek(0)
     except Exception:
@@ -62,7 +62,7 @@ def add_watermark(image_file, text=None, position="bottom-right"):
     original_mode = img.mode
     original_format = img.format or "JPEG"
 
-    # Convert to RGBA for compositing, but remember original
+    # Convert to RGBA for compositing
     if img.mode not in ("RGBA", "RGB"):
         img = img.convert("RGBA")
     elif img.mode == "RGB":
@@ -80,28 +80,28 @@ def add_watermark(image_file, text=None, position="bottom-right"):
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
 
-    # ── Ukubwa wa badge (background ya watermark) ─────────
+    # ── Ukubwa wa badge ────────────────────────────────────
     badge_width = text_width + (WATERMARK_BADGE_PAD_X * 2)
     badge_height = text_height + (WATERMARK_BADGE_PAD_Y * 2)
 
-    # ── Chagua mahali (position) ──────────────────────────
+    # ── Chagua mahali ──────────────────────────────────────
     if position == "bottom-right":
         badge_x = width - badge_width - WATERMARK_PADDING
         badge_y = height - badge_height - WATERMARK_PADDING
-    elif position == "bottom-left":
-        badge_x = WATERMARK_PADDING
-        badge_y = height - badge_height - WATERMARK_PADDING
-    elif position == "top-right":
-        badge_x = width - badge_width - WATERMARK_PADDING
-        badge_y = WATERMARK_PADDING
     elif position == "top-left":
         badge_x = WATERMARK_PADDING
         badge_y = WATERMARK_PADDING
-    else:  # center
+    elif position == "top-right":
+        badge_x = width - badge_width - WATERMARK_PADDING
+        badge_y = WATERMARK_PADDING
+    elif position == "center":
         badge_x = (width - badge_width) // 2
         badge_y = (height - badge_height) // 2
+    else:  # "bottom-left" (default)
+        badge_x = WATERMARK_PADDING
+        badge_y = height - badge_height - WATERMARK_PADDING
 
-    # ── Chora badge (background yenye rangi) ──────────────
+    # ── Chora badge ────────────────────────────────────────
     _rounded_rectangle(
         draw,
         (
@@ -114,11 +114,11 @@ def add_watermark(image_file, text=None, position="bottom-right"):
         fill=WATERMARK_BADGE_BG,
     )
 
-    # ── Chora maandishi juu ya badge ──────────────────────
+    # ── Chora maandishi ────────────────────────────────────
     text_x = badge_x + WATERMARK_BADGE_PAD_X
     text_y = badge_y + WATERMARK_BADGE_PAD_Y
 
-    # Shadow (chini ya maandishi)
+    # Shadow
     shadow_offset = 1
     draw.text(
         (text_x + shadow_offset, text_y + shadow_offset),
@@ -135,33 +135,31 @@ def add_watermark(image_file, text=None, position="bottom-right"):
         fill=WATERMARK_TEXT_COLOR,
     )
 
-    # ── Unganisha watermark na picha ───────────────────────
-    watermarked = Image.alpha_composite(img, watermark_layer)
+    # ── Unganisha ──────────────────────────────────────────
+    img = Image.alpha_composite(img, watermark_layer)
 
-    # ── Hifadhi bila kupunguza ubora ──────────────────────
+    # ── Hifadhi ────────────────────────────────────────────
     output = BytesIO()
     content_type = getattr(image_file, "content_type", "image/jpeg")
 
     if content_type == "image/jpeg" or original_format.upper() == "JPEG":
-        # JPEG: quality 95, subsampling 4:4:4 (hakuna chroma subsampling)
-        watermarked = watermarked.convert("RGB")
-        watermarked.save(
+        img = img.convert("RGB")
+        img.save(
             output,
             format="JPEG",
             quality=95,
-            subsampling=0,      # 4:4:4 — rangi hazipoteza ubora
+            subsampling=0,
             optimize=True,
         )
     elif content_type == "image/png" or original_format.upper() == "PNG":
-        watermarked.save(output, format="PNG", optimize=True)
+        img.save(output, format="PNG", optimize=True)
     elif content_type == "image/webp" or original_format.upper() == "WEBP":
-        watermarked.save(output, format="WEBP", quality=90, method=6)
+        img.save(output, format="WEBP", quality=90, method=6)
     else:
-        # Fallback: hifadhi kwa format ya awali ikiwa inawezekana
         try:
-            watermarked.save(output, format=original_format, quality=95)
+            img.save(output, format=original_format, quality=95)
         except Exception:
-            watermarked.save(output, format="PNG", optimize=True)
+            img.save(output, format="PNG", optimize=True)
 
     output.seek(0)
     return output

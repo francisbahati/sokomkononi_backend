@@ -71,10 +71,8 @@ def _hard_delete_obj(obj):
 
 # ============================================================
 # ✅ CLEANUP — majedwali yanayorejelea `listings` bila CASCADE
-# Mpangilio: watoto kwanza, wazazi baadaye.
 # ============================================================
 _LISTING_RELATED_TABLES = [
-    # Majedwali yanayorejelea listings kwa `listing_id` moja kwa moja
     "saved_search_matches",
     "feedback",
     "leads",
@@ -85,7 +83,6 @@ _LISTING_RELATED_TABLES = [
     "listing_leadings",
     "listing_fees",
     "listing_images",
-    # Details (one-to-one)
     "property_details",
     "land_details",
     "vehicle_details",
@@ -104,7 +101,6 @@ def _cleanup_listing_relations(listing_id):
     removed = []
 
     with connection.cursor() as cur:
-        # 1. messages — kupitia conversations
         try:
             cur.execute("""
                 DELETE FROM messages
@@ -117,7 +113,6 @@ def _cleanup_listing_relations(listing_id):
         except Exception as e:
             log.debug("[trash] messages cleanup skipped: %s", e)
 
-        # 2. watoto wa transactions (reservations, inspection_periods)
         for child in ("reservations", "inspection_periods"):
             try:
                 cur.execute(f"""
@@ -131,7 +126,6 @@ def _cleanup_listing_relations(listing_id):
             except Exception as e:
                 log.debug("[trash] %s cleanup skipped: %s", child, e)
 
-        # 3. watoto wa deal_rooms (deal_messages, negotiation_offers, tickets)
         for child in ("deal_messages", "negotiation_offers", "tickets"):
             try:
                 cur.execute(f"""
@@ -145,7 +139,6 @@ def _cleanup_listing_relations(listing_id):
             except Exception as e:
                 log.debug("[trash] %s cleanup skipped: %s", child, e)
 
-        # 4. Majedwali yanayorejelea listings kwa listing_id
         for table in _LISTING_RELATED_TABLES:
             try:
                 cur.execute(
@@ -157,7 +150,6 @@ def _cleanup_listing_relations(listing_id):
             except Exception as e:
                 log.debug("[trash] cleanup %s skipped: %s", table, e)
 
-        # 5. transactions (baada ya watoto wake)
         try:
             cur.execute("DELETE FROM transactions WHERE listing_id = %s", [listing_id])
             if cur.rowcount > 0:
@@ -165,7 +157,6 @@ def _cleanup_listing_relations(listing_id):
         except Exception as e:
             log.debug("[trash] transactions cleanup skipped: %s", e)
 
-        # 6. deal_rooms (baada ya watoto wake)
         try:
             cur.execute("DELETE FROM deal_rooms WHERE listing_id = %s", [listing_id])
             if cur.rowcount > 0:
@@ -173,7 +164,6 @@ def _cleanup_listing_relations(listing_id):
         except Exception as e:
             log.debug("[trash] deal_rooms cleanup skipped: %s", e)
 
-        # 7. conversations (baada ya messages)
         try:
             cur.execute("DELETE FROM conversations WHERE listing_id = %s", [listing_id])
             if cur.rowcount > 0:
@@ -182,6 +172,128 @@ def _cleanup_listing_relations(listing_id):
             log.debug("[trash] conversations cleanup skipped: %s", e)
 
     return removed
+
+
+def _create_refunds_for_listing(listing, admin_user):
+    """
+    Unda refund kwa promotions zilizolipiwa za listing hili
+    ambazo bado zina muda. Returns: list[str] ya refunds zilizoundwa.
+
+    NOTE: Inatumia `Refund` kutoka `apps.payments.models` — fields
+    zake ni tofauti na nilizopendekeza awali (promotion_type ni
+    uppercase, kuna user_phone, user_email, user_payment_method,
+    amount_refunded, method, processed_by).
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    created = []
+
+    try:
+        from apps.payments.models import Refund
+        from apps.boosting.models import ListingBoost
+        from apps.leading_fees.models import ListingLeading
+        from apps.banners.models import BannerAd
+        from django.utils import timezone
+
+        now = timezone.now()
+
+        # ── Boosts zilizolipiwa na bado zina muda ──────────
+        boosts = ListingBoost.objects.filter(
+            listing=listing,
+            payment_status="PAID",
+            status="ACTIVE",
+        )
+        for boost in boosts:
+            if boost.expires_at and boost.expires_at <= now:
+                continue
+            seller = boost.seller
+            refund = Refund.objects.create(
+                user=seller,
+                promotion_type=Refund.PromotionType.BOOST,
+                promotion_id=boost.pk,
+                amount_paid=boost.amount,
+                user_phone=getattr(seller, "phone", "") or "",
+                user_email=getattr(seller, "email", "") or "",
+                user_payment_method=getattr(boost, "payment_method", "") or "",
+                method=Refund.Method.MANUAL,
+                reason=(
+                    f"Tangazo \"{listing.title}\" limefutwa na admin "
+                    f"kabla ya boost kuisha."
+                ),
+                processed_by=admin_user,
+            )
+            created.append(f"boost#{boost.pk}(TZS {boost.amount})")
+            log.info(
+                "[trash] created refund %s for boost#%s",
+                refund.pk, boost.pk,
+            )
+
+        # ── Leadings zilizolipiwa na bado zina muda ────────
+        leadings = ListingLeading.objects.filter(
+            listing=listing,
+            payment_status=ListingLeading.PaymentStatus.PAID,
+            status=ListingLeading.Status.ACTIVE,
+        )
+        for leading in leadings:
+            if leading.expires_at and leading.expires_at <= now:
+                continue
+            seller = leading.seller
+            refund = Refund.objects.create(
+                user=seller,
+                promotion_type=Refund.PromotionType.LEADING,
+                promotion_id=leading.pk,
+                amount_paid=leading.price,
+                user_phone=getattr(seller, "phone", "") or "",
+                user_email=getattr(seller, "email", "") or "",
+                user_payment_method="",
+                method=Refund.Method.MANUAL,
+                reason=(
+                    f"Tangazo \"{listing.title}\" limefutwa na admin "
+                    f"kabla ya leading kuisha."
+                ),
+                processed_by=admin_user,
+            )
+            created.append(f"leading#{leading.pk}(TZS {leading.price})")
+            log.info(
+                "[trash] created refund %s for leading#%s",
+                refund.pk, leading.pk,
+            )
+
+        # ── Advertisements zilizolipiwa na bado zina muda ──
+        banners = BannerAd.objects.filter(
+            listing=listing,
+            payment_status="PAID",
+            active=True,
+        )
+        for banner in banners:
+            if banner.expires_at and banner.expires_at <= now:
+                continue
+            seller = banner.seller
+            refund = Refund.objects.create(
+                user=seller,
+                promotion_type=Refund.PromotionType.ADVERTISE,
+                promotion_id=banner.pk,
+                amount_paid=banner.amount or 0,
+                user_phone=getattr(seller, "phone", "") or "",
+                user_email=getattr(seller, "email", "") or "",
+                user_payment_method="",
+                method=Refund.Method.MANUAL,
+                reason=(
+                    f"Tangazo \"{listing.title}\" limefutwa na admin "
+                    f"kabla ya tangazo (advertisement) kuisha."
+                ),
+                processed_by=admin_user,
+            )
+            created.append(f"advertise#{banner.pk}(TZS {banner.amount})")
+            log.info(
+                "[trash] created refund %s for banner#%s",
+                refund.pk, banner.pk,
+            )
+
+    except Exception as e:
+        log.exception("[trash] refund creation failed: %s", e)
+
+    return created
 
 
 def _cascade_protected(obj, max_depth=5):
@@ -194,7 +306,6 @@ def _cascade_protected(obj, max_depth=5):
 
     removed = []
 
-    # MANUAL CLEANUP kwa Listing
     if obj._meta.model_name == "listing":
         removed.extend(_cleanup_listing_relations(obj.pk))
 
@@ -436,6 +547,18 @@ class TrashPermanentDeleteView(APIView):
                     request, "trash.hard_deleted", model, obj.pk,
                     f"Hard-deleted {model.__name__}#{obj.pk} [FORCED]",
                 )
+
+                if model.__name__ == "Listing":
+                    refunds_created = _create_refunds_for_listing(
+                        obj, request.user
+                    )
+                    if refunds_created:
+                        _audit(
+                            request, "trash.refunds_created", model, obj.pk,
+                            f"Created {len(refunds_created)} refund(s): "
+                            + ", ".join(refunds_created[:10]),
+                        )
+
                 ok, removed, err = _cascade_protected(obj)
                 if not ok:
                     transaction.set_rollback(True)
@@ -503,6 +626,10 @@ class TrashEmptyByTypeView(APIView):
                         request, "trash.hard_deleted", model, obj.pk,
                         f"Empty-by-type: {model.__name__}#{obj.pk} [FORCED]",
                     )
+
+                    if model.__name__ == "Listing":
+                        _create_refunds_for_listing(obj, request.user)
+
                     ok, removed, err = _cascade_protected(obj)
                     if not ok:
                         transaction.set_rollback(True)
@@ -560,6 +687,10 @@ class TrashEmptyAllView(APIView):
                             request, "trash.hard_deleted", model, obj.pk,
                             f"Empty-all: {model.__name__}#{obj.pk} [FORCED]",
                         )
+
+                        if model.__name__ == "Listing":
+                            _create_refunds_for_listing(obj, request.user)
+
                         ok, _removed, _err = _cascade_protected(obj)
                         if not ok:
                             transaction.set_rollback(True)

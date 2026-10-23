@@ -227,34 +227,51 @@ def expire_unpaid_reservations():
     for rid in reservation_ids:
         try:
             with db_transaction.atomic():
-                reservation = (Reservation.objects.select_for_update()
-                    .select_related("transaction","transaction__listing")
-                    .get(pk=rid))
+                reservation = (
+                    Reservation.objects.select_for_update(of=("self",))
+                    .select_related("transaction", "transaction__listing")
+                    .get(pk=rid)
+                )
                 if reservation.status != Reservation.Status.PENDING_PAYMENT:
                     continue
                 transaction = reservation.transaction
 
-            reservation.status = Reservation.Status.CANCELLED
-            reservation.save(update_fields=["status", "updated_at"])
+                reservation.status = Reservation.Status.CANCELLED
+                reservation.save(update_fields=["status", "updated_at"])
 
-            if transaction.status in (
-                Transaction.Status.RESERVATION_PENDING,
-                Transaction.Status.RESERVED,
-                Transaction.Status.INSPECTION,
-            ):
-                transaction.status = Transaction.Status.CANCELLED
-                transaction.cancelled_at = now
-                transaction.cancellation_reason = (
-                    "Reservation payment window expired."
-                )
-                transaction.save(update_fields=[
-                    "status", "cancelled_at", "cancellation_reason", "updated_at",
-                ])
+                if transaction.status in (
+                    Transaction.Status.RESERVATION_PENDING,
+                    Transaction.Status.RESERVED,
+                    Transaction.Status.INSPECTION,
+                ):
+                    transaction.status = Transaction.Status.CANCELLED
+                    transaction.cancelled_at = now
+                    transaction.cancellation_reason = (
+                        "Reservation payment window expired."
+                    )
+                    transaction.save(update_fields=[
+                        "status", "cancelled_at",
+                        "cancellation_reason", "updated_at",
+                    ])
 
-            listing = Listing.objects.filter(pk=transaction.listing_id).first()
-            if listing and listing.status == Listing.Status.RESERVED:
-                listing.status = Listing.Status.LIVE
-                listing.save(update_fields=["status", "updated_at"])
+                listing = Listing.objects.select_for_update().filter(
+                    pk=transaction.listing_id
+                ).first()
+                reopened = False
+                if listing and listing.status == Listing.Status.RESERVED:
+                    listing.status = Listing.Status.LIVE
+                    listing.save(update_fields=["status", "updated_at"])
+                    reopened = True
+
+                # Alichukua nafasi kupitia waiting list lakini hakulipa
+                # kwa wakati -> arudishwe kwenye foleni.
+                from .services.reservation import restore_waiting_list_entry
+                if restore_waiting_list_entry(
+                    reservation=reservation
+                ) is not None:
+                    reopened = True
+
+            if reopened:
                 try:
                     from apps.waiting_list.services.notifications import (
                         notify_waiting_buyers,
@@ -394,13 +411,13 @@ def notify_waiting_list_expiring():
                 listing=listing,
                 status__in=["WAITING", "NOTIFIED"],
             )
-            .select_related("user")
+            .select_related("buyer")
         )
 
         for entry in entries:
             try:
                 create_notification(
-                    recipient=entry.user,
+                    recipient=entry.buyer,
                     notification_type=(
                         Notification.NotificationType.WAITING_LIST_AVAILABLE
                     ),
@@ -423,20 +440,20 @@ def notify_waiting_list_expiring():
                 # Email kwa waiting list buyer
                 try:
                     send_waiting_list_reservation_email(
-                        buyer=entry.user,
+                        buyer=entry.buyer,
                         listing=listing,
                     )
                 except Exception:
                     logger.exception(
                         "Failed to send waiting-list email to user %s",
-                        entry.user_id,
+                        entry.buyer_id,
                     )
 
                 notified += 1
             except Exception:
                 logger.exception(
                     "Failed to notify waiting list user %s",
-                    entry.user_id,
+                    entry.buyer_id,
                 )
 
     logger.info(

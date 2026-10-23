@@ -473,9 +473,10 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             },
         })
 
-    # ═══════════════════════════════════════════════════════════════════
-    # PUBLISH
-    # ═══════════════════════════════════════════════════════════════════
+    
+   # ═══════════════════════════════════════════════════════════════════
+   # PUBLISH
+   # ═══════════════════════════════════════════════════════════════════
     @action(
         detail=True,
         methods=["post"],
@@ -483,21 +484,18 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         permission_classes=[IsVerifiedUser, IsOwnerOrAdmin],
     )
     def publish(self, request, pk=None):
-        # Mtiririko: seller anawasilisha -> admin anakagua -> admin anaomba
-        # malipo -> seller analipa -> admin anaidhinisha mwisho.
-        # Hakuna malipo wala kuhesabu ada hapa. (Awali import ya
-        # `_is_listing_fee_required_for` isiyokuwepo ilifanya endpoint hii
-        # irudishe 500 kila mara.)
         listing = self.get_object()
         self.check_object_permissions(request, listing)
 
+        # ⬅️ ONGEZA PENDING_PAYMENT
         if listing.status not in (
             Listing.Status.DRAFT,
+            Listing.Status.PENDING_PAYMENT,
             Listing.Status.REJECTED,
             Listing.Status.NEEDS_EDIT,
         ):
             return Response(
-                {"detail": f"Tangazo halipo kwenye DRAFT. Hali: {listing.status}."},
+                {"detail": f"Tangazo haliwezi kuwasilishwa. Hali: {listing.status}."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -516,8 +514,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        # Chaguo B: seller anawasilisha kwa admin BILA ya kulipa.
-        # Admin anaona, anakagua, kisha anamwambia seller alipe.
         listing.status = Listing.Status.PENDING_APPROVAL
         listing.save(update_fields=["status", "updated_at"])
 

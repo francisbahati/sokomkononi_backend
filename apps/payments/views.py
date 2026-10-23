@@ -56,6 +56,11 @@ _SUCCESS_HANDLERS = {
         "apps.transactions.services.reservation",
         "mark_reservation_paid_from_webhook",
     ),
+    # Ada ya kuongeza muda wa reservation
+    "RSX": (
+        "apps.transactions.services.reservation",
+        "mark_extension_paid_from_webhook",
+    ),
 }
 
 OK = "ok"
@@ -74,6 +79,7 @@ _REFUND_HANDLERS = {
     "ADV": ("apps.banners.services", "mark_banner_as_refunded"),
     "SFE": ("apps.finance.services_success_fee", "mark_success_fee_as_refunded"),
     "RSV": ("apps.transactions.services.reservation", "mark_reservation_as_refunded"),
+    "RSX": ("apps.transactions.services.reservation", "mark_extension_as_refunded"),
     "REF": ("apps.payments.refunds", "mark_refund_completed_from_webhook"),
 }
 
@@ -189,6 +195,9 @@ def _lookup_expected_amount(prefix, ref_id_int):
         if prefix == "RSV":
             from apps.transactions.models import Reservation
             return Reservation.objects.get(pk=ref_id_int).deposit_amount
+        if prefix == "RSX":
+            from apps.transactions.models import ReservationExtension
+            return ReservationExtension.objects.get(pk=ref_id_int).fee
     except ObjectDoesNotExist:
         return None
     except Exception:

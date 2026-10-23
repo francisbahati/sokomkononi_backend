@@ -28,6 +28,10 @@ SYNC_SOURCES = [
     {"model":"transactions.Reservation","pending_field":"payment_status","pending_value":"PENDING",
      "reference_field":"payment_reference","user_field":"transaction__buyer",
      "handler":("apps.transactions.services.reservation","mark_reservation_paid_from_webhook")},
+    # Ada ya kuongeza muda wa reservation (order prefix "RSX")
+    {"model":"transactions.ReservationExtension","pending_field":"status","pending_value":"PENDING_PAYMENT",
+     "reference_field":"payment_reference","user_field":"reservation__transaction__buyer",
+     "handler":("apps.transactions.services.reservation","mark_extension_paid_from_webhook")},
 ]
 
 def _ensure_db():

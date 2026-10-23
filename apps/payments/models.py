@@ -165,6 +165,7 @@ class Refund(models.Model):
         LEADING = "LEADING", "Leading"
         ADVERTISE = "ADVERTISE", "Advertisement"
         RESERVATION = "RESERVATION", "Reservation"
+        EXTENSION = "EXTENSION", "Reservation Extension"
 
     # ── Promotion inayohusika ──────────────────────────────
     promotion_type = models.CharField(

@@ -161,7 +161,11 @@ class WaitingListViewSet(viewsets.GenericViewSet):
         """
         from django.utils import timezone
         from apps.transactions.models import Transaction
-        from apps.transactions.services.reservation import create_reservation
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        from apps.transactions.services.reservation import (
+            create_reservation,
+            get_allowed_reservation_hours,
+        )
 
         entry = self.get_queryset().filter(pk=pk).first()
         if not entry:
@@ -221,6 +225,36 @@ class WaitingListViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Muda: tier yoyote hai (mnunuzi anachagua). Bila chaguo -> tier
+        # ndogo kuliko zote iliyo hai.
+        allowed = sorted(get_allowed_reservation_hours())
+        if not allowed:
+            return Response(
+                {"detail": "Hakuna tiers za reservation zilizo hai."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        raw_hours = request.data.get("duration_hours")
+        if raw_hours in (None, ""):
+            duration_hours = allowed[0]
+        else:
+            try:
+                duration_hours = int(raw_hours)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "Muda wa reservation si sahihi."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if duration_hours not in allowed:
+                return Response(
+                    {
+                        "detail": (
+                            "Chagua muda mmoja wa saa: "
+                            + ", ".join(str(h) for h in allowed)
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         txn, _ = Transaction.objects.get_or_create(
             deal_room=deal_room,
             defaults={
@@ -236,15 +270,22 @@ class WaitingListViewSet(viewsets.GenericViewSet):
             reservation = create_reservation(
                 transaction=txn,
                 user=request.user,
-                duration_hours=24,
+                duration_hours=duration_hours,
             )
-        except Exception as exc:
+        except DRFValidationError as exc:
+            detail = exc.detail
+            if isinstance(detail, (list, tuple)) and detail:
+                detail = str(detail[0])
+            elif isinstance(detail, dict):
+                detail = "; ".join(str(v) for v in detail.values())
             return Response(
-                {"detail": str(exc)},
+                {"detail": str(detail)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Mark the waitlist entry as FULFILLED so it drops out of queue
+        # Mark the waitlist entry as FULFILLED so it drops out of queue.
+        # Kama hatalipa kwa wakati, anarudishwa kwenye foleni
+        # (angalia restore_waiting_list_entry).
         entry.status = WaitingListEntry.Status.FULFILLED
         entry.save(update_fields=["status", "updated_at"])
 

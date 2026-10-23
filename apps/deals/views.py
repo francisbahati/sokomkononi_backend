@@ -81,6 +81,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         DealRoom.objects
         .select_related(
             "listing", "listing__category", "buyer", "seller",
+            "transaction", "transaction__reservation",
         )
         .prefetch_related("offers", "offers__offered_by")
     )
@@ -95,7 +96,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return DealRoomCreateSerializer
         if self.action == "offer":
             return NegotiationOfferCreateSerializer
-        if self.action == "accept_offer":
+        if self.action in ("accept_offer", "decline_offer"):
             return DealRoomAcceptOfferSerializer
         if self.action == "cancel":
             return DealRoomCancelSerializer
@@ -115,7 +116,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return [permissions.IsAuthenticated(), IsVerifiedDealUser()]
         if self.action in [
-            "retrieve", "offer", "accept_offer", "cancel",
+            "retrieve", "offer", "accept_offer", "decline_offer", "cancel",
             "messages_create", "messages_list", "report",
         ]:
             return [
@@ -641,6 +642,54 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         return Response(
             DealRoomDetailSerializer(
                 deal_room,
+                context={"request": request, "deal_room": deal_room},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        request=DealRoomAcceptOfferSerializer,
+        responses={200: NegotiationOfferSerializer},
+    )
+    @action(
+        detail=True, methods=["post"],
+        url_path="decline-offer", url_name="decline-offer",
+    )
+    @transaction.atomic
+    def decline_offer(self, request, pk=None):
+        """
+        Upande uliopokea ofa unaikataa. Ofa inakuwa REJECTED na
+        Deal Room inabaki NEGOTIATING ili pande zote ziendelee kutuma ofa.
+        """
+        deal_room = get_object_or_404(
+            DealRoom.objects.select_for_update(of=("self",)),
+            pk=pk,
+        )
+        self.check_object_permissions(request, deal_room)
+
+        serializer = DealRoomAcceptOfferSerializer(
+            data=request.data,
+            context={"request": request, "deal_room": deal_room},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        offer = (
+            NegotiationOffer.objects
+            .select_for_update(of=("self",))
+            .select_related("offered_by")
+            .get(pk=serializer.validated_data["offer_id"], deal_room=deal_room)
+        )
+        offer.status = NegotiationOffer.Status.REJECTED
+        offer.save(update_fields=["status", "updated_at"])
+        deal_room.save(update_fields=["updated_at"])
+
+        transaction.on_commit(
+            lambda: notify_offer_rejected(deal_room=deal_room, offer=offer)
+        )
+
+        return Response(
+            NegotiationOfferSerializer(
+                offer,
                 context={"request": request, "deal_room": deal_room},
             ).data,
             status=status.HTTP_200_OK,

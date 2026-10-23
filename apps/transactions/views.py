@@ -18,7 +18,12 @@ from rest_framework.response import Response
 
 from apps.deals.models import DealRoom
 
-from .models import InspectionPeriod, Reservation, Transaction
+from .models import (
+    InspectionPeriod,
+    Reservation,
+    ReservationExtension,
+    Transaction,
+)
 from .serializers import (
     BuyerDecisionSerializer,
     FinalPaymentProofSerializer,
@@ -41,7 +46,10 @@ from .services.reservation import (
     start_inspection_period,
     get_allowed_reservation_hours,
     calculate_reservation_fee,
-    remove_reservation_by_buyer, 
+    remove_reservation_by_buyer,
+    request_reservation_extension,
+    confirm_extension_with_credits,
+    initiate_extension_payment,
 )
 from .services.transaction import (
     cancel_transaction,
@@ -478,16 +486,26 @@ class TransactionViewSet(viewsets.GenericViewSet):
         )
 
     # ============================================================
-    # EXTEND RESERVATION (buyer)
+    # EXTEND RESERVATION (buyer) — LAZIMA ILIPWE KWANZA
     # ============================================================
     @action(detail=True, methods=["post"], url_path="extend-reservation")
     def extend_reservation(self, request, pk=None):
         """
-        Buyer anaongeza muda wa reservation yake kwa tier halali.
-        Fee ya tier inaongezwa kwenye deposit_amount.
+        Buyer anaongeza muda wa reservation (na inspection) kwa tier halali.
+        Muda unaongezwa TU baada ya ada ya tier kulipwa.
 
         Body (JSON):
-            { "additional_hours": 24 }   # lazima iwe tier halali
+            {
+              "additional_hours": 24,          # tier halali
+              "payment_reference": "credits",  # hiari: lipa kwa credits
+              "payment_method": "mobile|card", # FimiPay (default mobile)
+              "phone": "2557..."               # kwa mobile money
+            }
+
+        Majibu:
+          - 200 + Reservation  -> muda umeongezwa (credits / ada imezimwa)
+          - 201 + {extension_id, payment_status: "PENDING", fimipay: {...}}
+                                -> kamilisha malipo; webhook inaongeza muda
         """
         transaction = self._get_transaction(pk)
 
@@ -497,56 +515,53 @@ class TransactionViewSet(viewsets.GenericViewSet):
             )
 
         reservation = getattr(transaction, "reservation", None)
-        if not reservation or reservation.status != Reservation.Status.ACTIVE:
-            raise ValidationError(
-                "Reservation haipo ACTIVE. Haiwezi kuongezwa muda."
-            )
+        if not reservation:
+            raise ValidationError("Transaction hii haina Reservation.")
 
-        try:
-            additional_hours = int(request.data.get("additional_hours"))
-        except (TypeError, ValueError):
-            raise ValidationError(
-                "additional_hours inahitajika (integer)."
-            )
+        extension = request_reservation_extension(
+            reservation=reservation,
+            user=request.user,
+            additional_hours=request.data.get("additional_hours"),
+        )
 
-        allowed = get_allowed_reservation_hours()
-        if not allowed:
-            raise ValidationError(
-                "Hakuna tiers za reservation zilizo hai."
-            )
-        if additional_hours not in allowed:
-            hours_str = ", ".join(str(h) for h in sorted(allowed))
-            raise ValidationError(
-                f"Muda wa kuongeza lazima uwe mmoja wa: {hours_str}."
-            )
+        payment_reference = (
+            request.data.get("payment_reference") or ""
+        ).strip()
 
-        fee = calculate_reservation_fee(additional_hours)
-
-        with db_transaction.atomic():
-            reservation = (
-                Reservation.objects
-                .select_for_update()
-                .get(pk=reservation.pk)
-            )
-
-            if reservation.status != Reservation.Status.ACTIVE:
+        # 1) Ada imezimwa -> tayari imeongezwa
+        # 2) Credits
+        if extension.status != extension.Status.PAID:
+            if payment_reference == "credits":
+                confirm_extension_with_credits(
+                    extension=extension, user=request.user,
+                )
+            elif payment_reference:
                 raise ValidationError(
-                    "Reservation haipo ACTIVE tena."
+                    "Njia hii ya malipo hairuhusiwi. Tumia credits "
+                    "au lipa kupitia FimiPay."
+                )
+            else:
+                data = initiate_extension_payment(
+                    extension=extension,
+                    user=request.user,
+                    payment_method=request.data.get(
+                        "payment_method", "mobile",
+                    ),
+                    phone=request.data.get("phone", ""),
+                )
+                return Response(
+                    {
+                        "extension_id": extension.id,
+                        "reservation_id": reservation.id,
+                        "additional_hours": extension.additional_hours,
+                        "fee": str(extension.fee),
+                        "payment_status": "PENDING",
+                        "fimipay": data,
+                    },
+                    status=status.HTTP_201_CREATED,
                 )
 
-            now = timezone.now()
-            base = reservation.expires_at or now
-            reservation.duration_hours += additional_hours
-            reservation.expires_at = base + timedelta(hours=additional_hours)
-            if fee > Decimal("0.00"):
-                reservation.deposit_amount = (
-                    reservation.deposit_amount + fee
-                )
-            reservation.save(update_fields=[
-                "duration_hours", "expires_at",
-                "deposit_amount", "updated_at",
-            ])
-
+        reservation = Reservation.objects.get(pk=reservation.pk)
         _log(
             request,
             action="reservation.extended",
@@ -554,37 +569,10 @@ class TransactionViewSet(viewsets.GenericViewSet):
             target_id=reservation.id,
             details=(
                 f"Reservation #{reservation.id} extended by "
-                f"{additional_hours}h (fee TZS {fee}) "
+                f"{extension.additional_hours}h (fee TZS {extension.fee}) "
                 f"for Transaction #{transaction.id}"
             ),
         )
-
-        # Notify both parties
-        try:
-            from apps.notifications.models import Notification
-            from apps.notifications.services.notification import (
-                create_notification,
-            )
-            for recipient in (transaction.buyer, transaction.seller):
-                create_notification(
-                    recipient=recipient,
-                    notification_type=Notification.NotificationType.GENERAL,
-                    title="Reservation imeongezwa muda",
-                    message=(
-                        f"Reservation ya Transaction #{transaction.id} "
-                        f"imeongezwa saa {additional_hours}. "
-                        f"Inaisha: {reservation.expires_at}."
-                    ),
-                    priority=Notification.Priority.HIGH,
-                    related_object_type="Reservation",
-                    related_object_id=reservation.id,
-                    action_url=f"/transactions/{transaction.id}",
-                )
-        except Exception:
-            import logging
-            logging.getLogger(__name__).exception(
-                "reservation extend notify failed"
-            )
 
         return Response(
             ReservationSerializer(

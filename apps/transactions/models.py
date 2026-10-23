@@ -277,3 +277,67 @@ class InspectionPeriod(models.Model):
             f"Inspection #{self.pk} - "
             f"Transaction #{self.transaction_id}"
         )
+
+class ReservationExtension(models.Model):
+    """
+    Ombi la kuongeza muda wa reservation. Muda unaongezwa TU baada ya
+    ada ya tier kulipwa (FimiPay / credits) au kama ada imezimwa.
+    """
+
+    class Status(models.TextChoices):
+        PENDING_PAYMENT = "PENDING_PAYMENT", "Pending Payment"
+        PAID = "PAID", "Paid"
+        CANCELLED = "CANCELLED", "Cancelled"
+        REFUNDED = "REFUNDED", "Refunded"
+
+    reservation = models.ForeignKey(
+        Reservation, on_delete=models.PROTECT,
+        related_name="extensions", verbose_name="Reservation",
+    )
+    additional_hours = models.PositiveIntegerField(
+        verbose_name="Saa za kuongeza",
+    )
+    fee = models.DecimalField(
+        max_digits=15, decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="Ada ya extension",
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices,
+        default=Status.PENDING_PAYMENT, verbose_name="Hali",
+    )
+    payment_reference = models.CharField(
+        max_length=255, blank=True, null=True, unique=True,
+        verbose_name="Payment reference",
+    )
+    paid_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Muda wa kulipa",
+    )
+    refund_reference = models.CharField(
+        max_length=255, blank=True, verbose_name="Refund reference",
+    )
+    refunded_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Muda wa kurefund",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, verbose_name="Imeundwa",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True, verbose_name="Imesasishwa",
+    )
+
+    class Meta:
+        db_table = "reservation_extensions"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["reservation", "status"],
+                name="res_ext_res_status_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Extension #{self.pk} - Reservation #{self.reservation_id} "
+            f"(+{self.additional_hours}h)"
+        )

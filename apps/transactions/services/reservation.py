@@ -9,7 +9,12 @@ from rest_framework.exceptions import ValidationError
 from apps.listings.models import Listing
 from apps.waiting_list.services.notifications import notify_waiting_buyers
 
-from ..models import InspectionPeriod, Reservation, Transaction
+from ..models import (
+    InspectionPeriod,
+    Reservation,
+    ReservationExtension,
+    Transaction,
+)
 from .notifications import (
     notify_inspection_completed,
     notify_inspection_started,
@@ -139,6 +144,81 @@ def _lock_reservation(reservation):
     return reservation, transaction
 
 
+def _restore_deal_room(transaction):
+    """
+    Reservation imeisha / imeondolewa -> Deal Room irudi ACCEPTED ili
+    mnunuzi aweze kureserve tena (bei bado imekubaliwa).
+    """
+    from apps.deals.models import DealRoom
+
+    deal_room = (
+        DealRoom.objects
+        .select_for_update()
+        .filter(pk=transaction.deal_room_id)
+        .first()
+    )
+    if deal_room and deal_room.status == DealRoom.Status.RESERVED:
+        deal_room.status = DealRoom.Status.ACCEPTED
+        deal_room.save(update_fields=["status", "updated_at"])
+        return True
+    return False
+
+
+def restore_waiting_list_entry(*, reservation):
+    """
+    Mnunuzi aliyechukua nafasi kupitia waiting list (claim) lakini
+    hakulipa, anarudishwa kwenye foleni (mwisho wa foleni, ili anayefuata
+    apate nafasi kwanza). Haiguswi entry za zamani zisizohusiana.
+
+    Itumike ndani ya atomic block. Inarudisha entry au None.
+    """
+    from django.db.models import Max
+    from apps.waiting_list.models import WaitingListEntry
+
+    transaction = reservation.transaction
+
+    entry = (
+        WaitingListEntry.objects
+        .select_for_update()
+        .filter(
+            listing_id=transaction.listing_id,
+            buyer_id=transaction.buyer_id,
+            status=WaitingListEntry.Status.FULFILLED,
+            updated_at__gte=reservation.created_at,
+        )
+        .order_by("-updated_at")
+        .first()
+    )
+    if not entry:
+        return None
+
+    active = [
+        WaitingListEntry.Status.WAITING,
+        WaitingListEntry.Status.NOTIFIED,
+    ]
+    if WaitingListEntry.objects.filter(
+        listing_id=transaction.listing_id,
+        buyer_id=transaction.buyer_id,
+        status__in=active,
+    ).exists():
+        return None
+
+    last = (
+        WaitingListEntry.objects
+        .filter(listing_id=transaction.listing_id, status__in=active)
+        .aggregate(m=Max("position"))["m"]
+        or 0
+    )
+    entry.status = WaitingListEntry.Status.WAITING
+    entry.position = last + 1
+    entry.notified_at = None
+    entry.respond_by = None
+    entry.save(update_fields=[
+        "status", "position", "notified_at", "respond_by", "updated_at",
+    ])
+    return entry
+
+
 def _activate_reservation(*, reservation, transaction, payment_reference):
     """
     Mark a reservation PAID + ACTIVE and reserve the listing.
@@ -198,24 +278,42 @@ def _activate_reservation(*, reservation, transaction, payment_reference):
     except DealRoom.DoesNotExist:
         pass
 
-    # ── MPYA: Auto-create InspectionPeriod ──
+    # ── Inspection ina muda SAWA na reservation ──
+    # (inaisha wakati mmoja na reservation; extend inaiongeza pia)
     try:
-        if not hasattr(transaction, "inspection_period"):
-            inspection_expires_at = now + timedelta(
-                hours=DEFAULT_INSPECTION_HOURS
-            )
-            inspection = InspectionPeriod.objects.create(
+        inspection = (
+            InspectionPeriod.objects
+            .select_for_update()
+            .filter(transaction=transaction)
+            .first()
+        )
+        started = None
+        if inspection is None:
+            started = InspectionPeriod.objects.create(
                 transaction=transaction,
-                duration_hours=DEFAULT_INSPECTION_HOURS,
+                duration_hours=reservation.duration_hours,
                 starts_at=now,
-                expires_at=inspection_expires_at,
+                expires_at=expires_at,
                 status=InspectionPeriod.Status.ACTIVE,
             )
-            # Badilisha transaction.status kuwa INSPECTION
+        elif inspection.status == InspectionPeriod.Status.CANCELLED:
+            # Reservation mpya baada ya kuondoa / kuisha: tumia tena
+            inspection.duration_hours = reservation.duration_hours
+            inspection.starts_at = now
+            inspection.expires_at = expires_at
+            inspection.status = InspectionPeriod.Status.ACTIVE
+            inspection.completed_at = None
+            inspection.save(update_fields=[
+                "duration_hours", "starts_at", "expires_at",
+                "status", "completed_at", "updated_at",
+            ])
+            started = inspection
+
+        if started is not None:
             transaction.status = Transaction.Status.INSPECTION
             transaction.save(update_fields=["status", "updated_at"])
             db_transaction.on_commit(
-                lambda: notify_inspection_started(inspection=inspection)
+                lambda: notify_inspection_started(inspection=started)
             )
     except Exception:
         import logging
@@ -252,7 +350,36 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
         raise ValidationError(
             "Reservation inaweza kuanzishwa na mnunuzi pekee."
         )
-    if transaction.status != Transaction.Status.RESERVATION_PENDING:
+    # Kureserve tena: reservation ya awali iliondolewa / iliisha, Deal Room
+    # imerejeshwa ACCEPTED, na transaction ni CANCELLED.
+    reset_mode = False
+    if transaction.status == Transaction.Status.CANCELLED:
+        from apps.deals.models import DealRoom
+
+        deal_room = (
+            DealRoom.objects
+            .select_for_update()
+            .get(pk=transaction.deal_room_id)
+        )
+        previous = (
+            Reservation.objects
+            .select_for_update(of=("self",))
+            .filter(transaction=transaction)
+            .first()
+        )
+        if (
+            deal_room.status == DealRoom.Status.ACCEPTED
+            and previous
+            and previous.status in (
+                Reservation.Status.CANCELLED,
+                Reservation.Status.EXPIRED,
+            )
+        ):
+            reset_mode = True
+
+    if not reset_mode and (
+        transaction.status != Transaction.Status.RESERVATION_PENDING
+    ):
         raise ValidationError(
             "Transaction hii haipo tayari kwa reservation."
         )
@@ -268,6 +395,12 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
     ]:
         raise ValidationError(
             "Tangazo hili halipo kwenye hali ya AVAILABLE au RESERVED."
+        )
+
+    if reset_mode and listing.status != Listing.Status.LIVE:
+        raise ValidationError(
+            "Tangazo hili limechukuliwa na mtu mwingine. "
+            "Huwezi kureserve tena."
         )
 
     try:
@@ -316,6 +449,34 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
                 "updated_at",
             ])
             reservation = existing
+        elif reset_mode:
+            existing.status = Reservation.Status.PENDING_PAYMENT
+            existing.payment_status = Reservation.PaymentStatus.PENDING
+            existing.payment_reference = None
+            existing.paid_at = None
+            existing.starts_at = None
+            existing.refund_reference = ""
+            existing.refunded_at = None
+            existing.duration_hours = duration_hours
+            existing.deposit_amount = fee
+            existing.expires_at = window_end
+            existing.save(update_fields=[
+                "status", "payment_status", "payment_reference", "paid_at",
+                "starts_at", "refund_reference", "refunded_at",
+                "duration_hours", "deposit_amount", "expires_at",
+                "updated_at",
+            ])
+            transaction.status = Transaction.Status.RESERVATION_PENDING
+            transaction.cancelled_at = None
+            transaction.cancellation_reason = ""
+            transaction.save(update_fields=[
+                "status", "cancelled_at", "cancellation_reason",
+                "updated_at",
+            ])
+            reservation = existing
+            db_transaction.on_commit(
+                lambda: notify_reservation_created(reservation=reservation)
+            )
         else:
             raise ValidationError(
                 "Reservation tayari ipo kwa Transaction hii."
@@ -636,10 +797,19 @@ def expire_reservation(*, reservation):
             listing.save(update_fields=["status", "updated_at"])
             listing_reopened = True
 
+        _restore_deal_room(transaction)
+
     inspection = getattr(transaction, "inspection_period", None)
-    if inspection and inspection.status in [
-        InspectionPeriod.Status.PENDING, InspectionPeriod.Status.ACTIVE,
-    ]:
+    if inspection and (
+        inspection.status in [
+            InspectionPeriod.Status.PENDING, InspectionPeriod.Status.ACTIVE,
+        ]
+        or (
+            # Imekamilika pamoja na reservation (angalia expire_inspection)
+            inspection.status == InspectionPeriod.Status.COMPLETED
+            and transaction.status == Transaction.Status.CANCELLED
+        )
+    ):
         inspection.status = InspectionPeriod.Status.CANCELLED
         inspection.save(update_fields=["status", "updated_at"])
 
@@ -690,7 +860,23 @@ def expire_inspection_period(*, inspection):
     inspection.completed_at = now
     inspection.save(update_fields=["status", "completed_at", "updated_at"])
 
-    if transaction.status == Transaction.Status.INSPECTION:
+    # Inspection na reservation huisha pamoja. Kama reservation pia imefika
+    # mwisho, acha expire_reservation ifunge transaction na kurudisha mali
+    # sokoni (isiingie DISPUTED).
+    reservation_ending = False
+    linked = getattr(transaction, "reservation", None)
+    if (
+        linked is not None
+        and linked.status == Reservation.Status.ACTIVE
+        and linked.expires_at
+        and linked.expires_at <= now
+    ):
+        reservation_ending = True
+
+    if (
+        transaction.status == Transaction.Status.INSPECTION
+        and not reservation_ending
+    ):
         transaction.status = Transaction.Status.DISPUTED
         transaction.buyer_decision = Transaction.BuyerDecision.PENDING
         transaction.buyer_decision_note = (
@@ -770,6 +956,8 @@ def remove_reservation_by_buyer(*, reservation):
             f"({reservation.status})."
         )
 
+    was_unpaid = reservation.status == Reservation.Status.PENDING_PAYMENT
+
     if transaction.status in [
         Transaction.Status.COMPLETED,
         Transaction.Status.CANCELLED,
@@ -808,6 +996,9 @@ def remove_reservation_by_buyer(*, reservation):
             listing.save(update_fields=["status", "updated_at"])
             listing_reopened = True
 
+        # Deal Room irejeshwe ili mnunuzi aweze kureserve tena
+        _restore_deal_room(transaction)
+
     inspection = getattr(transaction, "inspection_period", None)
     if inspection and inspection.status in [
         InspectionPeriod.Status.PENDING,
@@ -816,9 +1007,19 @@ def remove_reservation_by_buyer(*, reservation):
         inspection.status = InspectionPeriod.Status.CANCELLED
         inspection.save(update_fields=["status", "updated_at"])
 
+    # Alichukua nafasi kupitia waiting list lakini hakulipa -> arudi foleni
+    waiting_restored = False
+    if was_unpaid:
+        waiting_restored = (
+            restore_waiting_list_entry(reservation=reservation) is not None
+        )
+
     db_transaction.on_commit(
         lambda: notify_reservation_expired(reservation=reservation)
     )
+
+    if waiting_restored and not listing_reopened:
+        listing_reopened = True
 
     if listing_reopened:
         reopened_listing = Listing.objects.get(pk=transaction.listing_id)
@@ -827,3 +1028,309 @@ def remove_reservation_by_buyer(*, reservation):
         )
 
     return reservation
+
+# ============================================================================
+# EXTEND RESERVATION (lazima ilipwe kwanza)
+# ============================================================================
+
+def _apply_extension(*, extension, reservation, transaction, payment_reference):
+    """
+    Ongeza muda wa reservation NA inspection baada ya malipo kuthibitishwa.
+    Caller ameshika locks. Idempotent.
+    """
+    if extension.status == ReservationExtension.Status.PAID:
+        return reservation
+
+    now = timezone.now()
+
+    if reservation.status != Reservation.Status.ACTIVE:
+        # Pesa imepokelewa lakini reservation haipo ACTIVE tena -> refund
+        extension.status = ReservationExtension.Status.PAID
+        extension.payment_reference = (
+            str(payment_reference or "").strip() or extension.payment_reference
+        )
+        extension.paid_at = now
+        extension.save(update_fields=[
+            "status", "payment_reference", "paid_at", "updated_at",
+        ])
+        logger.error(
+            "REFUND REQUIRED: extension %s paid but reservation %s status=%s",
+            extension.pk, reservation.pk, reservation.status,
+        )
+        try:
+            from apps.notifications.models import Notification
+            from apps.notifications.services.notification import (
+                create_notification_for_admins,
+            )
+            create_notification_for_admins(
+                notification_type=Notification.NotificationType.GENERAL,
+                title="Refund inahitajika — Extension imelipwa baada ya reservation kuisha",
+                message=(
+                    f"Extension #{extension.pk} ya Reservation "
+                    f"#{reservation.pk} ililipwa lakini reservation "
+                    f"haipo ACTIVE. Tafadhali fanya refund manually."
+                ),
+                priority=Notification.Priority.URGENT,
+                related_object_type="Reservation",
+                related_object_id=reservation.pk,
+                action_url="",
+            )
+        except Exception:
+            logger.exception("extension refund alert failed")
+        return reservation
+
+    base = max(reservation.expires_at or now, now)
+    hours = extension.additional_hours
+
+    reservation.duration_hours += hours
+    reservation.expires_at = base + timedelta(hours=hours)
+    reservation.deposit_amount = reservation.deposit_amount + extension.fee
+    reservation.save(update_fields=[
+        "duration_hours", "expires_at", "deposit_amount", "updated_at",
+    ])
+
+    # Inspection iende sambamba na reservation
+    inspection = (
+        InspectionPeriod.objects
+        .select_for_update()
+        .filter(
+            transaction=transaction,
+            status=InspectionPeriod.Status.ACTIVE,
+        )
+        .first()
+    )
+    if inspection:
+        inspection.duration_hours += hours
+        inspection.expires_at = reservation.expires_at
+        inspection.save(update_fields=[
+            "duration_hours", "expires_at", "updated_at",
+        ])
+
+    extension.status = ReservationExtension.Status.PAID
+    extension.payment_reference = (
+        str(payment_reference or "").strip() or extension.payment_reference
+    )
+    extension.paid_at = now
+    extension.save(update_fields=[
+        "status", "payment_reference", "paid_at", "updated_at",
+    ])
+
+    def _notify():
+        try:
+            from apps.notifications.models import Notification
+            from apps.notifications.services.notification import (
+                create_notification,
+            )
+            for recipient in (transaction.buyer, transaction.seller):
+                create_notification(
+                    recipient=recipient,
+                    notification_type=Notification.NotificationType.GENERAL,
+                    title="Reservation imeongezwa muda",
+                    message=(
+                        f"Reservation ya Transaction #{transaction.id} "
+                        f"imeongezwa saa {hours}. "
+                        f"Inaisha: {reservation.expires_at}."
+                    ),
+                    priority=Notification.Priority.HIGH,
+                    related_object_type="Reservation",
+                    related_object_id=reservation.id,
+                    action_url=f"/transactions/{transaction.id}",
+                )
+        except Exception:
+            logger.exception("reservation extend notify failed")
+
+    db_transaction.on_commit(_notify)
+    return reservation
+
+
+@db_transaction.atomic
+def request_reservation_extension(*, reservation, user, additional_hours):
+    """
+    Unda ombi la extension (PENDING_PAYMENT). Muda lazima uwe tier hai.
+    Ada = ada ya tier hiyo. Kama admin amezima ada (0.00) -> inaongezwa
+    papo hapo bila malipo.
+    """
+    reservation, transaction = _lock_reservation(reservation)
+
+    if user is None or user.id != transaction.buyer_id:
+        raise ValidationError(
+            "Ni mnunuzi pekee anayeweza kuongeza muda wa reservation."
+        )
+    if reservation.status != Reservation.Status.ACTIVE:
+        raise ValidationError(
+            "Reservation haipo ACTIVE. Haiwezi kuongezwa muda."
+        )
+
+    try:
+        additional_hours = int(additional_hours)
+    except (TypeError, ValueError):
+        raise ValidationError("additional_hours inahitajika (integer).")
+
+    allowed = get_allowed_reservation_hours()
+    if not allowed:
+        raise ValidationError("Hakuna tiers za reservation zilizo hai.")
+    if additional_hours not in allowed:
+        hours_str = ", ".join(str(h) for h in sorted(allowed))
+        raise ValidationError(
+            f"Muda wa kuongeza lazima uwe mmoja wa: {hours_str}."
+        )
+
+    fee = calculate_reservation_fee(additional_hours)
+
+    # Maombi ya zamani ambayo hayakulipwa yanafungwa
+    ReservationExtension.objects.filter(
+        reservation=reservation,
+        status=ReservationExtension.Status.PENDING_PAYMENT,
+    ).update(status=ReservationExtension.Status.CANCELLED)
+
+    extension = ReservationExtension.objects.create(
+        reservation=reservation,
+        additional_hours=additional_hours,
+        fee=fee,
+    )
+
+    if fee == Decimal("0.00"):
+        _apply_extension(
+            extension=extension,
+            reservation=reservation,
+            transaction=transaction,
+            payment_reference=f"free-ext-{extension.pk}",
+        )
+    return extension
+
+
+@db_transaction.atomic
+def confirm_extension_with_credits(*, extension, user):
+    """Lipia extension kwa reservation credit (huu ndio njia isiyo FimiPay)."""
+    extension = (
+        ReservationExtension.objects
+        .select_for_update(of=("self",))
+        .get(pk=extension.pk)
+    )
+    reservation, transaction = _lock_reservation(extension.reservation)
+
+    if extension.status != ReservationExtension.Status.PENDING_PAYMENT:
+        raise ValidationError("Extension hii haipo kwenye hatua ya malipo.")
+    if user is None or user.id != transaction.buyer_id:
+        raise ValidationError("Ni mnunuzi pekee anayeweza kutumia credits.")
+
+    from apps.credits.services import consume_credit
+    if not consume_credit(user=transaction.buyer, service_key="reservation"):
+        raise ValidationError("Hakuna reservation credits za kutosha.")
+
+    return _apply_extension(
+        extension=extension,
+        reservation=reservation,
+        transaction=transaction,
+        payment_reference=f"credits-ext-{extension.pk}-{int(timezone.now().timestamp())}",
+    )
+
+
+def initiate_extension_payment(*, extension, user, payment_method="mobile", phone=""):
+    """Anzisha FimiPay order ya ada ya extension (prefix "RSX")."""
+    from apps.payments.fimipay import (
+        create_order,
+        normalize_payment_method,
+    )
+    from apps.payments.order_ids import make_order_id
+
+    extension = (
+        ReservationExtension.objects
+        .select_related("reservation__transaction")
+        .get(pk=extension.pk)
+    )
+    transaction = extension.reservation.transaction
+
+    if user.id != transaction.buyer_id:
+        raise ValidationError("Huruhusiwi kulipia extension hii.")
+    if extension.status != ReservationExtension.Status.PENDING_PAYMENT:
+        raise ValidationError("Extension hii haipo kwenye hatua ya malipo.")
+    if extension.fee <= Decimal("0.00"):
+        raise ValidationError("Ada ya extension si sahihi.")
+
+    order_id = make_order_id("RSX", extension.pk)
+
+    data = create_order(
+        order_id=order_id,
+        amount=extension.fee,
+        buyer_phone=phone or user.phone or "",
+        buyer_email=user.email or "",
+        buyer_name=user.name or "",
+        payment_method=normalize_payment_method(payment_method),
+    )
+
+    extension.payment_reference = data.get("order_id") or order_id
+    extension.save(update_fields=["payment_reference", "updated_at"])
+    return data
+
+
+@db_transaction.atomic
+def mark_extension_paid_from_webhook(*, ref_id, payment_reference):
+    """FimiPay webhook (prefix "RSX"). Idempotent."""
+    extension = (
+        ReservationExtension.objects
+        .select_for_update(of=("self",))
+        .get(pk=ref_id)
+    )
+    if extension.status == ReservationExtension.Status.PAID:
+        return extension.reservation
+
+    reservation, transaction = _lock_reservation(extension.reservation)
+    return _apply_extension(
+        extension=extension,
+        reservation=reservation,
+        transaction=transaction,
+        payment_reference=payment_reference,
+    )
+
+
+@db_transaction.atomic
+def mark_extension_as_refunded(*, ref_id, reason=""):
+    """
+    FimiPay refund webhook (prefix "RSX"). Idempotent.
+
+    Muda uliokwisha ongezwa HAUONDOLEWI kiotomatiki (inaweza kufunga
+    reservation ya mnunuzi ghafla). Admin anaarifiwa akague.
+    """
+    extension = (
+        ReservationExtension.objects
+        .select_for_update(of=("self",))
+        .select_related("reservation__transaction")
+        .get(pk=ref_id)
+    )
+    if extension.status == ReservationExtension.Status.REFUNDED:
+        return extension
+
+    was_applied = extension.status == ReservationExtension.Status.PAID
+
+    extension.status = ReservationExtension.Status.REFUNDED
+    extension.refunded_at = timezone.now()
+    extension.refund_reference = reason or ""
+    extension.save(update_fields=[
+        "status", "refunded_at", "refund_reference", "updated_at",
+    ])
+
+    if was_applied:
+        try:
+            from apps.notifications.models import Notification
+            from apps.notifications.services.notification import (
+                create_notification_for_admins,
+            )
+            create_notification_for_admins(
+                notification_type=Notification.NotificationType.GENERAL,
+                title="Extension imerefundiwa — kagua muda wa reservation",
+                message=(
+                    f"Extension #{extension.pk} (+{extension.additional_hours}h) "
+                    f"ya Reservation #{extension.reservation_id} "
+                    f"imerefundiwa, lakini muda ulioongezwa haukuondolewa. "
+                    f"Kagua kama inahitajika."
+                ),
+                priority=Notification.Priority.HIGH,
+                related_object_type="Reservation",
+                related_object_id=extension.reservation_id,
+                action_url="",
+            )
+        except Exception:
+            logger.exception("extension refund admin notify failed")
+
+    return extension

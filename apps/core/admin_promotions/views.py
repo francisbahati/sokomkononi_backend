@@ -31,6 +31,12 @@ def _get_model(type_key):
             return Reservation
         except ImportError:
             return None
+    if type_key == "extension":
+        try:
+            from apps.transactions.models import ReservationExtension
+            return ReservationExtension
+        except ImportError:
+            return None
     return None
 
 
@@ -57,7 +63,10 @@ class AdminPromotionActionView(APIView):
     POST /api/admin/promotions/{type}/{id}/resume/
     POST /api/admin/promotions/{type}/{id}/cancel/
     
-    type: "boost" | "leading" | "advertise" | "reservation"
+    type: "boost" | "leading" | "advertise" | "reservation" | "extension"
+
+    "extension" (ada ya kuongeza muda): cancel + refund pekee. Pause/resume
+    hazikubaliki kwa sababu status yake ni ya malipo (PENDING_PAYMENT/PAID...).
     """
     permission_classes = [IsAdminUser]
 
@@ -67,6 +76,12 @@ class AdminPromotionActionView(APIView):
             return Response(
                 {"detail": f"Promotion type '{type}' haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if type == "extension" and action in ("pause", "resume"):
+            return Response(
+                {"detail": "Extension haiwezi kusimamishwa wala kuwashwa."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         obj = Model.objects.filter(pk=id).first()

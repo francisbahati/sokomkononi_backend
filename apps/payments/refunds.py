@@ -54,6 +54,14 @@ def _get_promotion_info(obj, type_key):
         )
         payment_reference = getattr(obj, "payment_reference", "") or ""
 
+    # ── Reservation extension (ada ya kuongeza muda) ───────
+    elif type_key == "extension":
+        reservation = getattr(obj, "reservation", None)
+        txn = getattr(reservation, "transaction", None) if reservation else None
+        user = getattr(txn, "buyer", None) if txn else None
+        amount_paid = Decimal(str(getattr(obj, "fee", 0) or 0))
+        payment_reference = getattr(obj, "payment_reference", "") or ""
+
     return {
         "user": user,
         "amount_paid": amount_paid,

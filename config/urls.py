@@ -28,8 +28,6 @@ urlpatterns = [
         name="docs",
     ),
 
-    # ⬇️ allauth (Apple callback)
-    path("accounts/", include("allauth.urls")),
 
     # Auth & apps
     path("api/stats/", include("apps.stats.urls")),

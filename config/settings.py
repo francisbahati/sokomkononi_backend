@@ -58,12 +58,6 @@ ALLOWED_HOSTS = list(dict.fromkeys(
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
-    # allauth (Apple Sign-In)
-    "django.contrib.sites",
-    "allauth",
-    "allauth.account",
-    "allauth.socialaccount",
-    "allauth.socialaccount.providers.apple",
     # DRF
     "rest_framework", "rest_framework_simplejwt", "rest_framework_simplejwt.token_blacklist",
     "corsheaders", "django_filters", "drf_spectacular",
@@ -79,23 +73,11 @@ INSTALLED_APPS = [
     "apps.leading_fees", "apps.advertisement_fees", "apps.reservation_rates",
 ]
 
-SITE_ID = 1
-
-# ============================================================
-# ALLAUTH CONFIGURATION (Hii inaondoa kosa la 'username')
-# ============================================================
+# Hatumii allauth kwa Apple (tunatumia SocialLoginView + Apple JS popup)
+# Kwa hiyo AUTHENTICATION_BACKENDS inabaki ya kawaida.
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
-    "allauth.account.auth_backends.AuthenticationBackend",
 ]
-
-# Mipangilio muhimu ya allauth kwa mfumo unaotumia Email pekee
-ACCOUNT_USER_MODEL_USERNAME_FIELD = None
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_AUTHENTICATION_METHOD = "email"
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_UNIQUE_EMAIL = True
-ACCOUNT_EMAIL_VERIFICATION = "none" # Weka 'mandatory' kama unataka uthibitisho wa email
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
@@ -107,7 +89,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "allauth.account.middleware.AccountMiddleware",
     "csp.middleware.CSPMiddleware",
     "apps.core.middleware.RequestIDMiddleware",
 ]
@@ -244,6 +225,7 @@ _CSP_DIRECTIVES = {
         "https://unpkg.com",
         "https://cdn.jsdelivr.net",
         "https://static.cloudflareinsights.com",
+        "https://appleid.cdn-apple.com",
     ],
     "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
     "font-src": ["'self'", "data:", "https://fonts.gstatic.com", "https://www.apple.com"],
@@ -461,44 +443,14 @@ TRUSTED_PROXY_CIDRS = env_list("TRUSTED_PROXY_CIDRS", "")
 ADMINS = [("SokoMkononi Admin", ADMIN_EMAIL)]
 MANAGERS = ADMINS
 
-# ---------------- SOCIAL / APPLE ----------------
+# ---------------- SOCIAL ----------------
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 
+# Apple: Services ID (sio App ID). Inatumika kwa uthibitisho wa id_token.
 APPLE_SERVICES_ID = os.environ.get("APPLE_CLIENT_ID", "co.tz.sokomkononi.web")
-APPLE_TEAM_ID = os.environ.get("APPLE_TEAM_ID", "")
-APPLE_KEY_ID = os.environ.get("APPLE_KEY_ID", "")
-APPLE_PRIVATE_KEY_PATH = os.environ.get(
-    "APPLE_PRIVATE_KEY_PATH",
-    str(BASE_DIR / "secrets" / "AuthKey_PUZLKHW2MN.p8"),
-)
 
-
-def _read_apple_key():
-    # Kwa kuwa .env ni tupu, tunasoma faili moja kwa moja hapa
-    path = BASE_DIR / "secrets" / "AuthKey_PUZLKHW2MN.p8"
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return fh.read()
-    except OSError:
-        return ""
-APPLE_PRIVATE_KEY = _read_apple_key()
-
-SOCIALACCOUNT_PROVIDERS = {
-    "apple": {
-        "APP": {
-            "client_id": APPLE_SERVICES_ID,
-            "secret": APPLE_KEY_ID,
-            "key": APPLE_TEAM_ID,
-            "certificate_key": APPLE_PRIVATE_KEY,
-        },
-        "SCOPE": ["name", "email"],
-        "VERIFIED_EMAIL": True,
-    }
-}
-
-SOCIALACCOUNT_ADAPTER = "apps.accounts.adapters.CustomSocialAccountAdapter"
-LOGIN_REDIRECT_URL = "https://www.sokomkononi.co.tz/dashboard"
-ACCOUNT_LOGOUT_REDIRECT_URL = "https://www.sokomkononi.co.tz/"
+# Hatumii allauth kwa Apple, kwa hiyo hakuna APPLE_TEAM_ID, APPLE_KEY_ID,
+# APPLE_PRIVATE_KEY, SOCIALACCOUNT_PROVIDERS, n.k.
 
 PYNEXTSMS_TOKEN = os.environ.get("PYNEXTSMS_TOKEN", "")
 PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
@@ -600,7 +552,6 @@ LOGGING = {
         "celery": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "apps": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "corsheaders": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
-        "allauth": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
 

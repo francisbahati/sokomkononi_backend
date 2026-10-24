@@ -445,7 +445,7 @@ FIMIPAY_SECRET_KEY = os.environ.get("FIMIPAY_SECRET_KEY", "")
 FIMIPAY_WEBHOOK_SECRET = os.environ.get("FIMIPAY_WEBHOOK_SECRET", "")
 FIMIPAY_BASE_URL = "https://fimipay.com/api/v1"
 FIMIPAY_CURRENCY = os.environ.get("FIMIPAY_CURRENCY", "TZS")
-   FIMIPAY_DEFAULT_REDIRECT_URL = os.environ.get("FIMIPAY_DEFAULT_REDIRECT_URL", "https://sokomkononi.co.tz/")
+
 
 if not DEBUG and not FIMIPAY_SECRET_KEY:
     raise ImproperlyConfigured("FIMIPAY_SECRET_KEY must be set when DEBUG=False.")

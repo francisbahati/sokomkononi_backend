@@ -189,11 +189,20 @@ def handler(exc, context):
                 "language": lang,
             }
         }
-        # ValidationError ina fields — ziweke
-        if isinstance(exc, ValidationError) and isinstance(exc.detail, dict):
-            body["error"]["fields"] = {
-                k: (v if isinstance(v, list) else [v]) for k, v in exc.detail.items()
-            }
+        # ValidationError: weka undani halisi ili frontend iweze kuonyesha sababu.
+        #   - detail ni dict  -> error.fields  = {field: [ujumbe, ...]}
+        #   - detail ni list  -> error.details = [ujumbe, ...]
+        #     (ValidationError("maandishi") ina detail ya aina ya list; awali ujumbe huu ulipotea
+        #      kabisa na mteja alipata ujumbe wa jumla tu.)
+        if isinstance(exc, ValidationError):
+            detail = exc.detail
+            if isinstance(detail, dict):
+                body["error"]["fields"] = {
+                    k: (v if isinstance(v, list) else [v]) for k, v in detail.items()
+                }
+            else:
+                items = detail if isinstance(detail, list) else [detail]
+                body["error"]["details"] = [str(i) for i in items]
         if rid:
             body["error"]["request_id"] = rid
         return Response(body, status=exc.status_code)

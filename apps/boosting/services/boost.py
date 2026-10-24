@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.conf import settings
 from django.db import models
 from django.db import transaction as db_transaction
 from django.utils import timezone
@@ -416,6 +417,40 @@ from apps.payments.fimipay import (
 )
 
 
+# Majina ya field ambazo FimiPay inaweza kutumia kwa URL ya ukurasa wa malipo (kadi / bank).
+# Jina halisi bado halijathibitishwa; mstari wa logi "create_order ... keys=" utaonyesha lililo sahihi.
+_URL_KEYS = (
+    "gateway_url", "payment_url", "checkout_url", "authorization_url",
+    "payment_link", "checkout_link", "link", "url",
+)
+_URL_SKIP_WORDS = ("redirect", "callback", "return", "webhook", "logo", "image")
+
+
+def _extract_gateway_url(data, *, our_redirect_url=""):
+    """Best effort: tafuta URL ya ukurasa wa malipo ya FimiPay kwenye jibu la create_order.
+
+    Haichukui field zinazoonekana kuwa URL YETU ya kurudi (redirect/callback), wala URL ile ile tuliyotuma.
+    """
+    if not isinstance(data, dict):
+        return ""
+
+    def _ok(value):
+        return (
+            isinstance(value, str)
+            and value.startswith(("https://", "http://"))
+            and value != our_redirect_url
+        )
+
+    for key in _URL_KEYS:
+        if _ok(data.get(key)):
+            return data[key]
+    for key, value in data.items():
+        k = str(key).lower()
+        if ("url" in k or "link" in k) and not any(w in k for w in _URL_SKIP_WORDS) and _ok(value):
+            return value
+    return ""
+
+
 def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
@@ -448,7 +483,19 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
             "phone": phone or user.phone or "",
             "email": user.email or "",
             "name": user.name or "",
+            "updated_at": boost.updated_at,  # ≈ wakati order ya mwisho ilipoundwa
         }
+
+    method = _fp_normalize_method(payment_method)  # "mobile" | "card" | "bank"
+
+    # Order ya mobile inayosubiri INAWEZA kutumika tena (usimtumie mteja ombi la pili la USSD) lakini tu
+    # kama ni changa. Kadi/bank huunda order mpya kila mara: order ya zamani inaweza kuwa ya njia nyingine
+    # (hatuhifadhi njia) au ukurasa wake umeachwa, na isingeweza kamwe kuisha ili mteja alipe kwa njia nyingine.
+    reuse_window = timedelta(minutes=getattr(settings, "BOOST_REUSE_PENDING_MINUTES", 5))
+    reuse_pending = (
+        method == "mobile"
+        and timezone.now() - _snapshot["updated_at"] <= reuse_window
+    )
 
     # ── Phase 2: HTTP calls (NO lock, NO transaction) ──
     if existing_ref:
@@ -468,8 +515,14 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
                     payment_reference=sd.get("transid") or existing_ref,
                 )
                 return sd
-            if ps in ("PENDING", "INPROGRESS"):
+            if ps in ("PENDING", "INPROGRESS", "PROCESSING") and reuse_pending:
                 return sd
+
+    # Kadi/bank: FimiPay inamrudisha mteja kwenye URL hii baada ya kulipa. Weka kwenye settings, mfano
+    # BOOST_PAYMENT_REDIRECT_URL = "https://sokomkononi.co.tz/dashboard/boosts" (bila hiyo, hakuna redirect_url).
+    redirect_url = ""
+    if method in ("card", "bank"):
+        redirect_url = getattr(settings, "BOOST_PAYMENT_REDIRECT_URL", "") or ""
 
     order_id = make_order_id("BST", _snapshot["pk"])
     data = _fp_create_order(
@@ -478,8 +531,20 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
         buyer_phone=_snapshot["phone"],
         buyer_email=_snapshot["email"],
         buyer_name=_snapshot["name"],
-        payment_method=_fp_normalize_method(payment_method),
+        payment_method=method,
+        redirect_url=redirect_url,
     )
+
+    # Toa URL ya ukurasa wa malipo (kadi/bank) kama `gateway_url`, na andika majina ya field kwenye logi
+    # (si thamani) ili uthibitishe jina halisi la FimiPay.
+    data = dict(data)
+    gateway_url = _extract_gateway_url(data, our_redirect_url=redirect_url)
+    logger.info(
+        "FimiPay create_order boost=%s method=%s keys=%s gateway_url_found=%s",
+        _snapshot["pk"], method, sorted(data.keys()), bool(gateway_url),
+    )
+    if gateway_url:
+        data["gateway_url"] = gateway_url
 
     # ── Phase 3: re-lock, persist reference ──
     with db_transaction.atomic():

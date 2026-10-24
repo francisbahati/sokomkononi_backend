@@ -115,6 +115,15 @@ def create_order(*, order_id, amount, buyer_phone, buyer_email="", buyer_name=""
             "detail": "Namba ya simu inahitajika kwa malipo ya simu."
         })
 
+    # FimiPay: "redirect_url is required for card, bank, and non-Tanzania mobile payments."
+    # Kila huduma (boost, listing fee, bundle...) ikiacha kuipitisha, tumia chaguo-msingi la settings.
+    if payment_method in ("card", "bank") and not redirect_url:
+        redirect_url = getattr(settings, "FIMIPAY_DEFAULT_REDIRECT_URL", "") or ""
+        if not redirect_url:
+            raise ValidationError({
+                "detail": "FIMIPAY_DEFAULT_REDIRECT_URL haijawekwa; malipo ya kadi/bank yanahitaji redirect_url."
+            })
+
     payload = {
         "order_id": str(order_id)[:64],
         "amount": amount_int,

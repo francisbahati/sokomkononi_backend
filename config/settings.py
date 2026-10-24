@@ -469,7 +469,7 @@ APPLE_TEAM_ID = os.environ.get("APPLE_TEAM_ID", "")
 APPLE_KEY_ID = os.environ.get("APPLE_KEY_ID", "")
 APPLE_PRIVATE_KEY_PATH = os.environ.get(
     "APPLE_PRIVATE_KEY_PATH",
-    str(BASE_DIR / "secrets" / "AuthKey_XXXXXXXXXX.p8"),
+    str(BASE_DIR / "secrets" / "AuthKey_PUZLKHW2MN.p8"),
 )
 
 

@@ -474,24 +474,13 @@ APPLE_PRIVATE_KEY_PATH = os.environ.get(
 
 
 def _read_apple_key():
-    """
-    Kipaumbele:
-    1. APPLE_PRIVATE_KEY (env, kwa production/Dokploy) — inaweza kuwa na \\n
-    2. APPLE_PRIVATE_KEY_PATH (faili, kwa local dev)
-    """
-    raw = os.environ.get("APPLE_PRIVATE_KEY", "")
-    if raw:
-        if "\\n" in raw:
-            raw = raw.replace("\\n", "\n")
-        return raw.strip() + "\n"
-
+    # Kwa kuwa .env ni tupu, tunasoma faili moja kwa moja hapa
+    path = BASE_DIR / "secrets" / "AuthKey_PUZLKHW2MN.p8"
     try:
-        with open(APPLE_PRIVATE_KEY_PATH, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             return fh.read()
     except OSError:
         return ""
-
-
 APPLE_PRIVATE_KEY = _read_apple_key()
 
 SOCIALACCOUNT_PROVIDERS = {

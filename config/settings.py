@@ -81,7 +81,6 @@ INSTALLED_APPS = [
 
 SITE_ID = 1
 
-# allauth backends: ModelBackend (login ya kawaida + Google custom view) + allauth (Apple)
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
@@ -219,6 +218,7 @@ _connect_src = ["'self'"] + [
         "https://sokomkononi.co.tz",
         "https://www.sokomkononi.co.tz",
         "https://appleid.apple.com",
+        "https://cloudflareinsights.com",
         R2_PUBLIC_ORIGIN,
     ] if o
 ]
@@ -227,7 +227,13 @@ _CSP_DIRECTIVES = {
     "default-src": ["'self'"],
     "img-src": _CSP_IMG_SRC,
     "media-src": _CSP_MEDIA_SRC,
-    "script-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
+    "script-src": [
+        "'self'",
+        "'unsafe-inline'",
+        "https://unpkg.com",
+        "https://cdn.jsdelivr.net",
+        "https://static.cloudflareinsights.com",
+    ],
     "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
     "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
     "connect-src": _connect_src,
@@ -452,15 +458,29 @@ APPLE_TEAM_ID = os.environ.get("APPLE_TEAM_ID", "")
 APPLE_KEY_ID = os.environ.get("APPLE_KEY_ID", "")
 APPLE_PRIVATE_KEY_PATH = os.environ.get(
     "APPLE_PRIVATE_KEY_PATH",
-    str(BASE_DIR / "secrets" / "AuthKey_PUZLKHW2MN.p8"),
+    str(BASE_DIR / "secrets" / "AuthKey_XXXXXXXXXX.p8"),
 )
 
+
 def _read_apple_key():
+    """
+    Kipaumbele:
+    1. APPLE_PRIVATE_KEY (env, kwa production/Dokploy) — inaweza kuwa na \\n
+    2. APPLE_PRIVATE_KEY_PATH (faili, kwa local dev)
+    """
+    raw = os.environ.get("APPLE_PRIVATE_KEY", "")
+    if raw:
+        # Kama env ina \\n (literal), badilisha kuwa newline halisi
+        if "\\n" in raw:
+            raw = raw.replace("\\n", "\n")
+        return raw.strip() + "\n"
+
     try:
         with open(APPLE_PRIVATE_KEY_PATH, "r", encoding="utf-8") as fh:
             return fh.read()
     except OSError:
         return ""
+
 
 APPLE_PRIVATE_KEY = _read_apple_key()
 
@@ -618,3 +638,8 @@ LISTING_FEE_REPRICE_AFTER_HOURS = env_int("LISTING_FEE_REPRICE_AFTER_HOURS", 24)
 # ADMIN PATH
 # ============================================================
 ADMIN_PATH = os.environ.get("ADMIN_PATH", "/smk-control-9x7k")
+
+# ============================================================
+# SILENCE WARNINGS
+# ============================================================
+SILENCED_SYSTEM_CHECKS = ["django_ratelimit.W001"]

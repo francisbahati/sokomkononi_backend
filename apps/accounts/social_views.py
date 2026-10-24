@@ -58,10 +58,6 @@ class SocialLoginView(APIView):
     """
     Google Sign-In (popup flow). Apple inatumia django-allauth
     (/accounts/apple/login/), sio view hii.
-
-    csrf_exempt: view hii ni public (AllowAny) na inatumia JWT,
-    kwa hivyo CSRF haihitajiki. Bila hii, CsrfViewMiddleware
-    inakataa POST na kosa la "CSRF verification failed".
     """
     permission_classes = [AllowAny]
 
@@ -111,8 +107,13 @@ class SocialLoginView(APIView):
                 name=name,
                 password=None,
                 is_active=True,
-                email_verified=True,
+                # email_verified=True, # <--- Imeondolewa kwa usalama wa model yako
             )
+            # Weka email_verified tu kama model ina sehemu hiyo
+            if hasattr(user, "email_verified"):
+                user.email_verified = True
+                user.save(update_fields=["email_verified"])
+
             if hasattr(user, "username"):
                 base_username = username_key
                 username = base_username

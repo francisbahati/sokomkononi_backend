@@ -81,10 +81,21 @@ INSTALLED_APPS = [
 
 SITE_ID = 1
 
+# ============================================================
+# ALLAUTH CONFIGURATION (Hii inaondoa kosa la 'username')
+# ============================================================
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
 ]
+
+# Mipangilio muhimu ya allauth kwa mfumo unaotumia Email pekee
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_AUTHENTICATION_METHOD = "email"
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_EMAIL_VERIFICATION = "none" # Weka 'mandatory' kama unataka uthibitisho wa email
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",

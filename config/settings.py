@@ -235,7 +235,7 @@ _CSP_DIRECTIVES = {
         "https://static.cloudflareinsights.com",
     ],
     "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
-    "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
+    "font-src": ["'self'", "data:", "https://fonts.gstatic.com", "https://www.apple.com"],
     "connect-src": _connect_src,
     "frame-src": ["'self'", "https://appleid.apple.com"],
     "frame-ancestors": ["'none'"],
@@ -470,7 +470,6 @@ def _read_apple_key():
     """
     raw = os.environ.get("APPLE_PRIVATE_KEY", "")
     if raw:
-        # Kama env ina \\n (literal), badilisha kuwa newline halisi
         if "\\n" in raw:
             raw = raw.replace("\\n", "\n")
         return raw.strip() + "\n"

@@ -4,11 +4,15 @@ import logging
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
@@ -49,17 +53,21 @@ def _verify_google_id_token(id_token):
     return claims
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class SocialLoginView(APIView):
     """
     Google Sign-In (popup flow). Apple inatumia django-allauth
     (/accounts/apple/login/), sio view hii.
+
+    csrf_exempt: view hii ni public (AllowAny) na inatumia JWT,
+    kwa hivyo CSRF haihitajiki. Bila hii, CsrfViewMiddleware
+    inakataa POST na kosa la "CSRF verification failed".
     """
     permission_classes = [AllowAny]
 
     def post(self, request):
         provider = (request.data.get("provider") or "").lower()
         id_token_raw = request.data.get("id_token")
-        social_user = request.data.get("user") or {}
 
         if not provider or not id_token_raw:
             return Response(
@@ -69,7 +77,12 @@ class SocialLoginView(APIView):
 
         if provider != "google":
             return Response(
-                {"detail": f"Provider '{provider}' haitumiki hapa. Tumia /accounts/apple/login/."},
+                {
+                    "detail": (
+                        f"Provider '{provider}' haitumiki hapa. "
+                        "Tumia /accounts/apple/login/ kwa Apple."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

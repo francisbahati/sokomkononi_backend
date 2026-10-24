@@ -1,6 +1,8 @@
 # apps/accounts/social_views.py
 import logging
 
+import jwt as pyjwt
+import requests as http_requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -18,6 +20,9 @@ from google.auth.transport import requests as google_requests
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
+APPLE_ISSUER = "https://appleid.apple.com"
 
 
 def _issue_jwt(user):
@@ -53,17 +58,47 @@ def _verify_google_id_token(id_token):
     return claims
 
 
+def _verify_apple_id_token(id_token):
+    """Thibitisha Apple id_token kwa public keys za Apple."""
+    try:
+        resp = http_requests.get(APPLE_KEYS_URL, timeout=10)
+        resp.raise_for_status()
+        jwks = resp.json()
+    except Exception as exc:
+        raise ValidationError(f"Imeshindwa kupata Apple keys: {exc}")
+
+    try:
+        unverified_header = pyjwt.get_unverified_header(id_token)
+    except Exception as exc:
+        raise ValidationError(f"id_token si sahihi: {exc}")
+
+    kid = unverified_header.get("kid")
+    key = next((k for k in jwks["keys"] if k["kid"] == kid), None)
+    if not key:
+        raise ValidationError("Apple public key haipatikani kwa kid hii.")
+
+    try:
+        claims = pyjwt.decode(
+            id_token,
+            key=pyjwt.algorithms.RSAAlgorithm.from_jwk(key),
+            algorithms=["RS256"],
+            audience=settings.APPLE_SERVICES_ID,
+            issuer=APPLE_ISSUER,
+        )
+    except Exception as exc:
+        raise ValidationError(f"Uthibitisho wa Apple umeshindwa: {exc}")
+
+    return claims
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class SocialLoginView(APIView):
-    """
-    Google Sign-In (popup flow). Apple inatumia django-allauth
-    (/accounts/apple/login/), sio view hii.
-    """
     permission_classes = [AllowAny]
 
     def post(self, request):
         provider = (request.data.get("provider") or "").lower()
         id_token_raw = request.data.get("id_token")
+        social_user = request.data.get("user") or {}
 
         if not provider or not id_token_raw:
             return Response(
@@ -71,23 +106,29 @@ class SocialLoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if provider != "google":
-            return Response(
-                {
-                    "detail": (
-                        f"Provider '{provider}' haitumiki hapa. "
-                        "Tumia /accounts/apple/login/ kwa Apple."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
-            claims = _verify_google_id_token(id_token_raw)
-            email = claims.get("email")
-            sub = claims.get("sub")
-            name = claims.get("name") or (email.split("@")[0] if email else "mteja")
-            username_key = f"google_{sub}"
+            if provider == "google":
+                claims = _verify_google_id_token(id_token_raw)
+                email = claims.get("email")
+                sub = claims.get("sub")
+                name = claims.get("name") or (email.split("@")[0] if email else "mteja")
+                username_key = f"google_{sub}"
+            elif provider == "apple":
+                claims = _verify_apple_id_token(id_token_raw)
+                email = claims.get("email")
+                sub = claims.get("sub")
+                name = ""
+                if social_user and social_user.get("name"):
+                    n = social_user["name"]
+                    name = f"{n.get('firstName', '')} {n.get('lastName', '')}".strip()
+                if not name:
+                    name = claims.get("name") or (email.split("@")[0] if email else "mteja")
+                username_key = f"apple_{sub}"
+            else:
+                return Response(
+                    {"detail": f"Provider '{provider}' haitumiki."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         except ValidationError as exc:
             return Response(
                 {"detail": str(exc)},
@@ -107,9 +148,7 @@ class SocialLoginView(APIView):
                 name=name,
                 password=None,
                 is_active=True,
-                # email_verified=True, # <--- Imeondolewa kwa usalama wa model yako
             )
-            # Weka email_verified tu kama model ina sehemu hiyo
             if hasattr(user, "email_verified"):
                 user.email_verified = True
                 user.save(update_fields=["email_verified"])

@@ -425,7 +425,7 @@ EMAIL_PORT = env_int("EMAIL_PORT", 587)
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "SokoMkononi <support@sokomkononi.co.tz>")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "SokoMkononi <no-reply@sokomkononi.co.tz>")
 
 if not DEBUG and not EMAIL_HOST:
     raise ImproperlyConfigured("EMAIL_HOST must be set when DEBUG=False.")

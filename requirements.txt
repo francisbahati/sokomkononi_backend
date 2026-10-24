@@ -82,3 +82,6 @@ pyotp==2.9.0
 django-filter>=23.0
 django-cors-headers>=4.3.0
 django-ratelimit>=4.1.0
+django-allauth
+google-auth
+requests

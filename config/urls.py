@@ -3,8 +3,9 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.accounts.social_views import SocialLoginView
 from apps.banners.views_admin import AdminPromotionsView
-from apps.core.admin_promotions.views import AdminPromotionActionView  # ⬅️ MPYA
+from apps.core.admin_promotions.views import AdminPromotionActionView
 
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -27,8 +28,12 @@ urlpatterns = [
         name="docs",
     ),
 
+    # ⬇️ allauth (Apple callback)
+    path("accounts/", include("allauth.urls")),
+
     # Auth & apps
     path("api/stats/", include("apps.stats.urls")),
+    path("api/auth/social/", SocialLoginView.as_view(), name="social-login"),  # Google (custom)
     path("api/auth/", include("apps.accounts.urls")),
     path("api/contact/", include("apps.contact.urls")),
     path("api/categories/", include("apps.categories.urls")),
@@ -60,14 +65,12 @@ urlpatterns = [
     path("api/admin/reports/", include("apps.finance.urls_admin_reports")),
     path("api/admin/content/", include("apps.content.urls_admin")),
 
-    # Admin promotions alias (frontend calls /api/admin/promotions/)
     path(
         "api/admin/promotions/",
         AdminPromotionsView.as_view(),
         name="admin-promotions-alias",
     ),
 
-    # ⬇️ MPYA: Admin promotion actions
     path(
         "api/admin/promotions/<str:type>/<int:id>/<str:action>/",
         AdminPromotionActionView.as_view(),

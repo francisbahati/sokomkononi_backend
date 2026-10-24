@@ -1,184 +1,117 @@
-"""
-Social login (Google / Apple).
-
-POST /api/auth/social/  { provider, id_token, code?, user? }
-"""
+# apps/accounts/social_views.py
 import logging
 
-import requests
 from django.conf import settings
-from django.db.models import Q
-from rest_framework import permissions, status
-from rest_framework.exceptions import ValidationError
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-
-from .models import User
-from .serializers import ProfileSerializer
-
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
 
 logger = logging.getLogger(__name__)
+User = get_user_model()
 
-GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
-APPLE_ISSUER = "https://appleid.apple.com"
-APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
 
-# JWKS client with cache — Apple rotates keys but caches for performance
-try:
-    from jwt import PyJWKClient as _PyJWKClient
-    _APPLE_JWKS_CLIENT = _PyJWKClient(APPLE_KEYS_URL, cache_keys=True)
-except Exception:
-    _APPLE_JWKS_CLIENT = None
+def _issue_jwt(user):
+    refresh = RefreshToken.for_user(user)
+    return {
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "phone": user.phone,
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+            "account_type": user.account_type,
+            "is_verified": getattr(user, "is_verified", False),
+            "role": "Admin" if user.is_staff or user.is_superuser else (
+                "Seller" if user.account_type == "BUSINESS" else "Buyer"
+            ),
+        },
+    }
+
+
+def _verify_google_id_token(id_token):
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            id_token,
+            google_requests.Request(),
+            settings.GOOGLE_CLIENT_ID,
+        )
+    except Exception as exc:
+        raise ValidationError(f"Uthibitisho wa Google umeshindwa: {exc}")
+    return claims
 
 
 class SocialLoginView(APIView):
-    permission_classes = [permissions.AllowAny]
-    throttle_scope = "login"
+    """
+    Google Sign-In (popup flow). Apple inatumia django-allauth
+    (/accounts/apple/login/), sio view hii.
+    """
+    permission_classes = [AllowAny]
 
     def post(self, request):
-        provider = (request.data.get("provider") or "").strip().lower()
-        id_token = (request.data.get("id_token") or "").strip()
-        user_data = request.data.get("user") or {}
-        code = request.data.get("code")
+        provider = (request.data.get("provider") or "").lower()
+        id_token_raw = request.data.get("id_token")
+        social_user = request.data.get("user") or {}
 
-        if provider not in ("google", "apple"):
-            raise ValidationError(
-                {"provider": "Provider si sahihi. Tumia google au apple."}
+        if not provider or not id_token_raw:
+            return Response(
+                {"detail": "provider na id_token zinahitajika."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        if not id_token:
-            raise ValidationError({"id_token": "ID token inahitajika."})
 
-        if provider == "google":
-            email, name = self._verify_google(id_token)
-        else:
-            email, name = self._verify_apple(id_token, user_data)
+        if provider != "google":
+            return Response(
+                {"detail": f"Provider '{provider}' haitumiki hapa. Tumia /accounts/apple/login/."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        email = email.strip().lower()
-        user = (
-            User.all_objects
-            .filter(Q(email__iexact=email) | Q(deleted_email__iexact=email))
-            .first()
-        )
+        try:
+            claims = _verify_google_id_token(id_token_raw)
+            email = claims.get("email")
+            sub = claims.get("sub")
+            name = claims.get("name") or (email.split("@")[0] if email else "mteja")
+            username_key = f"google_{sub}"
+        except ValidationError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if user and user.is_deleted:
-            user.restore()
+        if not email:
+            return Response(
+                {"detail": "Barua pepe haipatikani kwenye token."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = User.objects.filter(email__iexact=email).first()
         if not user:
             user = User.objects.create_user(
                 email=email,
-                name=name or email.split("@")[0],
-                is_verified=True,
+                name=name,
+                password=None,
                 is_active=True,
+                email_verified=True,
             )
+            if hasattr(user, "username"):
+                base_username = username_key
+                username = base_username
+                counter = 1
+                while User.objects.filter(username=username).exists():
+                    counter += 1
+                    username = f"{base_username}_{counter}"
+                user.username = username
+                user.save(update_fields=["username"])
+        else:
+            if not user.name and name:
+                user.name = name
+                user.save(update_fields=["name"])
 
-        if not user.is_active:
-            raise ValidationError({"detail": "Akaunti yako haipo hai."})
-
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "message": "Umeingia kwenye akaunti kwa mafanikio.",
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "user": ProfileSerializer(user).data,
-            },
-            status=status.HTTP_200_OK,
-        )
-
-    def _verify_google(self, id_token):
-        try:
-            r = requests.get(
-                GOOGLE_TOKENINFO_URL,
-                params={"id_token": id_token},
-                timeout=10,
-            )
-        except requests.RequestException:
-            logger.exception("Google tokeninfo request failed")
-            raise ValidationError(
-                {"id_token": "Imeshindwa kuwasiliana na Google."}
-            )
-
-        if r.status_code != 200:
-            raise ValidationError({"id_token": "ID token si sahihi."})
-
-        data = r.json()
-        client_id = getattr(settings, "GOOGLE_CLIENT_ID", "") or ""
-        if not client_id:
-            from django.core.exceptions import ImproperlyConfigured
-            raise ImproperlyConfigured(
-                "GOOGLE_CLIENT_ID must be set when using social login."
-            )
-        if data.get("aud") != client_id:
-            raise ValidationError(
-                {"id_token": "ID token haikubaliani na client."}
-            )
-
-        email = data.get("email")
-        if not email:
-            raise ValidationError(
-                {"id_token": "Barua pepe haipo kwenye token."}
-            )
-
-        return email, data.get("name", "")
-
-    def _verify_apple(self, id_token, user_data=None):
-        try:
-            import jwt
-            from jwt import PyJWKClient
-        except ImportError:
-            raise ValidationError({"id_token": "PyJWT haijasakinishwa."})
-
-        try:
-            jwks_client = _APPLE_JWKS_CLIENT or PyJWKClient(APPLE_KEYS_URL, cache_keys=True)
-            signing_key = jwks_client.get_signing_key_from_jwt(id_token)
-        except Exception:
-            logger.exception("Apple JWKS lookup failed")
-            raise ValidationError(
-                {"id_token": "Imeshindwa kupata funguo za Apple."}
-            )
-
-        try:
-            payload = jwt.decode(
-                id_token,
-                signing_key.key,
-                algorithms=["RS256"],
-                issuer=APPLE_ISSUER,
-                options={"verify_aud": False},
-            )
-        except Exception:
-            raise ValidationError({"id_token": "ID token si sahihi."})
-
-        client_id = getattr(settings, "APPLE_CLIENT_ID", "") or ""
-        if not client_id:
-            from django.core.exceptions import ImproperlyConfigured
-            raise ImproperlyConfigured(
-                "APPLE_CLIENT_ID must be set when using social login."
-            )
-        if payload.get("aud") != client_id:
-            raise ValidationError(
-                {"id_token": "ID token haikubaliani na client."}
-            )
-
-        # Apple returns email in `id_token` on first sign-in, but may omit it
-        # on subsequent sign-ins. The frontend passes the `user` object which
-        # contains email + name on first sign-in only.
-        email = payload.get("email")
-        if not email and user_data:
-            email = user_data.get("email")
-        if not email:
-            raise ValidationError(
-                {"id_token": "Barua pepe haipo kwenye token."}
-            )
-
-        # Name: `user_data.name` is { firstName, lastName } on first sign-in
-        name = ""
-        if user_data:
-            name_obj = user_data.get("name") or {}
-            if isinstance(name_obj, dict):
-                first = (name_obj.get("firstName") or "").strip()
-                last = (name_obj.get("lastName") or "").strip()
-                name = f"{first} {last}".strip()
-            elif isinstance(name_obj, str):
-                name = name_obj.strip()
-
-        return email, name
+        return Response(_issue_jwt(user), status=status.HTTP_200_OK)

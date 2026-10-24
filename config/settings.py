@@ -58,9 +58,17 @@ ALLOWED_HOSTS = list(dict.fromkeys(
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
+    # allauth (Apple Sign-In)
+    "django.contrib.sites",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.apple",
+    # DRF
     "rest_framework", "rest_framework_simplejwt", "rest_framework_simplejwt.token_blacklist",
     "corsheaders", "django_filters", "drf_spectacular",
     "drf_spectacular_sidecar", "storages", "csp",
+    # Apps
     "apps.core", "apps.stats",
     "apps.payments", "apps.contact", "apps.accounts", "apps.categories", "apps.listings",
     "apps.boosting", "apps.deals", "apps.transactions", "apps.finance",
@@ -71,8 +79,16 @@ INSTALLED_APPS = [
     "apps.leading_fees", "apps.advertisement_fees", "apps.reservation_rates",
 ]
 
+SITE_ID = 1
+
+# allauth backends: ModelBackend (login ya kawaida + Google custom view) + allauth (Apple)
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",       # ✅ CORS kwanza kabisa
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -81,6 +97,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
     "csp.middleware.CSPMiddleware",
     "apps.core.middleware.RequestIDMiddleware",
 ]
@@ -120,7 +137,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # ============================================================
-# CACHE — Redis when available, LocMemCache for local dev
+# CACHE
 # ============================================================
 _REDIS_CACHE_URL = (
     os.environ.get("REDIS_CACHE_URL")
@@ -201,6 +218,7 @@ _connect_src = ["'self'"] + [
         "https://api.sokomkononi.co.tz",
         "https://sokomkononi.co.tz",
         "https://www.sokomkononi.co.tz",
+        "https://appleid.apple.com",
         R2_PUBLIC_ORIGIN,
     ] if o
 ]
@@ -213,9 +231,10 @@ _CSP_DIRECTIVES = {
     "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
     "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
     "connect-src": _connect_src,
+    "frame-src": ["'self'", "https://appleid.apple.com"],
     "frame-ancestors": ["'none'"],
     "base-uri": ["'self'"],
-    "form-action": ["'self'"],
+    "form-action": ["'self'", "https://appleid.apple.com"],
 }
 
 _EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin")
@@ -233,10 +252,8 @@ else:
     }
 
 # ============================================================
-# CORS — FIX: lazima iwe na `www.sokomkononi.co.tz` KILA MARA
+# CORS
 # ============================================================
-# ✅ FIX #1: Ongeza `www.` variants KWA HARDCODE (usitegemee .env pekee)
-#    Kama .env ina `CORS_ALLOWED_ORIGINS` tupu au haipo, hizi zinatumika.
 _CORS_REQUIRED_ORIGINS = [
     "https://sokomkononi.co.tz",
     "https://www.sokomkononi.co.tz",
@@ -251,7 +268,6 @@ if DEBUG:
         "http://127.0.0.1:5173",
     ]
 
-# Chukua kutoka .env (kama ipo) + ongeza required origins
 CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
     env_list("CORS_ALLOWED_ORIGINS", "") + _CORS_REQUIRED_ORIGINS
 ))
@@ -259,11 +275,10 @@ CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
 CORS_PREFLIGHT_MAX_AGE = env_int("CORS_PREFLIGHT_MAX_AGE", 86400)
 
-# ✅ FIX #2: Ruhusu headers zote zinazotumwa na frontend
 CORS_ALLOW_HEADERS = [
     "accept",
     "accept-encoding",
-    "accept-language",          # ⬅️ MUHIMU — frontend inatuma hii
+    "accept-language",
     "authorization",
     "cache-control",
     "content-type",
@@ -279,11 +294,7 @@ CORS_ALLOW_HEADERS = [
     "x-request-id",
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
-
-# ✅ FIX #3: USIRUHUSU origins zote (security) — tumia list maalum
 CORS_ALLOW_ALL_ORIGINS = False
-
-# ✅ FIX #4: Ruhusu CORS kwenye errors pia (400, 401, 500)
 CORS_URLS_REGEX = r"^.*$"
 
 # ============================================================
@@ -315,8 +326,6 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
-    # DefaultPagination inakubali ?page_size= (max 500). PageNumberPagination
-    # ya kawaida inapuuza page_size, kwa hiyo ?page_size=200 ilirudisha 20 tu.
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.DefaultPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_FILTER_BACKENDS": (
@@ -435,8 +444,43 @@ TRUSTED_PROXY_CIDRS = env_list("TRUSTED_PROXY_CIDRS", "")
 ADMINS = [("SokoMkononi Admin", ADMIN_EMAIL)]
 MANAGERS = ADMINS
 
+# ---------------- SOCIAL / APPLE ----------------
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-APPLE_CLIENT_ID = os.environ.get("APPLE_CLIENT_ID", "")
+
+APPLE_SERVICES_ID = os.environ.get("APPLE_CLIENT_ID", "co.tz.sokomkononi.web")
+APPLE_TEAM_ID = os.environ.get("APPLE_TEAM_ID", "")
+APPLE_KEY_ID = os.environ.get("APPLE_KEY_ID", "")
+APPLE_PRIVATE_KEY_PATH = os.environ.get(
+    "APPLE_PRIVATE_KEY_PATH",
+    str(BASE_DIR / "secrets" / "AuthKey_PUZLKHW2MN.p8"),
+)
+
+def _read_apple_key():
+    try:
+        with open(APPLE_PRIVATE_KEY_PATH, "r", encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+APPLE_PRIVATE_KEY = _read_apple_key()
+
+SOCIALACCOUNT_PROVIDERS = {
+    "apple": {
+        "APP": {
+            "client_id": APPLE_SERVICES_ID,
+            "secret": APPLE_KEY_ID,
+            "key": APPLE_TEAM_ID,
+            "certificate_key": APPLE_PRIVATE_KEY,
+        },
+        "SCOPE": ["name", "email"],
+        "VERIFIED_EMAIL": True,
+    }
+}
+
+SOCIALACCOUNT_ADAPTER = "apps.accounts.adapters.CustomSocialAccountAdapter"
+LOGIN_REDIRECT_URL = "https://www.sokomkononi.co.tz/dashboard"
+ACCOUNT_LOGOUT_REDIRECT_URL = "https://www.sokomkononi.co.tz/"
+
 PYNEXTSMS_TOKEN = os.environ.get("PYNEXTSMS_TOKEN", "")
 PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
 
@@ -537,6 +581,7 @@ LOGGING = {
         "celery": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "apps": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "corsheaders": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
+        "allauth": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
 
@@ -566,13 +611,10 @@ CSRF_COOKIE_SECURE = not DEBUG
 # ============================================================
 # LISTING FEE BEHAVIOUR
 # ============================================================
-# False = kundi lisilo na fee rule HALIPEWI ada ya kubahatisha (3000). Admin
-# anaonywa anapoomba malipo. Weka LISTING_FEE_ALLOW_FALLBACK=true kwenye .env
-# kurudisha tabia ya zamani.
 LISTING_FEE_ALLOW_FALLBACK = env_bool("LISTING_FEE_ALLOW_FALLBACK", False)
 LISTING_FEE_REPRICE_AFTER_HOURS = env_int("LISTING_FEE_REPRICE_AFTER_HOURS", 24)
 
 # ============================================================
-# ADMIN PATH (used in notification action_url)
+# ADMIN PATH
 # ============================================================
 ADMIN_PATH = os.environ.get("ADMIN_PATH", "/smk-control-9x7k")

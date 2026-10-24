@@ -440,11 +440,15 @@ APPLE_CLIENT_ID = os.environ.get("APPLE_CLIENT_ID", "")
 PYNEXTSMS_TOKEN = os.environ.get("PYNEXTSMS_TOKEN", "")
 PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
 
+
 # ---------------- FIMIPAY PAYMENTS ----------------
 FIMIPAY_SECRET_KEY = os.environ.get("FIMIPAY_SECRET_KEY", "")
 FIMIPAY_WEBHOOK_SECRET = os.environ.get("FIMIPAY_WEBHOOK_SECRET", "")
 FIMIPAY_BASE_URL = "https://fimipay.com/api/v1"
 FIMIPAY_CURRENCY = os.environ.get("FIMIPAY_CURRENCY", "TZS")
+FIMIPAY_DEFAULT_REDIRECT_URL = os.environ.get(
+    "FIMIPAY_DEFAULT_REDIRECT_URL", "https://sokomkononi.co.tz/"
+)
 
 
 if not DEBUG and not FIMIPAY_SECRET_KEY:

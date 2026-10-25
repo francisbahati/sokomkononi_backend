@@ -1,9 +1,30 @@
+# apps/verifications/notify.py
+
 import logging
+
+from django.conf import settings
 from django.db import transaction as db_transaction
+
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# URL HELPER — huzalisha URL KAMILI kwa email
+# ============================================================
+def _absolute_url(path):
+    """
+    Badilisha relative path kuwa URL kamili.
+    "/dashboard/verification" -> "https://sokomkononi.co.tz/dashboard/verification"
+    """
+    if not path:
+        path = "/dashboard/verification"
+    if path.startswith(("http://", "https://")):
+        return path
+    base = getattr(settings, "SITE_URL", "https://sokomkononi.co.tz")
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
 def _send_email_safe(fn, **kwargs):
@@ -38,7 +59,7 @@ def notify_approved(r):
                 priority=Notification.Priority.HIGH,
                 related_object_type="verification",
                 related_object_id=r.id,
-                action_url="/dashboard/verification",
+                action_url="/dashboard/verification",  # ← app (React Router) inatumia relative
             )
         except Exception:
             logger.exception("notify_approved (notification) %s", r.id)
@@ -52,7 +73,7 @@ def notify_approved(r):
                 to_email=r.user.email or r.user_email,
                 name=r.user.name or r.user_name or "mteja",
                 verification_type=r.type,
-                action_url="/dashboard/verification",
+                action_url=_absolute_url("/dashboard/verification"),  # ✅ URL kamili
             )
         except Exception:
             logger.exception("notify_approved (email) %s", r.id)
@@ -90,7 +111,7 @@ def notify_rejected(r, reason=""):
                 name=r.user.name or r.user_name or "mteja",
                 verification_type=r.type,
                 reason=reason,
-                action_url="/dashboard/verification",
+                action_url=_absolute_url("/dashboard/verification"),  # ✅
             )
         except Exception:
             logger.exception("notify_rejected (email) %s", r.id)
@@ -127,7 +148,7 @@ def notify_documents_requested(r, message=""):
                 to_email=r.user.email or r.user_email,
                 name=r.user.name or r.user_name or "mteja",
                 message=message,
-                action_url="/dashboard/verification",
+                action_url=_absolute_url("/dashboard/verification"),  # ✅
             )
         except Exception:
             logger.exception("notify_documents_requested (email) %s", r.id)

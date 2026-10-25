@@ -1,3 +1,5 @@
+# apps/accounts/email_service.py
+
 """
 Central email dispatch. Templates + plain-text fallback + structured result.
 Swap providers via env vars only.
@@ -23,6 +25,21 @@ def _redact(email):
         return "***"
     u, _, d = email.partition("@")
     return f"{u[:2]}***@{d}"
+
+
+# ============================================================
+# URL HELPER — kinga ya mwisho kwa URL kamili
+# ============================================================
+def _absolute_url(path, default_path="/dashboard/verification"):
+    """
+    Badilisha relative path kuwa URL kamili.
+    "/dashboard/verification" -> "https://sokomkononi.co.tz/dashboard/verification"
+    """
+    path = path or default_path
+    if path.startswith(("http://", "https://")):
+        return path
+    base = getattr(settings, "SITE_URL", "https://sokomkononi.co.tz")
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
 def _send(*, to_email, subject, template_base, context):
@@ -107,6 +124,7 @@ def send_welcome_email(*, user):
         context={"name": name},
     )
 
+
 def send_account_deleted_email(*, to_email, name="mteja", reason=""):
     """
     Send account-deleted notification.
@@ -142,6 +160,7 @@ def send_account_suspended_email(*, to_email, name="mteja", reason=""):
         },
     )
 
+
 def send_verification_approved_email(
     *, to_email, name="mteja", verification_type="", action_url=""
 ):
@@ -152,6 +171,9 @@ def send_verification_approved_email(
     """
     if not to_email:
         return EmailResult(False, "no email")
+
+    # ✅ Kinga ya mwisho — hakikisha URL ni kamili
+    action_url = _absolute_url(action_url, "/dashboard/verification")
 
     type_label = {
         "SELLER": "Muuzaji",
@@ -165,7 +187,7 @@ def send_verification_approved_email(
         context={
             "name": name or "mteja",
             "verification_type": type_label,
-            "action_url": action_url or "/dashboard/verification",
+            "action_url": action_url,
         },
     )
 
@@ -181,6 +203,9 @@ def send_verification_rejected_email(
     if not to_email:
         return EmailResult(False, "no email")
 
+    # ✅ Kinga ya mwisho — hakikisha URL ni kamili
+    action_url = _absolute_url(action_url, "/dashboard/verification")
+
     type_label = {
         "SELLER": "Muuzaji",
         "BUYER": "Mnunuzi",
@@ -194,9 +219,10 @@ def send_verification_rejected_email(
             "name": name or "mteja",
             "verification_type": type_label,
             "reason": reason or "—",
-            "action_url": action_url or "/dashboard/verification",
+            "action_url": action_url,
         },
     )
+
 
 def send_documents_requested_email(
     *, to_email, name="mteja", message="", action_url=""
@@ -209,6 +235,9 @@ def send_documents_requested_email(
     if not to_email:
         return EmailResult(False, "no email")
 
+    # ✅ Kinga ya mwisho — hakikisha URL ni kamili
+    action_url = _absolute_url(action_url, "/dashboard/verification")
+
     return _send(
         to_email=to_email,
         subject="SokoMkononi — Nyaraka zaidi zinahitajika",
@@ -216,6 +245,6 @@ def send_documents_requested_email(
         context={
             "name": name or "mteja",
             "message": message or "Tafadhali pakia nyaraka zaidi.",
-            "action_url": action_url or "/dashboard/verification",
+            "action_url": action_url,
         },
     )

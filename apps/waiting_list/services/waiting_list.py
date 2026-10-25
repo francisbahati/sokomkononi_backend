@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -5,6 +7,8 @@ from rest_framework.exceptions import ValidationError
 from apps.listings.models import Listing
 
 from ..models import WaitingListEntry
+
+logger = logging.getLogger(__name__)
 
 
 def get_next_waiting_position(listing):
@@ -15,6 +19,46 @@ def get_next_waiting_position(listing):
         .first()
     )
     return 1 if not last_entry else last_entry.position + 1
+
+
+def _send_waiting_list_joined_notification(listing, buyer):
+    """
+    Tuma notification kwa mtumiaji mpya wa waiting list,
+    ikimjulisha muda wa reservation ya sasa.
+    """
+    try:
+        from apps.transactions.models import Reservation
+        from apps.notifications.models import Notification
+        from apps.notifications.services.notification import create_notification
+
+        reservation = Reservation.objects.filter(
+            transaction__listing_id=listing.pk,
+            status=Reservation.Status.ACTIVE,
+        ).order_by("-created_at").first()
+
+        time_left_minutes = 0
+        if reservation and getattr(reservation, "expires_at", None):
+            delta = reservation.expires_at - timezone.now()
+            time_left_minutes = max(0, int(delta.total_seconds() / 60))
+
+        create_notification(
+            recipient=buyer,
+            notification_type=Notification.NotificationType.GENERAL,
+            title="Umeingia kwenye Waiting List",
+            message=(
+                f"Umejiunga na waiting list ya mali '{listing.title}'. "
+                f"Reservation ya sasa inaisha baada ya dakika {time_left_minutes}. "
+                f"Utapata taarifa endapo itaisha."
+            ),
+            priority=Notification.Priority.NORMAL,
+            related_object_type="listing",
+            related_object_id=listing.id,
+            action_url=f"/mali/{listing.id}",
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send waiting list notification for listing %s", listing.pk
+        )
 
 
 @transaction.atomic
@@ -60,16 +104,28 @@ def join_waiting_list(*, listing, buyer):
         existing.save(update_fields=[
             "status", "position", "notified_at", "respond_by", "updated_at",
         ])
+        
+        # ✅ Tuma notification
+        transaction.on_commit(
+            lambda: _send_waiting_list_joined_notification(listing, buyer)
+        )
         return existing
 
     position = get_next_waiting_position(listing)
 
-    return WaitingListEntry.objects.create(
+    entry = WaitingListEntry.objects.create(
         listing=listing,
         buyer=buyer,
         status=WaitingListEntry.Status.WAITING,
         position=position,
     )
+
+    # ✅ Tuma notification
+    transaction.on_commit(
+        lambda: _send_waiting_list_joined_notification(listing, buyer)
+    )
+
+    return entry
 
 
 @transaction.atomic
@@ -125,26 +181,43 @@ def fulfil_waiting_entry(*, entry):
     entry.save(update_fields=["status", "updated_at"])
     return entry
 
+
 @transaction.atomic
 def claim_waitlist_entry(*, entry, user):
+    """
+    Buyer claims a NOTIFIED waitlist slot and starts a reservation.
+    """
     entry = (WaitingListEntry.objects.select_for_update()
              .select_related("listing", "buyer").get(pk=entry.pk))
-    if entry.buyer_id != user.id: raise ValidationError("Huna ruhusa.")
+             
+    if entry.buyer_id != user.id: 
+        raise ValidationError("Huna ruhusa.")
     if entry.status != WaitingListEntry.Status.NOTIFIED:
         raise ValidationError("Nafasi yako bado haijafunguliwa.")
     if entry.respond_by and entry.respond_by <= timezone.now():
         raise ValidationError("Muda wa kuchukua nafasi umepita.")
     if entry.listing.status != Listing.Status.LIVE:
         raise ValidationError("Tangazo halipo tena.")
+        
     from apps.deals.models import DealRoom
     from apps.transactions.models import Transaction
     from apps.transactions.services.reservation import create_reservation
+    
     dr = DealRoom.objects.filter(listing=entry.listing, buyer=user).order_by("-created_at").first()
-    if not dr: raise ValidationError("Anzisha Deal Room kwanza.")
-    txn, _ = Transaction.objects.get_or_create(deal_room=dr, defaults={
-        "listing": entry.listing, "buyer": user, "seller": entry.listing.seller,
-        "agreed_price": dr.agreed_price or entry.listing.price,
-        "status": Transaction.Status.RESERVATION_PENDING})
+    if not dr: 
+        raise ValidationError("Anzisha Deal Room kwanza.")
+        
+    txn, _ = Transaction.objects.get_or_create(
+        deal_room=dr, 
+        defaults={
+            "listing": entry.listing, 
+            "buyer": user, 
+            "seller": entry.listing.seller,
+            "agreed_price": dr.agreed_price or entry.listing.price,
+            "status": Transaction.Status.RESERVATION_PENDING
+        }
+    )
+    
     res = create_reservation(transaction=txn, user=user, duration_hours=24)
     entry.status = WaitingListEntry.Status.FULFILLED
     entry.save(update_fields=["status", "updated_at"])

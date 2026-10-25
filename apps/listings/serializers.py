@@ -17,7 +17,7 @@ from .services.listing_fee import calculate_listing_fee
 
 
 # ============================================================================
-# RESERVATION COUNT
+# RESERVATION COUNT & TIME
 # ============================================================================
 def _reserved_times(obj):
     cached = getattr(obj, "reserved_times_annot", None)
@@ -42,6 +42,28 @@ def _reserved_times(obj):
         )
         .count()
     )
+
+def _get_time_left(obj):
+    """Hesabu sekunde zilizobaki kwa reservation active."""
+    if obj.status != "RESERVED":
+        return None
+    
+    from apps.transactions.models import Reservation
+    from django.utils import timezone
+    
+    reservation = Reservation.objects.filter(
+        transaction__listing_id=obj.pk,
+        status=Reservation.Status.ACTIVE,
+    ).order_by("-created_at").first()
+    
+    if not reservation or not reservation.expires_at:
+        return None
+    
+    now = timezone.now()
+    if reservation.expires_at > now:
+        delta = reservation.expires_at - now
+        return int(delta.total_seconds())
+    return 0
 
 
 # ============================================================================
@@ -130,25 +152,19 @@ def _seller_contact_visible(request, seller, field_name):
 
 # ============================================================================
 # LISTING LIST
-# ✅ FIX: category = STRING (slug) — sio object. React Error #31 fix.
-# ✅ category_id = number kwa filtering.
-# ✅ category_name = string kwa display (kama inahitajika).
 # ============================================================================
 class ListingListSerializer(serializers.ModelSerializer):
     seller_name = serializers.CharField(source="seller.name", read_only=True)
     seller_phone = serializers.SerializerMethodField()
     seller_email = serializers.SerializerMethodField()
 
-    # ✅ category ni STRING (slug) — frontend ina-render kama text
     category = serializers.SlugRelatedField(
         slug_field="slug",
         read_only=True,
     )
-    # ✅ category_id ni number — kwa filtering/reference
     category_id = serializers.IntegerField(
         source="category.id", read_only=True,
     )
-    # ✅ category_name ni string — kwa display (badala ya object)
     category_name = serializers.CharField(
         source="category.name", read_only=True,
     )
@@ -163,6 +179,9 @@ class ListingListSerializer(serializers.ModelSerializer):
         source="leading_until", read_only=True,
     )
     reservation_count = serializers.SerializerMethodField()
+    
+    # ✅ MPYA
+    time_left_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
@@ -186,16 +205,19 @@ class ListingListSerializer(serializers.ModelSerializer):
             "is_boosted",
             "views_count",
             "reservation_count",
+            "time_left_seconds", # ✅ MPYA
             "seller_name",
             "seller_phone",
             "seller_email",
-            # ✅ category string fields
             "category",
             "category_id",
             "category_name",
             "primary_image",
             "created_at",
         ]
+
+    def get_time_left_seconds(self, obj):
+        return _get_time_left(obj)
 
     def get_reservation_count(self, obj):
         return _reserved_times(obj)
@@ -335,23 +357,19 @@ class EquipmentDetailsSerializer(serializers.ModelSerializer):
 
 # ============================================================================
 # LISTING DETAIL
-# ✅ FIX: category = STRING (slug) — sio object. React Error #31 fix.
 # ============================================================================
 class ListingDetailSerializer(serializers.ModelSerializer):
     seller_name = serializers.CharField(source="seller.name", read_only=True)
     seller_phone = serializers.SerializerMethodField()
     seller_email = serializers.SerializerMethodField()
 
-    # ✅ category ni STRING (slug)
     category = serializers.SlugRelatedField(
         slug_field="slug",
         read_only=True,
     )
-    # ✅ category_id ni number
     category_id = serializers.IntegerField(
         source="category.id", read_only=True,
     )
-    # ✅ category_name ni string
     category_name = serializers.CharField(
         source="category.name", read_only=True,
     )
@@ -372,6 +390,9 @@ class ListingDetailSerializer(serializers.ModelSerializer):
         source="leading_until", read_only=True,
     )
     reservation_count = serializers.SerializerMethodField()
+    
+    # ✅ MPYA
+    time_left_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
@@ -381,7 +402,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "seller_name",
             "seller_phone",
             "seller_email",
-            # ✅ category string fields
             "category",
             "category_id",
             "category_name",
@@ -404,6 +424,7 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "boosted_until",
             "views_count",
             "reservation_count",
+            "time_left_seconds", # ✅ MPYA
             "approved_by",
             "approved_at",
             "rejected_by",
@@ -419,6 +440,9 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+    def get_time_left_seconds(self, obj):
+        return _get_time_left(obj)
 
     def get_reservation_count(self, obj):
         return _reserved_times(obj)
@@ -637,13 +661,11 @@ class ListingRejectionSerializer(serializers.Serializer):
 
 # ============================================================================
 # ADMIN PENDING LISTING
-# ✅ FIX: category = STRING (slug) — sio object.
 # ============================================================================
 class AdminPendingListingSerializer(serializers.ModelSerializer):
     seller_name = serializers.CharField(source="seller.name", read_only=True)
     seller_email = serializers.CharField(source="seller.email", read_only=True)
 
-    # ✅ category ni STRING (slug)
     category = serializers.SlugRelatedField(
         slug_field="slug",
         read_only=True,
@@ -670,7 +692,6 @@ class AdminPendingListingSerializer(serializers.ModelSerializer):
             "latitude", "longitude", "address_text", "attributes",
             "status", "status_label", "seller", "seller_name",
             "seller_email",
-            # ✅ category string fields
             "category", "category_id", "category_name",
             "primary_image",
             "payment_status", "payment_label", "fee_status",

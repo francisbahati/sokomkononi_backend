@@ -764,7 +764,7 @@ class MeActivitiesView(APIView):
         serializer = UserActivitySerializer(activities, many=True)
         return Response(serializer.data)
 
-# ============================================================
+      # ============================================================
 # PUBLIC STATS — GET
 # ============================================================
 class PublicStatsView(APIView):
@@ -777,15 +777,15 @@ class PublicStatsView(APIView):
 
     def get(self, request):
         from apps.listings.models import Listing
-        from django.db.models import Avg
+        from django.db.models import Avg, Q
 
         # 1. Hesabu watumiaji wote (active only)
         users_count = User.all_objects.filter(is_active=True).count()
 
-        # 2. Hesabu mali zilizo hai (live)
-        # (Hakikisha jina la status ni "live" kama lilivyo kwenye database)
+        # 2. Hesabu mali zinazoonekana kwenye "Mali Zote"
+        #    (status="live" AU status="reserved", na hazijafutwa)
         properties_count = Listing.objects.filter(
-            status="live",
+            Q(status="live") | Q(status="reserved"),
             is_deleted=False,
         ).count()
 

@@ -3,7 +3,7 @@
 Listing moderation: 5 actions
   • request_edit_listing       — admin → seller: "hariri kwanza"
   • reject_listing             — admin → seller: "kataa kabisa"
-  • request_payment_listing    — admin → seller: "lipa fee"
+  • request_payment_listing    — admin → seller: "lipa fee" (au idhinisha kama bure)
   • finalize_approval_listing  — admin → seller: "idhinisha mwisho"
   • approve_listing            — legacy: idhinisha moja kwa moja
 """
@@ -87,11 +87,12 @@ def request_edit_listing(listing_id, admin_user, reason):
         "rejected_by", "rejected_at", "updated_at",
     ])
 
+    # Bilingual Notification
     _notify_seller(
         listing,
         Notification.NotificationType.LISTING_NEEDS_EDIT,
-        "Admin ameomba uhariri wa tangazo",
-        f'Admin ameomba uhariri wa "{listing.title}". Sababu: {reason}',
+        "Admin ameomba uhariri wa tangazo / Admin requested an edit",
+        f'Admin ameomba uhariri wa "{listing.title}". Sababu/Reason: {reason}',
         priority=Notification.Priority.HIGH,
     )
 
@@ -134,8 +135,8 @@ def reject_listing(listing_id, admin_user, rejection_reason):
     _notify_seller(
         listing,
         Notification.NotificationType.LISTING_REJECTED,
-        "Tangazo limekataliwa",
-        f'Tangazo lako "{listing.title}" halikuidhinishwa. Sababu: {rejection_reason}',
+        "Tangazo limekataliwa / Listing rejected",
+        f'Tangazo lako "{listing.title}" halikuidhinishwa. Sababu/Reason: {rejection_reason}',
         priority=Notification.Priority.URGENT,
     )
 
@@ -156,18 +157,40 @@ def request_payment_listing(listing_id, admin_user, reason=""):
             "Tangazo hili halipo kwenye hali ya kusubiri idhini."
         )
 
-    # Hakikisha ada ipo kabla ya kumwomba seller alipe. Hapa ndipo admin
-    # anaarifiwa kama kundi (category) halina fee rule.
+    # ✅ Angalia kama fee imezimwa (amount == 0) au haina fee rule
     from django.core.exceptions import ValidationError as DjangoValidationError
     from .listing_fee import create_listing_fee
+    
+    is_free = False
     try:
-        create_listing_fee(listing)
+        fee = create_listing_fee(listing)
+        if fee.amount == 0:
+            is_free = True
     except DjangoValidationError:
-        raise ValidationError(
-            "Ada ya kundi hili haijasanidiwa. Weka fee rule kwa kundi hili "
-            "(Revenue -> Listing Fee) kisha ujaribu tena."
-        )
+        # Kama hakuna fee rule kabisa, mfumo unaruhusu LIVE
+        is_free = True
 
+    if is_free:
+        # ✅ Bypass malipo: Mpeleke LIVE moja kwa moja
+        listing.status = Listing.Status.LIVE
+        listing.approved_by = admin_user
+        listing.approved_at = timezone.now()
+        listing.rejection_reason = ""
+        listing.save(update_fields=[
+            "status", "approved_by", "approved_at", 
+            "rejection_reason", "updated_at",
+        ])
+
+        _notify_seller(
+            listing,
+            Notification.NotificationType.LISTING_FINAL_APPROVED,
+            "Tangazo lako liko hewani! / Listing is live!",
+            f'Tangazo lako "{listing.title}" limeidhinishwa bila malipo na sasa linaonekana kwa wanunuzi. / Your listing "{listing.title}" has been approved for free and is now visible to buyers.',
+            priority=Notification.Priority.HIGH,
+        )
+        return listing
+
+    # Kama fee ipo (si sifuri), endelea na mtiririko wa kawaida wa malipo
     listing.status = Listing.Status.APPROVED_PENDING_PAYMENT
     listing.approved_by = admin_user
     listing.approved_at = timezone.now()
@@ -178,15 +201,17 @@ def request_payment_listing(listing_id, admin_user, reason=""):
     clean_reason = (reason or "").strip()
     msg = (
         f'Tangazo lako "{listing.title}" limekaguliwa na ni zuri. '
-        f"Tafadhali lipa ada ya kuchapisha ili liidhinishwe."
+        f"Tafadhali lipa ada ya kuchapisha ili liidhinishwe. / "
+        f'Your listing "{listing.title}" has been reviewed and is good. '
+        f"Please pay the listing fee so it can be approved."
     )
     if clean_reason:
-        msg = f"{msg} Maelezo: {clean_reason}"
+        msg = f"{msg} Maelezo/Notes: {clean_reason}"
 
     _notify_seller(
         listing,
         Notification.NotificationType.LISTING_PAYMENT_REQUESTED,
-        "Lipa ada ya kuchapisha tangazo",
+        "Lipa ada ya kuchapisha tangazo / Pay listing fee",
         msg,
         priority=Notification.Priority.HIGH,
     )
@@ -196,7 +221,7 @@ def request_payment_listing(listing_id, admin_user, reason=""):
 
 # ============================================================
 # 4. FINALIZE APPROVAL — admin analidhinisha mwisho
-# # ============================================================
+# ============================================================
 @transaction.atomic
 def finalize_approval_listing(listing_id, admin_user):
     _require_admin(admin_user)
@@ -228,15 +253,16 @@ def finalize_approval_listing(listing_id, admin_user):
     _notify_seller(
         listing,
         Notification.NotificationType.LISTING_FINAL_APPROVED,
-        "Tangazo lako liko hewani!",
-        f'Tangazo lako "{listing.title}" limeidhinishwa na sasa linaonekana kwa wanunuzi.',
+        "Tangazo lako liko hewani! / Listing is live!",
+        f'Tangazo lako "{listing.title}" limeidhinishwa na sasa linaonekana kwa wanunuzi. / Your listing "{listing.title}" has been approved and is now visible to buyers.',
         priority=Notification.Priority.HIGH,
     )
 
     return listing
 
-# ============================================================
 
+# ============================================================
+# 5. APPROVE (legacy) — idhinisha moja kwa moja
 # ============================================================
 @transaction.atomic
 def approve_listing(listing_id, admin_user):
@@ -260,7 +286,9 @@ def approve_listing(listing_id, admin_user):
     if not fee_is_paid and not fee_is_free:
         raise ValidationError(
             "Tangazo hili linahitaji malipo. Tumia 'Omba Malipo' "
-            "kwanza, kisha 'Idhinisha Mwisho' baada ya seller kulipa."
+            "kwanza, kisha 'Idhinisha Mwisho' baada ya seller kulipa. / "
+            "This listing requires payment. Use 'Request Payment' first, "
+            "then 'Finalize Approval' after the seller pays."
         )
     # ─────────────────────────────────────────────────────────
 
@@ -278,8 +306,8 @@ def approve_listing(listing_id, admin_user):
     _notify_seller(
         listing,
         Notification.NotificationType.LISTING_APPROVED,
-        "Tangazo limeidhinishwa",
-        f'Tangazo lako "{listing.title}" limeidhinishwa na sasa linapatikana.',
+        "Tangazo limeidhinishwa / Listing approved",
+        f'Tangazo lako "{listing.title}" limeidhinishwa na sasa linapatikana. / Your listing "{listing.title}" has been approved and is now live.',
         priority=Notification.Priority.HIGH,
     )
 

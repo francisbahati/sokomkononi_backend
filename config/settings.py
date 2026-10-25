@@ -54,6 +54,7 @@ ALLOWED_HOSTS = list(dict.fromkeys(
         "localhost",
     ]
 ))
+SITE_URL = os.environ.get("SITE_URL", "https://sokomkononi.co.tz")
 
 INSTALLED_APPS = [
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",

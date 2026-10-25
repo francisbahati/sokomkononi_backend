@@ -245,7 +245,7 @@ _CSP_DIRECTIVES = {
     "form-action": ["'self'", "https://appleid.apple.com"],
 }
 
-_EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin")
+_EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin", "/docs")
 
 if env_bool("CSP_REPORT_ONLY", DEBUG):
     CONTENT_SECURITY_POLICY_REPORT_ONLY = {

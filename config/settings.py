@@ -74,8 +74,6 @@ INSTALLED_APPS = [
     "apps.leading_fees", "apps.advertisement_fees", "apps.reservation_rates",
 ]
 
-# Hatumii allauth kwa Apple (tunatumia SocialLoginView + Apple JS popup)
-# Kwa hiyo AUTHENTICATION_BACKENDS inabaki ya kawaida.
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
 ]
@@ -196,7 +194,9 @@ STORAGES = {
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
 }
 
-# ---------------- CSP ----------------
+# ============================================================
+# CSP — Imeruhusiwa kwa ajili ya Swagger UI na Cloudflare
+# ============================================================
 R2_PUBLIC_ORIGIN = f"https://{R2_CUSTOM_DOMAIN}" if R2_CUSTOM_DOMAIN else None
 
 _CSP_IMG_SRC = ["'self'", "data:", "blob:"]
@@ -220,15 +220,23 @@ _CSP_DIRECTIVES = {
     "default-src": ["'self'"],
     "img-src": _CSP_IMG_SRC,
     "media-src": _CSP_MEDIA_SRC,
+    # ✅ 'unsafe-eval' imeongezwa kwa ajili ya Swagger UI
     "script-src": [
         "'self'",
         "'unsafe-inline'",
+        "'unsafe-eval'",
         "https://unpkg.com",
         "https://cdn.jsdelivr.net",
         "https://static.cloudflareinsights.com",
         "https://appleid.cdn-apple.com",
     ],
-    "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+    "style-src": [
+        "'self'", 
+        "'unsafe-inline'", 
+        "https://unpkg.com", 
+        "https://cdn.jsdelivr.net", 
+        "https://fonts.googleapis.com"
+    ],
     "font-src": ["'self'", "data:", "https://fonts.gstatic.com", "https://www.apple.com"],
     "connect-src": _connect_src,
     "frame-src": ["'self'", "https://appleid.apple.com"],
@@ -446,16 +454,10 @@ MANAGERS = ADMINS
 
 # ---------------- SOCIAL ----------------
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-
-# Apple: Services ID (sio App ID). Inatumika kwa uthibitisho wa id_token.
 APPLE_SERVICES_ID = os.environ.get("APPLE_CLIENT_ID", "co.tz.sokomkononi.web")
-
-# Hatumii allauth kwa Apple, kwa hiyo hakuna APPLE_TEAM_ID, APPLE_KEY_ID,
-# APPLE_PRIVATE_KEY, SOCIALACCOUNT_PROVIDERS, n.k.
 
 PYNEXTSMS_TOKEN = os.environ.get("PYNEXTSMS_TOKEN", "")
 PYNEXTSMS_SENDER_ID = os.environ.get("PYNEXTSMS_SENDER_ID", "")
-
 
 # ---------------- FIMIPAY PAYMENTS ----------------
 FIMIPAY_SECRET_KEY = os.environ.get("FIMIPAY_SECRET_KEY", "")
@@ -465,7 +467,6 @@ FIMIPAY_CURRENCY = os.environ.get("FIMIPAY_CURRENCY", "TZS")
 FIMIPAY_DEFAULT_REDIRECT_URL = os.environ.get(
     "FIMIPAY_DEFAULT_REDIRECT_URL", "https://sokomkononi.co.tz/"
 )
-
 
 if not DEBUG and not FIMIPAY_SECRET_KEY:
     raise ImproperlyConfigured("FIMIPAY_SECRET_KEY must be set when DEBUG=False.")

@@ -3,6 +3,9 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from django.views.generic.base import RedirectView
+from django.templatetags.static import static
+
 from apps.accounts.social_views import SocialLoginView
 from apps.banners.views_admin import AdminPromotionsView
 from apps.core.admin_promotions.views import AdminPromotionActionView
@@ -27,7 +30,9 @@ urlpatterns = [
         SpectacularSwaggerView.as_view(url_name="schema"),
         name="docs",
     ),
+    path("", RedirectView.as_view(url="/api/docs/", permanent=False)),
     path("api/", include("apps.accounts.urls")), 
+    path("favicon.ico", RedirectView.as_view(url=static("favicon.ico"))),
 
     # Auth & apps
     path("api/stats/", include("apps.stats.urls")),

@@ -9,6 +9,9 @@ from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
+# django-csp 4.0 constants
+from csp.constants import SELF, UNSAFE_INLINE, UNSAFE_EVAL
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
@@ -195,17 +198,17 @@ STORAGES = {
 }
 
 # ============================================================
-# CSP — Imeruhusiwa kwa ajili ya Swagger UI na Cloudflare
+# CSP — django-csp 4.0 (muundo mpya)
 # ============================================================
 R2_PUBLIC_ORIGIN = f"https://{R2_CUSTOM_DOMAIN}" if R2_CUSTOM_DOMAIN else None
 
-_CSP_IMG_SRC = ["'self'", "data:", "blob:"]
-_CSP_MEDIA_SRC = ["'self'"]
+_CSP_IMG_SRC = [SELF, "data:", "blob:"]
+_CSP_MEDIA_SRC = [SELF]
 if R2_PUBLIC_ORIGIN:
     _CSP_IMG_SRC.append(R2_PUBLIC_ORIGIN)
     _CSP_MEDIA_SRC.append(R2_PUBLIC_ORIGIN)
 
-_connect_src = ["'self'"] + [
+_connect_src = [SELF] + [
     o for o in [
         "https://api.sokomkononi.co.tz",
         "https://sokomkononi.co.tz",
@@ -216,64 +219,47 @@ _connect_src = ["'self'"] + [
     ] if o
 ]
 
-_CSP_DIRECTIVES = {
-    "default-src": ["'self'"],
-    "img-src": _CSP_IMG_SRC,
-    "media-src": _CSP_MEDIA_SRC,
-    "script-src": [
-        "'self'",
-        "'unsafe-inline'",
-        "'unsafe-eval'",
-        "https://unpkg.com",
-        "https://cdn.jsdelivr.net",
-        "https://static.cloudflareinsights.com",
-        "https://appleid.cdn-apple.com",
-    ],
-    # ⬅️ MUHIMU: script-src-elem inashinda script-src kwa <script> elements
-    "script-src-elem": [
-        "'self'",
-        "'unsafe-inline'",
-        "'unsafe-eval'",
-        "https://unpkg.com",
-        "https://cdn.jsdelivr.net",
-        "https://static.cloudflareinsights.com",
-        "https://appleid.cdn-apple.com",
-    ],
-    "style-src": [
-        "'self'",
-        "'unsafe-inline'",
-        "https://unpkg.com",
-        "https://cdn.jsdelivr.net",
-        "https://fonts.googleapis.com"
-    ],
-    # ⬅️ MUHIMU: style-src-elem inashinda style-src kwa <style> elements
-    "style-src-elem": [
-        "'self'",
-        "'unsafe-inline'",
-        "https://unpkg.com",
-        "https://cdn.jsdelivr.net",
-        "https://fonts.googleapis.com"
-    ],
-    "font-src": ["'self'", "data:", "https://fonts.gstatic.com", "https://www.apple.com"],
-    "connect-src": _connect_src,
-    "frame-src": ["'self'", "https://appleid.apple.com"],
-    "frame-ancestors": ["'none'"],
-    "base-uri": ["'self'"],
-    "form-action": ["'self'", "https://appleid.apple.com"],
+# ⬅️ EXCLUDE_URL_PREFIXES ndani ya CONTENT_SECURITY_POLICY, kama LIST
+CONTENT_SECURITY_POLICY = {
+    "EXCLUDE_URL_PREFIXES": ["/api/docs", "/api/schema", "/admin", "/docs"],
+    "DIRECTIVES": {
+        "default-src": [SELF],
+        "img-src": _CSP_IMG_SRC,
+        "media-src": _CSP_MEDIA_SRC,
+        "script-src": [
+            SELF, UNSAFE_INLINE, UNSAFE_EVAL,
+            "https://unpkg.com",
+            "https://cdn.jsdelivr.net",
+            "https://static.cloudflareinsights.com",
+            "https://appleid.cdn-apple.com",
+        ],
+        "script-src-elem": [
+            SELF, UNSAFE_INLINE, UNSAFE_EVAL,
+            "https://unpkg.com",
+            "https://cdn.jsdelivr.net",
+            "https://static.cloudflareinsights.com",
+            "https://appleid.cdn-apple.com",
+        ],
+        "style-src": [
+            SELF, UNSAFE_INLINE,
+            "https://unpkg.com",
+            "https://cdn.jsdelivr.net",
+            "https://fonts.googleapis.com",
+        ],
+        "style-src-elem": [
+            SELF, UNSAFE_INLINE,
+            "https://unpkg.com",
+            "https://cdn.jsdelivr.net",
+            "https://fonts.googleapis.com",
+        ],
+        "font-src": [SELF, "data:", "https://fonts.gstatic.com", "https://www.apple.com"],
+        "connect-src": _connect_src,
+        "frame-src": [SELF, "https://appleid.apple.com"],
+        "frame-ancestors": ["'none'"],
+        "base-uri": [SELF],
+        "form-action": [SELF, "https://appleid.apple.com"],
+    },
 }
-_EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin", "/docs")
-
-if env_bool("CSP_REPORT_ONLY", DEBUG):
-    CONTENT_SECURITY_POLICY_REPORT_ONLY = {
-        "DIRECTIVES": _CSP_DIRECTIVES,
-        "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
-    }
-    CONTENT_SECURITY_POLICY = {"DIRECTIVES": {}}
-else:
-    CONTENT_SECURITY_POLICY = {
-        "DIRECTIVES": _CSP_DIRECTIVES,
-        "EXCLUDE_URL_PREFIXES": _EXCLUDE_URL_PREFIXES,
-    }
 
 # ============================================================
 # CORS

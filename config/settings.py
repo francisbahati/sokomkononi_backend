@@ -261,7 +261,6 @@ _CSP_DIRECTIVES = {
     "base-uri": ["'self'"],
     "form-action": ["'self'", "https://appleid.apple.com"],
 }
-
 _EXCLUDE_URL_PREFIXES = ("/api/docs", "/api/schema", "/admin", "/docs")
 
 if env_bool("CSP_REPORT_ONLY", DEBUG):

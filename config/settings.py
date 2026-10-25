@@ -220,7 +220,6 @@ _CSP_DIRECTIVES = {
     "default-src": ["'self'"],
     "img-src": _CSP_IMG_SRC,
     "media-src": _CSP_MEDIA_SRC,
-    # ✅ 'unsafe-eval' imeongezwa kwa ajili ya Swagger UI
     "script-src": [
         "'self'",
         "'unsafe-inline'",
@@ -230,11 +229,29 @@ _CSP_DIRECTIVES = {
         "https://static.cloudflareinsights.com",
         "https://appleid.cdn-apple.com",
     ],
+    # ⬅️ MUHIMU: script-src-elem inashinda script-src kwa <script> elements
+    "script-src-elem": [
+        "'self'",
+        "'unsafe-inline'",
+        "'unsafe-eval'",
+        "https://unpkg.com",
+        "https://cdn.jsdelivr.net",
+        "https://static.cloudflareinsights.com",
+        "https://appleid.cdn-apple.com",
+    ],
     "style-src": [
-        "'self'", 
-        "'unsafe-inline'", 
-        "https://unpkg.com", 
-        "https://cdn.jsdelivr.net", 
+        "'self'",
+        "'unsafe-inline'",
+        "https://unpkg.com",
+        "https://cdn.jsdelivr.net",
+        "https://fonts.googleapis.com"
+    ],
+    # ⬅️ MUHIMU: style-src-elem inashinda style-src kwa <style> elements
+    "style-src-elem": [
+        "'self'",
+        "'unsafe-inline'",
+        "https://unpkg.com",
+        "https://cdn.jsdelivr.net",
         "https://fonts.googleapis.com"
     ],
     "font-src": ["'self'", "data:", "https://fonts.gstatic.com", "https://www.apple.com"],

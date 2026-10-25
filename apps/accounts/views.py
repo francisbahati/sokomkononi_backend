@@ -764,38 +764,37 @@ class MeActivitiesView(APIView):
         serializer = UserActivitySerializer(activities, many=True)
         return Response(serializer.data)
 
-      # ============================================================
+# ============================================================
 # PUBLIC STATS — GET
 # ============================================================
 class PublicStatsView(APIView):
-    """
-    GET /api/stats/public/
-    Inarudisha idadi ya watumiaji, mali zilizo hai, na rating.
-    Ni public (AllowAny) — inaweza kufikiwa na mtu yeyote.
-    """
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         from apps.listings.models import Listing
-        from django.db.models import Avg, Q
+        from django.db.models import Avg
 
-        # 1. Hesabu watumiaji wote (active only)
+        # 1. Watumiaji
         users_count = User.all_objects.filter(is_active=True).count()
 
-        # 2. Hesabu mali zinazoonekana kwenye "Mali Zote"
-        #    (status="live" AU status="reserved", na hazijafutwa)
+        # 2. Mali (Properties) — Hesabu zote ambazo hazijafutwa
+        # Tumeondoa kigezo cha status kwa muda ili kuhakikisha tunaona namba
         properties_count = Listing.objects.filter(
-            Q(status="live") | Q(status="reserved"),
-            is_deleted=False,
+            is_deleted=False
         ).count()
 
-        # 3. Rating — kama una model ya Review
+        # Kama unataka kuona ni status gani zinatumika, unaweza kuongeza hii kwa muda:
+        # from django.db.models import Count
+        # status_counts = Listing.objects.values('status').annotate(count=Count('id'))
+        # print("STATUS COUNTS:", list(status_counts))
+
+        # 3. Rating
         try:
             from apps.reviews.models import Review
             avg_rating = Review.objects.aggregate(avg=Avg('rating'))['avg']
             rating = round(avg_rating, 1) if avg_rating else 4.7
         except Exception:
-            rating = 4.7  # Default kama model haipo bado
+            rating = 4.7
 
         return Response({
             "users": users_count,

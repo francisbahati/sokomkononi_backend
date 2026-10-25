@@ -27,11 +27,11 @@ urlpatterns = [
         SpectacularSwaggerView.as_view(url_name="schema"),
         name="docs",
     ),
-
+    path("api/", include("apps.accounts.urls")), 
 
     # Auth & apps
     path("api/stats/", include("apps.stats.urls")),
-    path("api/auth/social/", SocialLoginView.as_view(), name="social-login"),  # Google (custom)
+    path("api/auth/social/", SocialLoginView.as_view(), name="social-login"),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/contact/", include("apps.contact.urls")),
     path("api/categories/", include("apps.categories.urls")),

@@ -763,3 +763,42 @@ class MeActivitiesView(APIView):
 
         serializer = UserActivitySerializer(activities, many=True)
         return Response(serializer.data)
+
+# ============================================================
+# PUBLIC STATS — GET
+# ============================================================
+class PublicStatsView(APIView):
+    """
+    GET /api/stats/public/
+    Inarudisha idadi ya watumiaji, mali zilizo hai, na rating.
+    Ni public (AllowAny) — inaweza kufikiwa na mtu yeyote.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from apps.listings.models import Listing
+        from django.db.models import Avg
+
+        # 1. Hesabu watumiaji wote (active only)
+        users_count = User.all_objects.filter(is_active=True).count()
+
+        # 2. Hesabu mali zilizo hai (live)
+        # (Hakikisha jina la status ni "live" kama lilivyo kwenye database)
+        properties_count = Listing.objects.filter(
+            status="live",
+            is_deleted=False,
+        ).count()
+
+        # 3. Rating — kama una model ya Review
+        try:
+            from apps.reviews.models import Review
+            avg_rating = Review.objects.aggregate(avg=Avg('rating'))['avg']
+            rating = round(avg_rating, 1) if avg_rating else 4.7
+        except Exception:
+            rating = 4.7  # Default kama model haipo bado
+
+        return Response({
+            "users": users_count,
+            "properties": properties_count,
+            "rating": rating,
+        }, status=status.HTTP_200_OK)

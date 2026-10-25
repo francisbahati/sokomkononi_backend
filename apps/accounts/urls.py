@@ -1,5 +1,7 @@
 from django.urls import path
 
+from .views import PublicStatsView 
+
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .social_views import SocialLoginView
@@ -46,6 +48,7 @@ urlpatterns = [
     path("resend-otp/", ResendOTPView.as_view(), name="resend-otp"),
 
     path("login/", LoginView.as_view(), name="login"),
+    path("stats/public/", PublicStatsView.as_view(), name="public-stats"),
     path("social/", SocialLoginView.as_view(), name="social-login"),
     path(
         "token/refresh/",

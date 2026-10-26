@@ -104,6 +104,7 @@ def _period_range(period, date_from=None, date_to=None):
 def _revenue_in_range(start_dt, end_dt):
     """
     Hesabu revenue halisi kwa kipindi chochote (siku au mwezi) kutoka vyanzo vyote.
+    ✅ Inatumia Coalesce("paid_at", "created_at") kama ilivyo kwenye revenue.py
     """
     from apps.banners.models import BannerAd
     from apps.boosting.models import ListingBoost
@@ -115,40 +116,47 @@ def _revenue_in_range(start_dt, end_dt):
 
     total = Decimal("0.00")
 
-    total += ListingFee.objects.filter(
-        payment_status="PAID",
-        paid_at__gte=start_dt, paid_at__lt=end_dt,
-    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+    # Listing Fees
+    qs = ListingFee.objects.filter(payment_status="PAID").annotate(
+        effective_paid=Coalesce("paid_at", "created_at")
+    )
+    total += qs.filter(effective_paid__gte=start_dt, effective_paid__lt=end_dt).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
-    total += ListingBoost.objects.filter(
-        payment_status="PAID",
-        paid_at__gte=start_dt, paid_at__lt=end_dt,
-    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+    # Boosts
+    qs = ListingBoost.objects.filter(payment_status="PAID").annotate(
+        effective_paid=Coalesce("paid_at", "created_at")
+    )
+    total += qs.filter(effective_paid__gte=start_dt, effective_paid__lt=end_dt).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
-    total += ListingLeading.objects.filter(
-        payment_status=ListingLeading.PaymentStatus.PAID,
-        paid_at__gte=start_dt, paid_at__lt=end_dt,
-    ).aggregate(s=Sum("price"))["s"] or Decimal("0.00")
+    # Leading
+    qs = ListingLeading.objects.filter(payment_status=ListingLeading.PaymentStatus.PAID).annotate(
+        effective_paid=Coalesce("paid_at", "created_at")
+    )
+    total += qs.filter(effective_paid__gte=start_dt, effective_paid__lt=end_dt).aggregate(s=Sum("price"))["s"] or Decimal("0.00")
 
-    total += Reservation.objects.filter(
-        payment_status="PAID",
-        paid_at__gte=start_dt, paid_at__lt=end_dt,
-    ).aggregate(s=Sum("deposit_amount"))["s"] or Decimal("0.00")
+    # Reservations
+    qs = Reservation.objects.filter(payment_status="PAID").annotate(
+        effective_paid=Coalesce("paid_at", "created_at")
+    )
+    total += qs.filter(effective_paid__gte=start_dt, effective_paid__lt=end_dt).aggregate(s=Sum("deposit_amount"))["s"] or Decimal("0.00")
 
-    total += BannerAd.objects.filter(
-        payment_status="PAID",
-        paid_at__gte=start_dt, paid_at__lt=end_dt,
-    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+    # Banner Ads
+    qs = BannerAd.objects.filter(payment_status="PAID").annotate(
+        effective_paid=Coalesce("paid_at", "created_at")
+    )
+    total += qs.filter(effective_paid__gte=start_dt, effective_paid__lt=end_dt).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
-    total += BundlePurchase.objects.filter(
-        status=BundlePurchase.Status.PAID,
-        paid_at__gte=start_dt, paid_at__lt=end_dt,
-    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+    # Bundle Purchases
+    qs = BundlePurchase.objects.filter(status=BundlePurchase.Status.PAID).annotate(
+        effective_paid=Coalesce("paid_at", "created_at")
+    )
+    total += qs.filter(effective_paid__gte=start_dt, effective_paid__lt=end_dt).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
-    total += SuccessFeePayment.objects.filter(
-        payment_status="PAID",
-        paid_at__gte=start_dt, paid_at__lt=end_dt,
-    ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+    # Success Fees
+    qs = SuccessFeePayment.objects.filter(payment_status="PAID").annotate(
+        effective_paid=Coalesce("paid_at", "created_at")
+    )
+    total += qs.filter(effective_paid__gte=start_dt, effective_paid__lt=end_dt).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
     return total
 
@@ -304,7 +312,7 @@ class ReportsView(APIView):
                 "total": float(month_total),
             })
 
-        # ✅ REVENUE BY DAY (MPYA)
+        # ✅ REVENUE BY DAY (Siku 7)
         revenue_by_day = []
         for i in range(6, -1, -1):
             day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)

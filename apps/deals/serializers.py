@@ -81,26 +81,19 @@ class DealUserSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "phone", "email"]
         read_only_fields = fields
 
-    def _reservation_paid(self):
+    def _is_participant(self):
+        """
+        Mawasiliano ni huru: mnunuzi na muuzaji wa Deal Room hii wanaweza
+        kuonana (phone/email) bila kusubiri Reservation Fee.
+        Privacy settings (show_phone / show_email) bado zinaheshimiwa.
+        """
         request = self.context.get("request")
         deal_room = self.context.get("deal_room")
         if not request or not request.user.is_authenticated:
             return False
         if not deal_room:
             return False
-        if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
-            return False
-        try:
-            txn = deal_room.transaction
-        except Exception:
-            return False
-        from apps.transactions.models import Transaction
-        return txn.status in [
-            Transaction.Status.RESERVED,
-            Transaction.Status.INSPECTION,
-            Transaction.Status.READY_FOR_FINAL_PAYMENT,
-            Transaction.Status.COMPLETED,
-        ]
+        return request.user.id in [deal_room.buyer_id, deal_room.seller_id]
 
     def _is_self_or_staff(self, obj):
         request = self.context.get("request")
@@ -117,7 +110,7 @@ class DealUserSerializer(serializers.ModelSerializer):
     def get_phone(self, obj):
         if self._is_self_or_staff(obj):
             return getattr(obj, "phone", None)
-        if not self._reservation_paid():
+        if not self._is_participant():
             return None
         prefs = self._prefs(obj)
         if prefs is not None and not prefs.show_phone:
@@ -127,7 +120,7 @@ class DealUserSerializer(serializers.ModelSerializer):
     def get_email(self, obj):
         if self._is_self_or_staff(obj):
             return getattr(obj, "email", None)
-        if not self._reservation_paid():
+        if not self._is_participant():
             return None
         prefs = self._prefs(obj)
         if prefs is not None and not prefs.show_email:
@@ -195,26 +188,7 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
         request = self.context.get("request")
         if not deal_room or not request or not request.user.is_authenticated:
             return value
-        if request.user.id == deal_room.seller_id:
-            return value
-        try:
-            txn = deal_room.transaction
-        except Exception:
-            txn = None
-        from apps.transactions.models import Transaction
-        reservation_paid = bool(
-            txn and txn.status in [
-                Transaction.Status.RESERVED,
-                Transaction.Status.INSPECTION,
-                Transaction.Status.READY_FOR_FINAL_PAYMENT,
-                Transaction.Status.COMPLETED,
-            ]
-        )
-        if not reservation_paid and contains_contact_info(value):
-            raise serializers.ValidationError(
-                "Hairuhusiwi kutuma namba ya simu, email, au taarifa za "
-                "mawasiliano kwenye offer kabla ya kulipa Reservation Fee."
-            )
+        # Mawasiliano ni huru — hakuna tena kuzuia namba/email kwenye offer.
         return value
 
     def validate(self, attrs):
@@ -300,26 +274,7 @@ class DealMessageCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Huruhusiwi kutuma ujumbe kwenye Deal Room hii."
             )
-        if request.user.id == deal_room.seller_id:
-            return attrs
-        try:
-            txn = deal_room.transaction
-        except Exception:
-            txn = None
-        from apps.transactions.models import Transaction
-        reservation_paid = bool(
-            txn and txn.status in [
-                Transaction.Status.RESERVED,
-                Transaction.Status.INSPECTION,
-                Transaction.Status.READY_FOR_FINAL_PAYMENT,
-                Transaction.Status.COMPLETED,
-            ]
-        )
-        if not reservation_paid and contains_contact_info(attrs["text"]):
-            raise serializers.ValidationError({
-                "text": "Hairuhusiwi kutuma namba ya simu, email, au taarifa "
-                        "za mawasiliano kwenye chat kabla ya kulipa Reservation Fee."
-            })
+        # Mawasiliano ni huru — hakuna tena kuzuia namba/email kwenye chat.
         return attrs
 
 
@@ -417,19 +372,8 @@ class DealRoomListSerializer(serializers.ModelSerializer):
             return None
 
     def get_can_see_contact(self, obj):
-        try:
-            txn = obj.transaction
-        except Exception:
-            return False
-        if not txn:
-            return False
-        from apps.transactions.models import Transaction
-        return txn.status in [
-            Transaction.Status.RESERVED,
-            Transaction.Status.INSPECTION,
-            Transaction.Status.READY_FOR_FINAL_PAYMENT,
-            Transaction.Status.COMPLETED,
-        ]
+        # Washiriki wa Deal Room wanaweza kuonana wakati wowote.
+        return True
 
     def get_inspection_started_at(self, obj):
         try:
@@ -597,16 +541,7 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
         True kama reservation imelipwa — buyer/seller wanaweza kuonana
         (phone/email) na kuwasiliana wakati wa inspection.
         """
-        txn = self._txn(obj)
-        if not txn:
-            return False
-        from apps.transactions.models import Transaction
-        return txn.status in [
-            Transaction.Status.RESERVED,
-            Transaction.Status.INSPECTION,
-            Transaction.Status.READY_FOR_FINAL_PAYMENT,
-            Transaction.Status.COMPLETED,
-        ]
+        return True
 
     # ── MPYA: inspection fields ──
     def get_inspection_started_at(self, obj):

@@ -1,7 +1,4 @@
-"""Per-endpoint admin report routes.
-
-Each endpoint reuses ReportsView (aggregated) and returns a slice.
-"""
+# apps/finance/urls_admin_reports.py
 from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -40,6 +37,13 @@ class RevenueByMonthView(APIView):
         return Response(_aggregate(request).get("revenueByMonth", []))
 
 
+# ✅ MPYA: Revenue by Day
+class RevenueByDayView(APIView):
+    permission_classes = [IsAdminUser]
+    def get(self, request):
+        return Response(_aggregate(request).get("revenueByDay", []))
+
+
 class DealsStatusView(APIView):
     permission_classes = [IsAdminUser]
     def get(self, request):
@@ -76,8 +80,6 @@ class ConversionRateView(APIView):
         return Response({"rate": _aggregate(request).get("conversionRate", 0)})
 
 
-
-
 class OverviewView(APIView):
     """GET /api/admin/reports/overview/ — full aggregate bundle."""
     permission_classes = [IsAdminUser]
@@ -91,6 +93,7 @@ urlpatterns = [
     path("users-growth/", UsersGrowthView.as_view(), name="admin-reports-users-growth"),
     path("listings-growth/", ListingsGrowthView.as_view(), name="admin-reports-listings-growth"),
     path("revenue-by-month/", RevenueByMonthView.as_view(), name="admin-reports-revenue-month"),
+    path("revenue-by-day/", RevenueByDayView.as_view(), name="admin-reports-revenue-day"), # ✅ MPYA
     path("deals-status/", DealsStatusView.as_view(), name="admin-reports-deals-status"),
     path("top-sellers/", TopSellersView.as_view(), name="admin-reports-top-sellers"),
     path("most-viewed-listings/", MostViewedView.as_view(), name="admin-reports-most-viewed"),

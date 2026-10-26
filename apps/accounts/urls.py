@@ -11,6 +11,7 @@ from .views_2fa import (
     SessionsView,
     TwoFactorChallengeView,
     TwoFactorDisableView,
+    TwoFactorRecoveryCodesView,
     TwoFactorSetupView,
     TwoFactorStatusView,
     TwoFactorVerifyView,
@@ -94,4 +95,26 @@ urlpatterns = [
         DeleteAccountView.as_view(),
         name="delete-account",
     ),
+
+    # ---------------- 2FA ----------------
+    path("2fa/status/", TwoFactorStatusView.as_view(), name="2fa-status"),
+    path("2fa/setup/", TwoFactorSetupView.as_view(), name="2fa-setup"),
+    path("2fa/verify/", TwoFactorVerifyView.as_view(), name="2fa-verify"),
+    path("2fa/disable/", TwoFactorDisableView.as_view(), name="2fa-disable"),
+    path(
+        "2fa/recovery-codes/",
+        TwoFactorRecoveryCodesView.as_view(),
+        name="2fa-recovery-codes",
+    ),
+    path("2fa/login/", TwoFactorChallengeView.as_view(), name="2fa-login"),
+
+    # ------- Sessions + data export -------
+    path("sessions/", SessionsView.as_view(), name="sessions"),
+    path("sessions/<int:pk>/", SessionsView.as_view(), name="session-detail"),
+    path(
+        "sessions/revoke-others/",
+        RevokeOtherSessionsView.as_view(),
+        name="sessions-revoke-others",
+    ),
+    path("me/data-export/", DataExportView.as_view(), name="data-export"),
 ]

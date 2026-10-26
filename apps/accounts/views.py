@@ -44,6 +44,7 @@ from .services import (
     verify_registration_otp,
 )
 from .tokens import (
+    create_2fa_challenge_token,
     create_password_reset_token,
     decode_password_reset_token,
 )
@@ -171,6 +172,22 @@ class LoginView(APIView):
         serializer.is_valid(raise_exception=True)
 
         user = serializer.validated_data["user"]
+
+        # 2FA: password ni sahihi lakini hatutoi token kamili bado
+        # (admin/staff hawatumii 2FA)
+        totp = getattr(user, "totp", None)
+        is_admin_user = user.is_staff or user.is_superuser
+        if totp is not None and totp.enabled and not is_admin_user:
+            logger.info("[login] 2fa required user_id=%s", user.pk)
+            return Response(
+                {
+                    "requires_2fa": True,
+                    "code_token": create_2fa_challenge_token(user),
+                    "message": "Weka nambari kutoka kwenye authenticator app.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
         logger.info("[login] success user_id=%s", user.pk)
         refresh = RefreshToken.for_user(user)
 

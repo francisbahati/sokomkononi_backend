@@ -5,6 +5,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from rest_framework import permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -13,12 +14,40 @@ from .models import User, UserSession
 from .serializers import ProfileSerializer
 from .totp import (
     build_provisioning_uri,
+    clear_failures,
     generate_recovery_codes,
     get_or_create_totp,
+    is_locked,
+    register_failure,
     verify_recovery_code,
     verify_totp,
 )
 from .tokens import decode_2fa_challenge_token
+
+LOCKED_MSG = "Majaribio mengi yameshindwa. Subiri dakika 10 kisha ujaribu tena."
+ADMIN_MSG = "Akaunti za admin hazitumii 2FA."
+
+
+def _is_admin(user):
+    return bool(user.is_staff or user.is_superuser)
+
+
+def _qr_data_uri(text):
+    """QR kama data URI (SVG) kwa kutumia `segno`. None ikikosekana."""
+    try:
+        import segno
+        return segno.make(text, error="m").svg_data_uri(scale=6, border=2)
+    except Exception:
+        return None
+
+
+def _first_error(detail):
+    """Toa ujumbe mmoja kutoka kwa ValidationError (dict/list/str)."""
+    if isinstance(detail, dict):
+        detail = next(iter(detail.values()), "")
+    if isinstance(detail, (list, tuple)):
+        detail = detail[0] if detail else ""
+    return str(detail)
 
 
 class TwoFactorStatusView(APIView):
@@ -36,27 +65,55 @@ class TwoFactorSetupView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        if _is_admin(request.user):
+            return Response({"detail": ADMIN_MSG}, status=status.HTTP_403_FORBIDDEN)
+        existing = getattr(request.user, "totp", None)
+        if existing and existing.enabled:
+            # Usionyeshe secret tena baada ya 2FA kuwashwa
+            return Response(
+                {"detail": "2FA tayari imewashwa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         t = get_or_create_totp(request.user)
+        uri = build_provisioning_uri(request.user)
         return Response({
-            "provisioning_uri": build_provisioning_uri(request.user),
+            "provisioning_uri": uri,
+            "qr_url": _qr_data_uri(uri),
             "secret": t.secret,
         })
 
 
 class TwoFactorVerifyView(APIView):
+    """Inathibitisha code ya kwanza na kuwasha 2FA."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        user = request.user
+        if _is_admin(user):
+            return Response({"detail": ADMIN_MSG}, status=status.HTTP_403_FORBIDDEN)
+        if is_locked(user):
+            return Response({"detail": LOCKED_MSG}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        t = get_or_create_totp(user)
+        if t.enabled:
+            return Response(
+                {"detail": "2FA tayari imewashwa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         code = (request.data.get("code") or "").strip()
-        if not verify_totp(request.user, code):
+        # require_enabled=False: 2FA bado haijawashwa, tunathibitisha setup
+        if not verify_totp(user, code, require_enabled=False):
+            register_failure(user)
             return Response(
                 {"detail": "Nambari si sahihi."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        t = get_or_create_totp(request.user)
+
+        clear_failures(user)
         t.enabled = True
         t.save(update_fields=["enabled"])
-        codes = generate_recovery_codes(request.user)
+        codes = generate_recovery_codes(user)
         return Response({
             "enabled": True,
             "recovery_codes": codes,
@@ -64,14 +121,66 @@ class TwoFactorVerifyView(APIView):
 
 
 class TwoFactorDisableView(APIView):
+    """Kuzima 2FA kunahitaji nenosiri + code (TOTP au recovery)."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        t = getattr(request.user, "totp", None)
-        if t:
-            t.enabled = False
-            t.save(update_fields=["enabled"])
+        user = request.user
+        t = getattr(user, "totp", None)
+        if not (t and t.enabled):
+            return Response({"enabled": False})
+
+        if is_locked(user):
+            return Response({"detail": LOCKED_MSG}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        password = request.data.get("password") or ""
+        code = (request.data.get("code") or "").strip()
+
+        if not user.check_password(password):
+            register_failure(user)
+            return Response(
+                {"detail": "Nenosiri si sahihi."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not (verify_totp(user, code) or verify_recovery_code(user, code)):
+            register_failure(user)
+            return Response(
+                {"detail": "Nambari si sahihi."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        clear_failures(user)
+        t.enabled = False
+        t.secret = ""            # secret mpya itatengenezwa ukiwasha tena
+        t.recovery_codes = []
+        t.save(update_fields=["enabled", "secret", "recovery_codes"])
         return Response({"enabled": False})
+
+
+class TwoFactorRecoveryCodesView(APIView):
+    """Tengeneza recovery codes mpya (za zamani zinafutwa). Inahitaji code."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        t = getattr(user, "totp", None)
+        if not (t and t.enabled):
+            return Response(
+                {"detail": "2FA haijawashwa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if is_locked(user):
+            return Response({"detail": LOCKED_MSG}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        code = (request.data.get("code") or "").strip()
+        if not verify_totp(user, code):
+            register_failure(user)
+            return Response(
+                {"detail": "Nambari si sahihi."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        clear_failures(user)
+        return Response({"recovery_codes": generate_recovery_codes(user)})
 
 
 class TwoFactorChallengeView(APIView):
@@ -85,27 +194,33 @@ class TwoFactorChallengeView(APIView):
 
         try:
             user_id = decode_2fa_challenge_token(code_token)
-        except Exception as exc:
+        except ValidationError as exc:
             return Response(
-                {"detail": getattr(exc, "detail", str(exc))},
+                {"detail": _first_error(exc.detail)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user = User.objects.filter(pk=user_id).first()
-        if not user:
+        user = User.objects.filter(pk=user_id, is_active=True).first()
+        if not user or _is_admin(user):
             return Response(
                 {"detail": "Mtumiaji haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        if is_locked(user):
+            return Response({"detail": LOCKED_MSG}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         if not (verify_totp(user, code) or verify_recovery_code(user, code)):
+            register_failure(user)
             return Response(
                 {"detail": "Nambari si sahihi."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        clear_failures(user)
         refresh = RefreshToken.for_user(user)
         return Response({
+            "message": "Umeingia kwenye akaunti kwa mafanikio.",
             "access": str(refresh.access_token),
             "refresh": str(refresh),
             "user": ProfileSerializer(user).data,

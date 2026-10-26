@@ -1,14 +1,4 @@
 # apps/finance/views_reports.py
-#
-# Marekebisho:
-#  - Ongeza @method_decorator(csrf_exempt) kwa ReportsView na
-#    ReportsExportView ili kuepuka CSRF 500 kwenye JWT-only API
-#  - Ondoa DISPUTED kutoka deals_by_status (dispute imeondolewa)
-#  - Ongeza `from` na `to` (custom date range) kwenye ReportsView
-#    na ReportsExportView
-#  - Revenue by month itumie revenue halisi (sio GMV)  ⬅️ MPYA
-#  - Ongeza leading_revenue kwenye revenue sources  ⬅️ MPYA
-# ============================================================
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -82,10 +72,8 @@ def _parse_end_date(s):
 def _period_range(period, date_from=None, date_to=None):
     """
     Rudisha (start, end) kutoka period au custom date range.
-
-    - period = "custom" → tumia date_from, date_to
-    - period = "today" | "week" | "month" | "year" | "all"
     """
+    # ✅ Tumia localtime ili upate muda wa Tanzania (EAT)
     now = timezone.localtime()
 
     if period == "custom":
@@ -116,7 +104,6 @@ def _period_range(period, date_from=None, date_to=None):
 def _revenue_for_month(month_start, month_end):
     """
     Hesabu revenue halisi kwa mwezi mmoja kutoka vyanzo vyote.
-    ⬅️ MPYA: hutumia fee models moja kwa moja, sio `agreed_price` (GMV).
     """
     from apps.banners.models import BannerAd
     from apps.boosting.models import ListingBoost
@@ -174,7 +161,8 @@ class ReportsView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        now = timezone.now()
+        # ✅ Tumia localtime
+        now = timezone.localtime()
 
         # ── CUSTOM DATE RANGE (optional) ────────────────────
         period = request.query_params.get("period", "all")
@@ -215,16 +203,17 @@ class ReportsView(APIView):
         running = baseline
         for i in range(29, -1, -1):
             day = (now - timedelta(days=i)).date()
-            running += growth_rows.get(day, 0)
+            new_count = growth_rows.get(day, 0)
+            running += new_count
             users_growth.append({
                 "label": day.strftime("%d/%m"),
-                "cumulative": running,
+                "count": new_count, # ✅ Idadi ya siku hiyo
+                "cumulative": running, # ✅ Jumla kwa ujumla
             })
 
         # ── LISTINGS ────────────────────────────────────────
         visible_qs = _visible_listings_qs()
 
-        # Kama custom date range imetolewa, chuja listings kwa created_at
         if start and end:
             visible_qs_in_range = visible_qs.filter(
                 created_at__gte=start, created_at__lte=end,
@@ -299,7 +288,6 @@ class ReportsView(APIView):
         except Exception:
             total_revenue = 0.0
 
-        # ⬅️ REKEBISHO: revenueByMonth itumie revenue halisi (sio GMV)
         revenue_by_month = []
         _anchor = now.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0,
@@ -421,13 +409,6 @@ class ReportsView(APIView):
 # ============================================================
 @method_decorator(csrf_exempt, name="dispatch")
 class ReportsExportView(APIView):
-    """
-    GET /api/finance/reports/export/?format=csv&period=week
-    GET /api/finance/reports/export/?format=csv&period=custom&from=2026-10-15&to=2026-10-17
-
-    Period: today | week | month | year | all | custom
-    Format: csv | pdf | doc
-    """
     permission_classes = [IsAdminUser]
 
     def get(self, request):
@@ -470,7 +451,6 @@ class ReportsExportView(APIView):
         except Exception:
             records = []
 
-        # Kama custom date range, chuja records kwa tarehe
         if period == "custom":
             start = _parse_date(date_from)
             end = _parse_end_date(date_to)
@@ -482,7 +462,8 @@ class ReportsExportView(APIView):
                         filtered.append(r)
                 records = filtered
 
-        timestamp = timezone.now().strftime("%Y%m%d_%H%M")
+        # ✅ Tumia localtime kwa timestamp
+        timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
         suffix = (
             f"{date_from or 'start'}_to_{date_to or 'end'}"
             if period == "custom"
@@ -507,7 +488,8 @@ class ReportsExportView(APIView):
 
         writer.writerow(["SokoMkononi — Ripoti ya Mfumo"])
         writer.writerow([f"Kipindi: {period}"])
-        writer.writerow([f"Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}"])
+        # ✅ Tumia localtime
+        writer.writerow([f"Tarehe: {timezone.localtime().strftime('%Y-%m-%d %H:%M')}"])
         writer.writerow([])
 
         writer.writerow(["=== WATUMIAJI ==="])
@@ -621,8 +603,9 @@ class ReportsExportView(APIView):
             "<b>SokoMkononi — Ripoti ya Mfumo</b>", styles["Title"],
         ))
         elements.append(Spacer(1, 0.3 * cm))
+        # ✅ Tumia localtime
         elements.append(Paragraph(
-            f"Kipindi: <b>{period}</b> · Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}",
+            f"Kipindi: <b>{period}</b> · Tarehe: {timezone.localtime().strftime('%Y-%m-%d %H:%M')}",
             styles["Normal"],
         ))
         elements.append(Spacer(1, 0.5 * cm))
@@ -698,8 +681,9 @@ class ReportsExportView(APIView):
         h = doc.add_heading("SokoMkononi — Ripoti ya Mfumo", 0)
         h.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+        # ✅ Tumia localtime
         sub = doc.add_paragraph(
-            f"Kipimo: {period} · Tarehe: {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+            f"Kipimo: {period} · Tarehe: {timezone.localtime().strftime('%Y-%m-%d %H:%M')}"
         )
         sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
 

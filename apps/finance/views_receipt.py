@@ -20,6 +20,7 @@ Ulinzi: user anaweza kuona receipt ya muamala wake pekee.
 from io import BytesIO
 
 from django.http import HttpResponse
+from django.utils import timezone 
 
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -283,11 +284,13 @@ class TransactionReceiptView(APIView):
         elements.append(Spacer(1, 0.8 * cm))
 
         amount_str = f"TZS {float(txn['amount']):,.0f}"
+        
         date_str = (
-            txn["date"].strftime("%Y-%m-%d %H:%M") if txn["date"] else "—"
+            timezone.localtime(txn["date"]).strftime("%Y-%m-%d %H:%M") 
+            if txn["date"] else "—"
         )
         paid_str = (
-            txn["paid_at"].strftime("%Y-%m-%d %H:%M")
+            timezone.localtime(txn["paid_at"]).strftime("%Y-%m-%d %H:%M")
             if txn["paid_at"] else "—"
         )
 

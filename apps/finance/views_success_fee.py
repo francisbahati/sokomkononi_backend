@@ -4,16 +4,6 @@ Success Fee views:
 - POST /api/finance/success-fee/           — FimiPay order (existing)
 - GET  /api/finance/success-fee/status/    — Check if download is free/paid
 - GET  /api/finance/success-fee/download/  — Download transactions (PDF/CSV/DOC)
-
-SASISHO:
-  - Inapokea `period` param: today | week | two_weeks | month | year | all
-  - _get_user_transactions() sasa inachukua pia:
-    • Transaction (buyer + seller) — sale, purchase
-    • SuccessFeePayment
-    • BundlePurchase
-    • BannerAd (advertising)
-  - ✅ Inarudisha COMPLETED/PAID pekee (pending/failed hazionekani)
-  - ✅ Inaita sync_user_pending() kabla ya kuhesabu (FimiPay fallback)
 """
 import csv
 from datetime import timedelta
@@ -65,6 +55,7 @@ def get_period_start(period):
     if days is None:
         return None
 
+    # ✅ Tumia localtime ili upate muda wa Tanzania (EAT)
     now_local = timezone.localtime()
     if days == 0:
         midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -100,9 +91,7 @@ def _is_sw():
 def _get_user_transactions(user, period="all"):
     """
     Chukua miamala ILIYOKAMILIKA (completed/paid) pekee.
-    Inaita sync_user_pending() kwanza ili FimiPay fallback ifanye kazi.
     """
-    # ⬇️ SYNC kabla ya kuhesabu (manual: sync zote PENDING)
     try:
         from apps.payments.tasks import sync_user_pending_task
         sync_user_pending_task.delay(user.id, since_hours=720)
@@ -377,7 +366,8 @@ class SuccessFeeDownloadView(APIView):
         if not records:
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        timestamp = timezone.now().strftime("%Y%m%d")
+        # ✅ Tumia localtime
+        timestamp = timezone.localtime().strftime("%Y%m%d")
 
         if fmt == "csv":
             return self._generate_csv(records, timestamp, period)
@@ -399,14 +389,17 @@ class SuccessFeeDownloadView(APIView):
             "Kiasi (TZS)", "Hali", "Ilipwa",
         ])
         for r in records:
+            # ✅ Tumia localtime kwa tarehe
+            date_str = timezone.localtime(r["date"]).strftime("%Y-%m-%d") if r["date"] else ""
+            paid_str = timezone.localtime(r["paid_at"]).strftime("%Y-%m-%d %H:%M") if r["paid_at"] else ""
             writer.writerow([
-                r["date"].strftime("%Y-%m-%d") if r["date"] else "",
+                date_str,
                 r["ref"],
                 r["type"],
                 r["title"],
                 f"{r['amount']:.2f}",
                 r["status"],
-                r["paid_at"].strftime("%Y-%m-%d %H:%M") if r["paid_at"] else "",
+                paid_str,
             ])
         return response
 
@@ -455,8 +448,11 @@ class SuccessFeeDownloadView(APIView):
             "all": "Zote",
         }.get(period, "Zote")
 
+        # ✅ Tumia localtime kwenye subtitle
+        now_local = timezone.localtime().strftime("%Y-%m-%d %H:%M")
         subtitle = Paragraph(
-            f"Ripoti ya miamala iliyokamilika · Kipindi: {period_label} · {len(records)} rekodi",
+            f"Ripoti ya miamala iliyokamilika · Kipindi: {period_label} · {len(records)} rekodi<br/>"
+            f"Tarehe: {now_local}",
             styles["Normal"],
         )
         elements.append(subtitle)
@@ -468,8 +464,10 @@ class SuccessFeeDownloadView(APIView):
         ]
         data = [header]
         for r in records:
+            # ✅ Tumia localtime kwa tarehe
+            date_str = timezone.localtime(r["date"]).strftime("%Y-%m-%d") if r["date"] else ""
             data.append([
-                r["date"].strftime("%Y-%m-%d") if r["date"] else "",
+                date_str,
                 r["ref"][:20],
                 r["type"][:20],
                 (r["title"] or "")[:30],
@@ -533,8 +531,11 @@ class SuccessFeeDownloadView(APIView):
             "all": "Zote",
         }.get(period, "Zote")
 
+        # ✅ Tumia localtime kwenye subtitle
+        now_local = timezone.localtime().strftime("%Y-%m-%d %H:%M")
         subtitle = doc.add_paragraph(
-            f"Ripoti ya miamala iliyokamilika · Kipindi: {period_label} · {len(records)} rekodi"
+            f"Ripoti ya miamala iliyokamilika · Kipindi: {period_label} · {len(records)} rekodi\n"
+            f"Tarehe: {now_local}"
         )
         subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -555,7 +556,9 @@ class SuccessFeeDownloadView(APIView):
 
         for r in records:
             row = table.add_row().cells
-            row[0].text = r["date"].strftime("%Y-%m-%d") if r["date"] else ""
+            # ✅ Tumia localtime kwa tarehe
+            date_str = timezone.localtime(r["date"]).strftime("%Y-%m-%d") if r["date"] else ""
+            row[0].text = date_str
             row[1].text = r["ref"][:25]
             row[2].text = r["type"]
             row[3].text = r["title"] or ""

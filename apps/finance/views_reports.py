@@ -188,13 +188,13 @@ class ReportsView(APIView):
         neither_role = user_stats["neitherRole"]
         total_admins = user_stats["totalAdmins"]
 
-        # ── USERS GROWTH ────────────────────────────────────
+        # ── USERS GROWTH ──────────────────────────────────
         start_day = (now - timedelta(days=29)).date()
         growth_rows = dict(
             User.objects
             .filter(
                 is_deleted=False,
-                is_staff=False,
+                # ✅ Ondoa is_staff=False hapa
                 date_joined__date__gte=start_day,
             )
             .annotate(d=TruncDate("date_joined"))
@@ -204,7 +204,7 @@ class ReportsView(APIView):
         )
         baseline = User.objects.filter(
             is_deleted=False,
-            is_staff=False,
+            # ✅ Ondoa is_staff=False hapa pia
             date_joined__date__lt=start_day,
         ).count()
         users_growth = []

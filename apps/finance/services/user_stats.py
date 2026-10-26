@@ -3,14 +3,14 @@
 User statistics kwa admin dashboard na reports.
 
 Sheria:
-- Admin (is_staff=True) HAhesabiwi kama seller/buyer
+- Admin (is_staff=True) HAhesabiwi kama seller/buyer, lakini anahesabika kwenye totalUsers.
 - Seller = user mwenye Listing angalau moja
 - Buyer  = user mwenye DealRoom angalau moja (kama buyer)
 - bothRoles = watumiaji ambao ni seller NA buyer
 - sellersOnly = sellers ambao SIO buyers
 - buyersOnly  = buyers ambao SIO sellers
-- neitherRole = hawana listing wala deal
-- totalUsers = users wote (is_staff=False, is_deleted=False)
+- neitherRole = hawana listing wala deal (HAWAJUMUISHWI Admin)
+- totalUsers = users wote (ikijumuisha Admin, is_deleted=False)
 
 Mtumiaji mmoja anaweza kuwa seller NA buyer kwa wakati mmoja.
 """
@@ -32,9 +32,8 @@ def calculate_user_stats():
     """
     User = get_user_model()
 
-    # Users wote (bila admin, bila waliofutwa)
+    # ✅ Users wote (bila waliofutwa) — IKIJUMUISHA Admin
     base_users = User.objects.filter(
-        is_staff=False,
         is_deleted=False,
     )
     total_users = base_users.count()
@@ -82,13 +81,16 @@ def calculate_user_stats():
     both_roles = seller_ids & buyer_ids
     sellers_only = seller_ids - buyer_ids
     buyers_only = buyer_ids - seller_ids
-    neither = (
-        set(base_users.values_list("id", flat=True))
-        - (seller_ids | buyer_ids)
+
+    # ✅ Kwa neitherRole, tunatenga Admin ili wasihesabiwe mara mbili
+    # (kwa sababu Admin tayari amehesabiwa kwenye totalAdmins)
+    non_admin_ids = set(
+        base_users.filter(is_staff=False).values_list("id", flat=True)
     )
+    neither = non_admin_ids - (seller_ids | buyer_ids)
 
     return {
-        "totalUsers": total_users,
+        "totalUsers": total_users,  # ✅ Sasa inajumuisha Admin (18)
         "totalSellers": len(seller_ids),
         "totalBuyers": len(buyer_ids),
         "sellersOnly": len(sellers_only),

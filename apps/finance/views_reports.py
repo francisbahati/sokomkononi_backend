@@ -99,11 +99,11 @@ def _period_range(period, date_from=None, date_to=None):
 
 
 # ============================================================
-# REVENUE-BY-MONTH HELPER (revenue halisi, sio GMV)
+# REVENUE-BY-RANGE HELPER (revenue halisi, sio GMV)
 # ============================================================
-def _revenue_for_month(month_start, month_end):
+def _revenue_in_range(start_dt, end_dt):
     """
-    Hesabu revenue halisi kwa mwezi mmoja kutoka vyanzo vyote.
+    Hesabu revenue halisi kwa kipindi chochote (siku au mwezi) kutoka vyanzo vyote.
     """
     from apps.banners.models import BannerAd
     from apps.boosting.models import ListingBoost
@@ -117,37 +117,37 @@ def _revenue_for_month(month_start, month_end):
 
     total += ListingFee.objects.filter(
         payment_status="PAID",
-        paid_at__gte=month_start, paid_at__lt=month_end,
+        paid_at__gte=start_dt, paid_at__lt=end_dt,
     ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
     total += ListingBoost.objects.filter(
         payment_status="PAID",
-        paid_at__gte=month_start, paid_at__lt=month_end,
+        paid_at__gte=start_dt, paid_at__lt=end_dt,
     ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
     total += ListingLeading.objects.filter(
         payment_status=ListingLeading.PaymentStatus.PAID,
-        paid_at__gte=month_start, paid_at__lt=month_end,
+        paid_at__gte=start_dt, paid_at__lt=end_dt,
     ).aggregate(s=Sum("price"))["s"] or Decimal("0.00")
 
     total += Reservation.objects.filter(
         payment_status="PAID",
-        paid_at__gte=month_start, paid_at__lt=month_end,
+        paid_at__gte=start_dt, paid_at__lt=end_dt,
     ).aggregate(s=Sum("deposit_amount"))["s"] or Decimal("0.00")
 
     total += BannerAd.objects.filter(
         payment_status="PAID",
-        paid_at__gte=month_start, paid_at__lt=month_end,
+        paid_at__gte=start_dt, paid_at__lt=end_dt,
     ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
     total += BundlePurchase.objects.filter(
         status=BundlePurchase.Status.PAID,
-        paid_at__gte=month_start, paid_at__lt=month_end,
+        paid_at__gte=start_dt, paid_at__lt=end_dt,
     ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
     total += SuccessFeePayment.objects.filter(
         payment_status="PAID",
-        paid_at__gte=month_start, paid_at__lt=month_end,
+        paid_at__gte=start_dt, paid_at__lt=end_dt,
     ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
 
     return total
@@ -290,6 +290,7 @@ class ReportsView(APIView):
         except Exception:
             total_revenue = 0.0
 
+        # ✅ REVENUE BY MONTH
         revenue_by_month = []
         _anchor = now.replace(
             day=1, hour=0, minute=0, second=0, microsecond=0,
@@ -297,10 +298,22 @@ class ReportsView(APIView):
         for i in range(5, -1, -1):
             month_start = _anchor - relativedelta(months=i)
             month_end = month_start + relativedelta(months=1)
-            month_total = _revenue_for_month(month_start, month_end)
+            month_total = _revenue_in_range(month_start, month_end)
             revenue_by_month.append({
                 "label": month_start.strftime("%b"),
                 "total": float(month_total),
+            })
+
+        # ✅ REVENUE BY DAY (MPYA)
+        revenue_by_day = []
+        for i in range(6, -1, -1):
+            day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            day_total = _revenue_in_range(day_start, day_end)
+            revenue_by_day.append({
+                "date": day_start.strftime("%Y-%m-%d"),
+                "label": day_start.strftime("%a"), # Mon, Tue, n.k.
+                "total": float(day_total),
             })
 
         conversion_rate = (
@@ -397,6 +410,7 @@ class ReportsView(APIView):
             "totalGMV": float(total_gmv),
             "totalRevenue": total_revenue,
             "revenueByMonth": revenue_by_month,
+            "revenueByDay": revenue_by_day, # ✅ MPYA
             "conversionRate": round(conversion_rate, 2),
 
             "topSellers": top_sellers,

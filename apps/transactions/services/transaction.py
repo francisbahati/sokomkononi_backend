@@ -19,6 +19,38 @@ from .notifications import (
 )
 
 
+# ============================================================
+# DEAL ROOM STATUS SYNC HELPER
+# ============================================================
+def _sync_deal_room_status(*, transaction, new_status):
+    """
+    Syncs DealRoom.status na transaction lifecycle ili baada ya
+    page refresh, buyer/seller aone hali sahihi.
+
+    Idempotent — saves tu kama status imebadilika.
+    """
+    try:
+        deal_room = DealRoom.objects.select_for_update().get(
+            pk=transaction.deal_room_id,
+        )
+    except DealRoom.DoesNotExist:
+        logger.warning(
+            "DealRoom #%s haipo kwa transaction #%s",
+            transaction.deal_room_id, transaction.pk,
+        )
+        return None
+
+    if deal_room.status == new_status:
+        return deal_room
+
+    deal_room.status = new_status
+    deal_room.save(update_fields=["status", "updated_at"])
+    return deal_room
+
+
+# ============================================================
+# CREATE
+# ============================================================
 @db_transaction.atomic
 def create_transaction_from_deal_room(*, deal_room, user):
     if not user or not user.is_authenticated:
@@ -73,6 +105,9 @@ def create_transaction_from_deal_room(*, deal_room, user):
     return transaction
 
 
+# ============================================================
+# BUYER DECISION (inspection outcome)
+# ============================================================
 @db_transaction.atomic
 def submit_buyer_decision(*, transaction, buyer, decision, note=""):
     transaction = (
@@ -148,6 +183,19 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
         "buyer_decision", "buyer_decision_note", "buyer_decision_at",
         "status", "cancelled_at", "cancellation_reason", "updated_at",
     ])
+
+    # ── Sync DealRoom.status ili ibaki baada ya refresh ──
+    if decision == Transaction.BuyerDecision.READY_FOR_FINAL_PAYMENT:
+        _sync_deal_room_status(
+            transaction=transaction,
+            new_status=DealRoom.Status.AWAITING_FINAL_PAYMENT,
+        )
+    elif decision == Transaction.BuyerDecision.CANCEL_TRANSACTION:
+        _sync_deal_room_status(
+            transaction=transaction,
+            new_status=DealRoom.Status.CANCELLED,
+        )
+
     db_transaction.on_commit(
         lambda: notify_buyer_decision(transaction=transaction)
     )
@@ -157,6 +205,9 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
     return transaction
 
 
+# ============================================================
+# UPLOAD FINAL PAYMENT PROOF
+# ============================================================
 @db_transaction.atomic
 def upload_final_payment_proof(
     *, transaction, buyer, proof, payment_reference="",
@@ -181,6 +232,15 @@ def upload_final_payment_proof(
     if proof.size > 10 * 1024 * 1024:
         raise ValidationError("Faili haliwezi kuzidi 10MB.")
 
+    # ── Zuia kupakia proof mara mbili ──
+    # Seller anaweza ku-reject (ambayo inafuta proof), ndio buyer aweze
+    # kupakia tena.
+    if transaction.final_payment_uploaded_at:
+        raise ValidationError(
+            "Ushahidi wa malipo tayari umepakiwa. "
+            "Tafadhali subiri muuzaji athibitishe au akatae."
+        )
+
     transaction.final_payment_proof = proof
     transaction.final_payment_reference = (payment_reference or "").strip()
     transaction.final_payment_uploaded_at = timezone.now()
@@ -189,12 +249,96 @@ def upload_final_payment_proof(
         "final_payment_uploaded_at", "updated_at",
     ])
 
+    # Sync DealRoom → PAYMENT_PROOF_SUBMITTED
+    _sync_deal_room_status(
+        transaction=transaction,
+        new_status=DealRoom.Status.PAYMENT_PROOF_SUBMITTED,
+    )
+
     db_transaction.on_commit(
         lambda: notify_payment_proof_uploaded(transaction=transaction)
     )
     return transaction
 
 
+# ============================================================
+# REJECT FINAL PAYMENT PROOF (seller)
+# ============================================================
+@db_transaction.atomic
+def reject_final_payment_proof(*, transaction, seller, reason=""):
+    """
+    Muuzaji anakataa uthibitisho wa malipo (bado hajapokea malipo).
+    Inafuta proof ili buyer aweze kupakia tena.
+
+    DealRoom.status → AWAITING_FINAL_PAYMENT (ili buyer aone panel tena)
+    Transaction.status inabaki READY_FOR_FINAL_PAYMENT.
+    """
+    transaction = (
+        Transaction.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "buyer", "seller")
+        .get(pk=transaction.pk)
+    )
+
+    if seller.id != transaction.seller_id:
+        raise ValidationError(
+            "Ni muuzaji pekee anayeweza kukataa uthibitisho."
+        )
+    if transaction.status != Transaction.Status.READY_FOR_FINAL_PAYMENT:
+        raise ValidationError(
+            "Transaction haipo kwenye hatua ya malipo ya mwisho."
+        )
+    if not transaction.final_payment_proof:
+        raise ValidationError("Hakuna uthibitisho wa malipo uliopakiwa.")
+
+    reason = (reason or "").strip()
+
+    # Futa proof — buyer anaweza kupakia tena
+    transaction.final_payment_proof = None
+    transaction.final_payment_reference = ""
+    transaction.final_payment_uploaded_at = None
+    transaction.save(update_fields=[
+        "final_payment_proof", "final_payment_reference",
+        "final_payment_uploaded_at", "updated_at",
+    ])
+
+    # Sync DealRoom → AWAITING_FINAL_PAYMENT (buyer apakie tena)
+    _sync_deal_room_status(
+        transaction=transaction,
+        new_status=DealRoom.Status.AWAITING_FINAL_PAYMENT,
+    )
+
+    # Notification kwa mnunuzi
+    try:
+        from apps.notifications.models import Notification
+        from apps.notifications.services.notification import create_notification
+        create_notification(
+            recipient=transaction.buyer,
+            notification_type=Notification.NotificationType.GENERAL,
+            title="Uthibitisho wa malipo haujapokelewa",
+            message=(
+                f"Muuzaji hajapokea malipo yako ya Transaction #{transaction.pk}"
+                + (f". Sababu: {reason}" if reason else ".")
+                + " Tafadhali pakia uthibitisho mpya."
+            ),
+            priority=Notification.Priority.HIGH,
+            related_object_type="Transaction",
+            related_object_id=transaction.pk,
+            action_url=f"/transactions/{transaction.pk}",
+        )
+    except Exception:
+        logger.exception("reject proof notification failed")
+
+    logger.info(
+        "Payment proof rejected for transaction %s by seller %s. Reason: %s",
+        transaction.pk, seller.pk, reason or "(none)",
+    )
+    return transaction
+
+
+# ============================================================
+# SELLER CONFIRM PAYMENT
+# ============================================================
 @db_transaction.atomic
 def seller_confirm_final_payment(*, transaction, seller):
     transaction = (
@@ -275,10 +419,10 @@ def _fire_completion_side_effects(*, transaction, listing):
             transaction.pk,
         )
 
-    # NOTE: listing is SOLD here — no waiting-list notification. Waiting
-    # buyers are only notified when a listing is re-opened (AVAILABLE).
 
-
+# ============================================================
+# CANCEL TRANSACTION
+# ============================================================
 @db_transaction.atomic
 def cancel_transaction(*, transaction, user, reason):
     transaction = (

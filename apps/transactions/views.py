@@ -54,6 +54,7 @@ from .services.reservation import (
 from .services.transaction import (
     cancel_transaction,
     create_transaction_from_deal_room,
+    reject_final_payment_proof,
     seller_confirm_final_payment,
     submit_buyer_decision,
     upload_final_payment_proof,
@@ -108,7 +109,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
 
     throttle_scope = "user"
 
-    # Placeholder for drf-spectacular; real filtering happens in get_queryset().
     queryset = Transaction.objects.none()
 
     def get_queryset(self):
@@ -263,8 +263,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
 
         payment_reference = (request.data.get("payment_reference") or "").strip()
 
-        # Credits, or manual confirmation by staff. Any other reference
-        # typed by a client is rejected by the service.
         if payment_reference:
             reservation = confirm_reservation_payment(
                 reservation=reservation,
@@ -278,8 +276,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        # Default: FimiPay. The reservation is activated by the webhook
-        # once the payment succeeds.
         data = initiate_reservation_payment(
             reservation=reservation,
             user=request.user,
@@ -388,6 +384,48 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
+    # ============================================================
+    # REJECT PAYMENT PROOF (seller) — MPYA
+    # ============================================================
+    @action(detail=True, methods=["post"], url_path="reject-payment-proof")
+    def reject_payment_proof(self, request, pk=None):
+        """
+        Muuzaji anakataa uthibitisho wa malipo (bado hajapokea).
+        Inafuta proof ili buyer aweze kupakia tena.
+
+        Body (JSON):
+            { "reason": "Si sahihi..." }   # hiari
+        """
+        transaction = self._get_transaction(pk)
+
+        if request.user.id != transaction.seller_id:
+            raise PermissionDenied(
+                "Ni muuzaji pekee anayeweza kukataa uthibitisho wa malipo."
+            )
+
+        reason = (request.data.get("reason") or "").strip()
+
+        updated_transaction = reject_final_payment_proof(
+            transaction=transaction,
+            seller=request.user,
+            reason=reason,
+        )
+
+        _log(
+            request,
+            action="transaction.payment_proof_rejected",
+            target="Transaction",
+            target_id=updated_transaction.id,
+            details=f"reason={(reason or '')[:200]}",
+        )
+
+        return Response(
+            TransactionDetailSerializer(
+                updated_transaction, context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
         transaction = self._get_transaction(pk)
@@ -486,27 +524,10 @@ class TransactionViewSet(viewsets.GenericViewSet):
         )
 
     # ============================================================
-    # EXTEND RESERVATION (buyer) — LAZIMA ILIPWE KWANZA
+    # EXTEND RESERVATION (buyer)
     # ============================================================
     @action(detail=True, methods=["post"], url_path="extend-reservation")
     def extend_reservation(self, request, pk=None):
-        """
-        Buyer anaongeza muda wa reservation (na inspection) kwa tier halali.
-        Muda unaongezwa TU baada ya ada ya tier kulipwa.
-
-        Body (JSON):
-            {
-              "additional_hours": 24,          # tier halali
-              "payment_reference": "credits",  # hiari: lipa kwa credits
-              "payment_method": "mobile|card", # FimiPay (default mobile)
-              "phone": "2557..."               # kwa mobile money
-            }
-
-        Majibu:
-          - 200 + Reservation  -> muda umeongezwa (credits / ada imezimwa)
-          - 201 + {extension_id, payment_status: "PENDING", fimipay: {...}}
-                                -> kamilisha malipo; webhook inaongeza muda
-        """
         transaction = self._get_transaction(pk)
 
         if request.user.id != transaction.buyer_id:
@@ -528,8 +549,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
             request.data.get("payment_reference") or ""
         ).strip()
 
-        # 1) Ada imezimwa -> tayari imeongezwa
-        # 2) Credits
         if extension.status != extension.Status.PAID:
             if payment_reference == "credits":
                 confirm_extension_with_credits(
@@ -582,16 +601,10 @@ class TransactionViewSet(viewsets.GenericViewSet):
         )
 
     # ============================================================
-    # REMOVE RESERVATION (buyer) — njia B
+    # REMOVE RESERVATION (buyer)
     # ============================================================
     @action(detail=True, methods=["post"], url_path="remove-reservation")
     def remove_reservation(self, request, pk=None):
-        """
-        Buyer anaondoa reservation yake wakati wowote (hiari).
-        Reservation Fee HAIRUDISHWI.
-
-        Body (JSON): {}  (hakuna payload inayohitajika)
-        """
         transaction = self._get_transaction(pk)
 
         if request.user.id != transaction.buyer_id:
@@ -603,7 +616,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
         if not reservation:
             raise ValidationError("Transaction hii haina Reservation.")
 
-        # ── Njia B: function mpya inayoruhusu kuondoa BILA check ya muda ──
         reservation = remove_reservation_by_buyer(reservation=reservation)
 
         _log(
@@ -623,6 +635,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
             ).data,
             status=status.HTTP_200_OK,
         )
+
     # ============================================================
     # INTERNAL HELPER
     # ============================================================

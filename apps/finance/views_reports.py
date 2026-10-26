@@ -206,9 +206,10 @@ class ReportsView(APIView):
             new_count = growth_rows.get(day, 0)
             running += new_count
             users_growth.append({
-                "label": day.strftime("%d/%m"),
-                "count": new_count, # ✅ Idadi ya siku hiyo
-                "cumulative": running, # ✅ Jumla kwa ujumla
+                "date": day.strftime("%Y-%m-%d"),   # ✅ Tarehe kamili (YYYY-MM-DD)
+                "label": day.strftime("%d/%m"),      # ✅ Bado tunatuma label kwa backup
+                "count": new_count,                  # ✅ Idadi ya siku hiyo
+                "cumulative": running,               # ✅ Jumla kwa ujumla
             })
 
         # ── LISTINGS ────────────────────────────────────────
@@ -234,7 +235,8 @@ class ReportsView(APIView):
             day = (now - timedelta(days=i)).date()
             count = visible_qs.filter(created_at__date=day).count()
             listings_growth.append({
-                "label": day.strftime("%d/%m"),
+                "date": day.strftime("%Y-%m-%d"),  # ✅ Tarehe kamili
+                "label": day.strftime("%d/%m"),     # ✅ Label kwa backup
                 "count": count,
             })
 

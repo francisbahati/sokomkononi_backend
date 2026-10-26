@@ -104,7 +104,7 @@ def _period_range(period, date_from=None, date_to=None):
 def _revenue_in_range(start_dt, end_dt):
     """
     Hesabu revenue halisi kwa kipindi chochote (siku au mwezi) kutoka vyanzo vyote.
-    ✅ Inatumia Coalesce("paid_at", "created_at") kama ilivyo kwenye revenue.py
+    ✅ Inatumia Coalesce("paid_at", "created_at")
     """
     from apps.banners.models import BannerAd
     from apps.boosting.models import ListingBoost
@@ -214,10 +214,10 @@ class ReportsView(APIView):
             new_count = growth_rows.get(day, 0)
             running += new_count
             users_growth.append({
-                "date": day.strftime("%Y-%m-%d"),   # ✅ Tarehe kamili (YYYY-MM-DD)
-                "label": day.strftime("%d/%m"),      # ✅ Bado tunatuma label kwa backup
-                "count": new_count,                  # ✅ Idadi ya siku hiyo
-                "cumulative": running,               # ✅ Jumla kwa ujumla
+                "date": day.strftime("%Y-%m-%d"),
+                "label": day.strftime("%d/%m"),
+                "count": new_count,
+                "cumulative": running,
             })
 
         # ── LISTINGS ────────────────────────────────────────
@@ -243,8 +243,8 @@ class ReportsView(APIView):
             day = (now - timedelta(days=i)).date()
             count = visible_qs.filter(created_at__date=day).count()
             listings_growth.append({
-                "date": day.strftime("%Y-%m-%d"),  # ✅ Tarehe kamili
-                "label": day.strftime("%d/%m"),     # ✅ Label kwa backup
+                "date": day.strftime("%Y-%m-%d"),
+                "label": day.strftime("%d/%m"),
                 "count": count,
             })
 
@@ -320,7 +320,7 @@ class ReportsView(APIView):
             day_total = _revenue_in_range(day_start, day_end)
             revenue_by_day.append({
                 "date": day_start.strftime("%Y-%m-%d"),
-                "label": day_start.strftime("%a"), # Mon, Tue, n.k.
+                "label": day_start.strftime("%a"),
                 "total": float(day_total),
             })
 
@@ -418,7 +418,7 @@ class ReportsView(APIView):
             "totalGMV": float(total_gmv),
             "totalRevenue": total_revenue,
             "revenueByMonth": revenue_by_month,
-            "revenueByDay": revenue_by_day, # ✅ MPYA
+            "revenueByDay": revenue_by_day,
             "conversionRate": round(conversion_rate, 2),
 
             "topSellers": top_sellers,
@@ -486,7 +486,6 @@ class ReportsExportView(APIView):
                         filtered.append(r)
                 records = filtered
 
-        # ✅ Tumia localtime kwa timestamp
         timestamp = timezone.localtime().strftime("%Y%m%d_%H%M")
         suffix = (
             f"{date_from or 'start'}_to_{date_to or 'end'}"
@@ -500,7 +499,6 @@ class ReportsExportView(APIView):
             return self._pdf(data, records, suffix, timestamp)
         return self._doc(data, records, suffix, timestamp)
 
-    # ── CSV ─────────────────────────────────────────────────
     def _csv(self, data, records, period, timestamp):
         import csv
         response = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -512,7 +510,6 @@ class ReportsExportView(APIView):
 
         writer.writerow(["SokoMkononi — Ripoti ya Mfumo"])
         writer.writerow([f"Kipindi: {period}"])
-        # ✅ Tumia localtime
         writer.writerow([f"Tarehe: {timezone.localtime().strftime('%Y-%m-%d %H:%M')}"])
         writer.writerow([])
 
@@ -598,7 +595,6 @@ class ReportsExportView(APIView):
 
         return response
 
-    # ── PDF ─────────────────────────────────────────────────
     def _pdf(self, data, records, period, timestamp):
         try:
             from reportlab.lib import colors
@@ -627,7 +623,6 @@ class ReportsExportView(APIView):
             "<b>SokoMkononi — Ripoti ya Mfumo</b>", styles["Title"],
         ))
         elements.append(Spacer(1, 0.3 * cm))
-        # ✅ Tumia localtime
         elements.append(Paragraph(
             f"Kipindi: <b>{period}</b> · Tarehe: {timezone.localtime().strftime('%Y-%m-%d %H:%M')}",
             styles["Normal"],
@@ -690,7 +685,6 @@ class ReportsExportView(APIView):
         )
         return response
 
-    # ── DOC ─────────────────────────────────────────────────
     def _doc(self, data, records, period, timestamp):
         try:
             from docx import Document
@@ -705,7 +699,6 @@ class ReportsExportView(APIView):
         h = doc.add_heading("SokoMkononi — Ripoti ya Mfumo", 0)
         h.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # ✅ Tumia localtime
         sub = doc.add_paragraph(
             f"Kipimo: {period} · Tarehe: {timezone.localtime().strftime('%Y-%m-%d %H:%M')}"
         )

@@ -1,5 +1,6 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -93,9 +94,6 @@ class BoostPackageViewSet(
             return [permissions.IsAdminUser()]
         return super().get_permissions()
 
-    # ══════════════════════════════════════════════════════════
-    # CREATE — log fee.created (boost package)
-    # ══════════════════════════════════════════════════════════
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
 
@@ -115,9 +113,6 @@ class BoostPackageViewSet(
 
         return response
 
-    # ══════════════════════════════════════════════════════════
-    # UPDATE — log fee.updated (boost package) — full PUT
-    # ══════════════════════════════════════════════════════════
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         old_snapshot = self._snapshot(instance)
@@ -143,17 +138,10 @@ class BoostPackageViewSet(
 
         return response
 
-    # ══════════════════════════════════════════════════════════
-    # PARTIAL UPDATE — log fee.updated (boost package) — PATCH
-    # Inaruhusu kubadilisha field moja pekee (mfano `is_active`)
-    # bila kutuma fields zote.
-    # ══════════════════════════════════════════════════════════
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         old_snapshot = self._snapshot(instance)
 
-        # super().partial_update() ina-handle `partial=True` yenyewe,
-        # kwa hiyo inaruhusu fields moja pekee.
         response = super().partial_update(request, *args, **kwargs)
 
         if response.status_code in (
@@ -175,9 +163,6 @@ class BoostPackageViewSet(
 
         return response
 
-    # ══════════════════════════════════════════════════════════
-    # DESTROY — log fee.deleted (boost package)
-    # ══════════════════════════════════════════════════════════
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
 
@@ -306,7 +291,7 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
         boost = create_boost(
             listing=listing,
             user=request.user,
-            package=serializer.validated_data["package"],
+            package=serializer.validated_data.get("package"),
         )
 
         return Response(
@@ -323,6 +308,51 @@ class ListingBoostViewSet(viewsets.ModelViewSet):
             .filter(seller=request.user)
         )
         return Response(self.get_serializer(qs, many=True).data)
+
+    # ── NEW: status ya boost kwa listing ──────────────────────
+    @extend_schema(responses={200: None})
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"status/(?P<listing_id>\d+)",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def listing_status(self, request, listing_id=None):
+        """GET /api/boosting/status/<listing_id>/"""
+        listing = Listing.objects.filter(pk=listing_id).first()
+        if not listing:
+            return Response(
+                {"detail": "Tangazo halipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if request.user.id != listing.seller_id and not request.user.is_staff:
+            return Response(
+                {"detail": "Huna ruhusa."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        boosts = (
+            ListingBoost.objects
+            .filter(listing=listing)
+            .select_related("package")
+            .order_by("-created_at")
+        )
+        active = boosts.filter(
+            status=ListingBoost.BoostStatus.ACTIVE,
+            expires_at__gt=timezone.now(),
+        ).first()
+        pending = boosts.filter(
+            payment_status=ListingBoost.PaymentStatus.PENDING,
+        ).first()
+
+        return Response({
+            "listing_id": listing.id,
+            "has_active": bool(active),
+            "active": ListingBoostSerializer(active).data if active else None,
+            "has_pending": bool(pending),
+            "pending": ListingBoostSerializer(pending).data if pending else None,
+            "can_create_new": not active and not pending,
+        })
 
     @extend_schema(request=None, responses={201: ListingBoostSerializer})
     @action(detail=True, methods=["post"], url_path="pay")

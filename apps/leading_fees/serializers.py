@@ -38,7 +38,6 @@ class LeadingPackageSerializer(serializers.ModelSerializer):
 
     def get_pricing(self, obj):
         try:
-            
             from apps.banners.services import calculate_promotion_price
             return calculate_promotion_price(obj.price, "LEADING")
         except Exception:
@@ -48,7 +47,7 @@ class LeadingPackageSerializer(serializers.ModelSerializer):
 class ListingLeadingSerializer(serializers.ModelSerializer):
     listing_title = serializers.CharField(source="listing.title", read_only=True)
     seller_name = serializers.CharField(source="seller.name", read_only=True)
-    package_name = serializers.CharField(source="package.name", read_only=True)
+    package_name = serializers.SerializerMethodField()
 
     class Meta:
         model = ListingLeading
@@ -61,13 +60,25 @@ class ListingLeadingSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_package_name(self, obj):
+        return obj.package.name if obj.package else None
+
 
 class LeadingApplySerializer(serializers.Serializer):
     listing = serializers.IntegerField()
-    package = serializers.IntegerField(required=True)
+    package = serializers.IntegerField(required=False, allow_null=True)
     payment_reference = serializers.CharField(
         max_length=255, required=False, allow_blank=True,
     )
+
+    def validate(self, attrs):
+        from .models import LeadingFeeConfig
+        fee_enabled = LeadingFeeConfig.get_solo().is_enabled
+        if fee_enabled and not attrs.get("package"):
+            raise serializers.ValidationError({
+                "package": ["Leading package inahitajika."],
+            })
+        return attrs
 
 
 class LeadingPaymentSerializer(serializers.Serializer):

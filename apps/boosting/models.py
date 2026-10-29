@@ -122,6 +122,7 @@ class ListingBoost(models.Model):
         PAID = "PAID", "Paid"
         FAILED = "FAILED", "Failed"
         REFUNDED = "REFUNDED", "Refunded"
+        CANCELLED = "CANCELLED", "Cancelled"
 
     class BoostStatus(models.TextChoices):
         PENDING = "PENDING", "Pending"
@@ -141,10 +142,13 @@ class ListingBoost(models.Model):
         related_name="listing_boosts",
     )
 
+    # null=True ili kuruhusu boosts za bure (fee imezimwa) bila package.
     package = models.ForeignKey(
         BoostPackage,
         on_delete=models.PROTECT,
         related_name="listing_boosts",
+        null=True,
+        blank=True,
     )
 
     # 0.00 is allowed: boosts are free while the boost fee is disabled.

@@ -74,13 +74,91 @@ class BannerAdViewSet(viewsets.ModelViewSet):
         banner = create_banner_ad(
             listing_id=serializer.validated_data["listing"],
             seller=request.user,
-            package=serializer.validated_data["package"],
+            package=serializer.validated_data.get("package"),
         )
 
         return Response(
             BannerAdSerializer(banner, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+    # ── NEW: status ya banner kwa listing ──────────────────────
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"status/(?P<listing_id>\d+)",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def listing_status(self, request, listing_id=None):
+        """GET /api/banners/status/<listing_id>/"""
+        from apps.listings.models import Listing
+
+        listing = Listing.objects.filter(pk=listing_id).first()
+        if not listing:
+            return Response(
+                {"detail": "Tangazo halipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if request.user.id != listing.seller_id and not request.user.is_staff:
+            return Response(
+                {"detail": "Huna ruhusa."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ads = (
+            BannerAd.objects
+            .filter(listing=listing)
+            .select_related("package")
+            .order_by("-created_at")
+        )
+        active = ads.filter(
+            active=True, expires_at__gt=timezone.now(),
+        ).first()
+        pending = ads.filter(payment_status="PENDING").first()
+
+        return Response({
+            "listing_id": listing.id,
+            "has_active": bool(active),
+            "active": BannerAdSerializer(active).data if active else None,
+            "has_pending": bool(pending),
+            "pending": BannerAdSerializer(pending).data if pending else None,
+            "can_create_new": not active and not pending,
+        })
+
+    # ── NEW: cancel pending banner ─────────────────────────────
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="cancel",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def cancel(self, request, pk=None):
+        """POST /api/banners/<pk>/cancel/"""
+        banner = BannerAd.objects.filter(pk=pk).first()
+        if not banner:
+            return Response(
+                {"detail": "Haipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if banner.seller_id != request.user.id and not request.user.is_staff:
+            return Response(
+                {"detail": "Huna ruhusa."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if banner.payment_status != "PENDING":
+            return Response(
+                {"detail": f"Haiwezi kufutwa. Status: {banner.payment_status}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        banner.payment_status = "CANCELLED"
+        banner.active = False
+        banner.save(update_fields=["payment_status", "active"])
+
+        return Response({
+            "detail": "Banner imefutwa.",
+            "banner": BannerAdSerializer(banner, context={"request": request}).data,
+        })
 
     @action(detail=True, methods=["post"], url_path="pay")
     def pay(self, request, pk=None):
@@ -108,13 +186,9 @@ class BannerAdViewSet(viewsets.ModelViewSet):
         payment_reference = (request.data.get("payment_reference") or "").strip()
 
         # ============================================================
-        # ✅ MPYA — "free" branch
-        # Admin akizima advertisement fee, seller anaweza kutuma
-        # payment_reference="free" ili ku-activate banner moja kwa moja.
+        # FREE branch
         # ============================================================
         if payment_reference == "free":
-            # Angalia kama advertisement fee imezimwa.
-            # Kama bado inatumika, kataa — mtu asitumie "free" kudanganya.
             try:
                 from apps.advertisement_fees.models import AdvertisementFeeConfig
                 cfg = AdvertisementFeeConfig.get_solo()
@@ -161,7 +235,7 @@ class BannerAdViewSet(viewsets.ModelViewSet):
             )
 
         # ============================================================
-        # "credits" branch — seller anatumia credits
+        # CREDITS branch
         # ============================================================
         if payment_reference == "credits":
             import uuid
@@ -216,13 +290,6 @@ class BannerAdViewSet(viewsets.ModelViewSet):
 # CAMPAIGN VIEWSET
 # ============================================================
 class CampaignViewSet(viewsets.ModelViewSet):
-    """
-    GET    /api/banners/campaigns/             → list
-    POST   /api/banners/campaigns/             → create (admin)
-    PATCH  /api/banners/campaigns/{id}/        → update (admin)
-    DELETE /api/banners/campaigns/{id}/        → delete (admin)
-    POST   /api/banners/campaigns/{id}/toggle/ → toggle active (admin)
-    """
     serializer_class = CampaignSerializer
     permission_classes = [IsAdminOrReadOnly]
     queryset = Campaign.objects.all()
@@ -239,18 +306,6 @@ class CampaignViewSet(viewsets.ModelViewSet):
 # PROMOTIONS ANALYTICS
 # ============================================================
 class PromotionsAnalyticsView(viewsets.ViewSet):
-    """
-    GET /api/banners/analytics/
-
-    Inarudisha counts za promotions kwa PromotionsSection:
-      - boostedListings: ListingBoost zilizo ACTIVE
-      - leadingListings: ListingLeading zilizo ACTIVE
-      - advertisedListings: BannerAd zilizo active
-      - reservedListings: Reserved listings (kutoka transactions)
-      - successFeeDeals: Success fee payments
-      - listingFeeTransactions: ListingFee zilizolipwa
-      - counts: {boosted, leading, advertised, reserved, successFee, listingFee, campaigns, totalActive}
-    """
     permission_classes = [permissions.IsAdminUser]
 
     def list(self, request):
@@ -276,7 +331,6 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
             "source": "api",
         }
 
-        # ── BOOSTED ────────────────────────────────────────
         try:
             from apps.boosting.models import ListingBoost
             boosts = (
@@ -305,7 +359,6 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
         except Exception:
             pass
 
-        # ── LEADING ────────────────────────────────────────
         try:
             from apps.leading_fees.models import ListingLeading
             leadings = (
@@ -334,7 +387,6 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
         except Exception:
             pass
 
-        # ── ADVERTISED ─────────────────────────────────────
         try:
             banners = (
                 BannerAd.objects
@@ -359,7 +411,6 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
         except Exception:
             pass
 
-        # ── SUCCESS FEE ────────────────────────────────────
         try:
             from apps.finance.models import SuccessFeePayment
             fees = (
@@ -382,7 +433,6 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
         except Exception:
             pass
 
-        # ── LISTING FEE ────────────────────────────────────
         try:
             from apps.listings.models import ListingFee
             listing_fees = (
@@ -405,7 +455,6 @@ class PromotionsAnalyticsView(viewsets.ViewSet):
         except Exception:
             pass
 
-        # ── CAMPAIGNS ──────────────────────────────────────
         try:
             results["counts"]["campaigns"] = Campaign.objects.filter(
                 active=True,

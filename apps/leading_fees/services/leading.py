@@ -1,6 +1,8 @@
 # apps/leading_fees/services/leading.py
-"""Leading purchase flow. Inatumia package badala ya config."""
+"""Leading purchase flow. Inatumia package badala ya config.
+Kama fee imezimwa (package=None), inatumia default 168h (siku 7) na bei 0."""
 from datetime import timedelta
+from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
@@ -11,8 +13,20 @@ from apps.listings.models import Listing
 from ..models import LeadingFeeConfig, LeadingPackage, ListingLeading
 
 
+ZERO = Decimal("0.00")
+DEFAULT_LEADING_HOURS = 168  # siku 7
+
+
 def _get_config():
     return LeadingFeeConfig.get_solo()
+
+
+def _leading_fee_enabled():
+    try:
+        return bool(_get_config().is_enabled)
+    except Exception:
+        # Fail-closed: kama lookup inashindwa, chukulia fee inatumika
+        return True
 
 
 def _validate_seller(listing, user):
@@ -30,7 +44,10 @@ def _validate_seller(listing, user):
 
 @transaction.atomic
 def create_leading(*, listing_id, user, package, payment_reference=""):
-    """Create a PENDING leading purchase. Does NOT touch the listing yet."""
+    """Create a PENDING leading purchase. Does NOT touch the listing yet.
+
+    `package` inaweza kuwa None kama leading fee imezimwa.
+    """
     try:
         listing = Listing.objects.select_for_update(of=("self",)).get(pk=listing_id)
     except Listing.DoesNotExist:
@@ -38,16 +55,29 @@ def create_leading(*, listing_id, user, package, payment_reference=""):
 
     _validate_seller(listing, user)
 
-    if not package or not package.is_active:
-        raise ValidationError({"package": "Leading package haipo active."})
+    fee_enabled = _leading_fee_enabled()
 
-    now = timezone.now()
+    if fee_enabled:
+        if not package or not package.is_active:
+            raise ValidationError({"package": "Leading package haipo active."})
+    else:
+        if package is not None and not package.is_active:
+            package = None
+
+    # Kama package ipo, tumia; kama haipo, default
+    if package is not None:
+        days = round(package.duration_hours / 24) or 1
+        price = package.price
+    else:
+        days = round(DEFAULT_LEADING_HOURS / 24) or 1
+        price = ZERO
+
     leading = ListingLeading.objects.create(
         listing=listing,
         seller=user,
         package=package,
-        days=round(package.duration_hours / 24) or 1,
-        price=package.price,
+        days=days,
+        price=price,
         payment_status=ListingLeading.PaymentStatus.PENDING,
         status=ListingLeading.Status.PENDING,
         payment_reference=(payment_reference or "").strip() or None,
@@ -107,7 +137,9 @@ def _activate(leading):
 
     now = timezone.now()
     base = listing.leading_until if (listing.leading_until and listing.leading_until > now) else now
-    hours = leading.package.duration_hours if leading.package else 168
+
+    # package inaweza kuwa None (fee imezimwa)
+    hours = leading.package.duration_hours if leading.package else DEFAULT_LEADING_HOURS
     expires_at = base + timedelta(hours=hours)
 
     leading.status = ListingLeading.Status.ACTIVE
@@ -121,7 +153,6 @@ def _activate(leading):
     return leading
 
 
-@transaction.atomic
 @transaction.atomic
 def expire_stale_leading():
     now = timezone.now()
@@ -167,8 +198,13 @@ def initiate_leading_payment(*, leading, user, payment_method='mobile', phone=''
     if leading.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia leading hii.")
     if leading.payment_status == ListingLeading.PaymentStatus.PAID:
-        # Bila hii, order mpya ingeundwa na mteja angelipa mara ya pili.
         raise ValidationError("Leading hii tayari imelipiwa.")
+
+    # Kama ni bure (price=0), hakuna haja ya FimiPay
+    if not leading.price or Decimal(str(leading.price)) <= ZERO:
+        raise ValidationError(
+            "Leading hii haina kiasi cha kulipia. Tumia 'free' reference."
+        )
 
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
@@ -182,9 +218,6 @@ def initiate_leading_payment(*, leading, user, payment_method='mobile', phone=''
         if sd:
             ps = (sd.get("payment_status") or "").upper()
             if ps == "SUCCESS":
-                # Tayari imelipwa FimiPay: itumie sasa (webhook inaweza kuwa
-                # imekosa). Errors hapa zinapita juu kwa makusudi — kamwe
-                # usiunde order ya pili kwa malipo yaliyokwisha kufanyika.
                 mark_leading_paid_from_webhook(
                     ref_id=leading.pk,
                     payment_reference=sd.get("transid") or existing_ref,
@@ -229,6 +262,7 @@ def mark_leading_paid_from_webhook(*, ref_id, payment_reference):
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
     return _activate(leading)
+
 
 @transaction.atomic
 def mark_leading_as_refunded(*, ref_id, reason=""):

@@ -50,6 +50,7 @@ class BannerAd(models.Model):
             ("PAID", "Paid"),
             ("FAILED", "Failed"),
             ("REFUNDED", "Refunded"),
+            ("CANCELLED", "Cancelled"),
         ],
         default="PENDING",
         verbose_name="Hali ya malipo",
@@ -99,8 +100,6 @@ class Campaign(models.Model):
         ADVERTISEMENT = "ADVERTISEMENT", "Advertisement only"
         ALL = "ALL", "All promotions"
 
-    # Legacy type (DISCOUNT/BANNER/FEATURE/OTHER) — tunaiweka kama
-    # metadata. Haithiri pricing.
     class Type(models.TextChoices):
         DISCOUNT = "DISCOUNT", "Discount"
         BANNER = "BANNER", "Banner"

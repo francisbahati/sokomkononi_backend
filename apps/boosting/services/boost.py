@@ -11,7 +11,6 @@ from rest_framework.exceptions import ValidationError
 from apps.listings.models import Listing
 
 
-from decimal import Decimal
 try:
     from apps.notifications.services.notification import create_notification
 except (ImportError, LookupError):
@@ -67,8 +66,12 @@ def validate_boost_request(*, listing, user, package):
             "Tangazo lazima liwe AVAILABLE kabla ya ku-boost."
         )
 
-    if not package.is_active:
-        raise ValidationError("Boost package hii haipo active.")
+    fee_enabled = is_boost_fee_enabled()
+    if fee_enabled:
+        if package is None:
+            raise ValidationError("Boost package inahitajika.")
+        if not package.is_active:
+            raise ValidationError("Boost package hii haipo active.")
 
     now = timezone.now()
     if ListingBoost.objects.filter(listing=listing).filter(
@@ -88,11 +91,18 @@ def create_boost(*, listing, user, package):
         .select_related("seller")
         .get(pk=listing.pk)
     )
-    package = BoostPackage.objects.select_for_update().get(pk=package.pk)
+    if package is not None:
+        package = BoostPackage.objects.select_for_update().get(pk=package.pk)
 
     validate_boost_request(listing=listing, user=user, package=package)
 
-    amount = calculate_boost_fee(package=package)
+    if package is not None:
+        amount = calculate_boost_fee(package=package)
+    else:
+        # Free boost bila package
+        if is_boost_fee_enabled():
+            raise ValidationError("Boost package inahitajika.")
+        amount = Decimal("0.00")
 
     return ListingBoost.objects.create(
         listing=listing,
@@ -191,7 +201,7 @@ def pay_boost_free(*, boost, user):
     ]:
         raise ValidationError("Boost hii haiwezi kuwashwa kwa sababu imefungwa.")
 
-    if not boost.package.is_active:
+    if boost.package is not None and not boost.package.is_active:
         raise ValidationError("Boost package hii haipo active.")
 
     boost.amount = Decimal("0.00")
@@ -254,8 +264,13 @@ def activate_boost(*, boost):
             "Tangazo hili tayari lina boost nyingine active."
         )
 
+    # Free boost bila package: default 24 hours
+    duration_hours = (
+        boost.package.duration_hours if boost.package else 24
+    )
+
     starts_at = now
-    expires_at = starts_at + timedelta(hours=boost.package.duration_hours)
+    expires_at = starts_at + timedelta(hours=duration_hours)
 
     if expires_at <= now:
         raise ValidationError(
@@ -359,8 +374,10 @@ def cancel_boost(*, boost, user):
         )
 
     boost.status = ListingBoost.BoostStatus.CANCELLED
-    boost.save(update_fields=["status", "updated_at"])
+    boost.payment_status = ListingBoost.PaymentStatus.CANCELLED
+    boost.save(update_fields=["status", "payment_status", "updated_at"])
     return boost
+
 
 # ============================================================================
 # PAY BOOST WITH CREDITS
@@ -392,8 +409,6 @@ def pay_boost_with_credits(*, boost, user):
     ]:
         raise ValidationError("Boost hii haiwezi kulipiwa.")
 
-    # consume_credit() HAIRUSHI error — inarudisha True/False.
-    # Awali jibu lilipuuzwa, kwa hiyo boost ilihesabiwa PAID hata bila credit.
     if not consume_credit(user=user, service_key="boost", required=1):
         raise ValidationError("Hakuna boost credits za kutosha au zimeisha muda.")
 
@@ -417,8 +432,6 @@ from apps.payments.fimipay import (
 )
 
 
-# Majina ya field ambazo FimiPay inaweza kutumia kwa URL ya ukurasa wa malipo (kadi / bank).
-# Jina halisi bado halijathibitishwa; mstari wa logi "create_order ... keys=" utaonyesha lililo sahihi.
 _URL_KEYS = (
     "gateway_url", "payment_url", "checkout_url", "authorization_url",
     "payment_link", "checkout_link", "link", "url",
@@ -427,10 +440,7 @@ _URL_SKIP_WORDS = ("redirect", "callback", "return", "webhook", "logo", "image")
 
 
 def _extract_gateway_url(data, *, our_redirect_url=""):
-    """Best effort: tafuta URL ya ukurasa wa malipo ya FimiPay kwenye jibu la create_order.
-
-    Haichukui field zinazoonekana kuwa URL YETU ya kurudi (redirect/callback), wala URL ile ile tuliyotuma.
-    """
+    """Best effort: tafuta URL ya ukurasa wa malipo ya FimiPay kwenye jibu la create_order."""
     if not isinstance(data, dict):
         return ""
 
@@ -454,7 +464,6 @@ def _extract_gateway_url(data, *, our_redirect_url=""):
 def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
-    # ── Phase 1: lock, validate, snapshot (short transaction) ──
     with db_transaction.atomic():
         boost = (
             ListingBoost.objects
@@ -473,6 +482,8 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
             )
 
         if boost.amount <= Decimal("0.00"):
+            if boost.package is None:
+                raise ValidationError("Boost haina package wala kiasi.")
             boost.amount = calculate_boost_fee(package=boost.package)
             boost.save(update_fields=["amount", "updated_at"])
 
@@ -483,21 +494,17 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
             "phone": phone or user.phone or "",
             "email": user.email or "",
             "name": user.name or "",
-            "updated_at": boost.updated_at,  # ≈ wakati order ya mwisho ilipoundwa
+            "updated_at": boost.updated_at,
         }
 
-    method = _fp_normalize_method(payment_method)  # "mobile" | "card" | "bank"
+    method = _fp_normalize_method(payment_method)
 
-    # Order ya mobile inayosubiri INAWEZA kutumika tena (usimtumie mteja ombi la pili la USSD) lakini tu
-    # kama ni changa. Kadi/bank huunda order mpya kila mara: order ya zamani inaweza kuwa ya njia nyingine
-    # (hatuhifadhi njia) au ukurasa wake umeachwa, na isingeweza kamwe kuisha ili mteja alipe kwa njia nyingine.
     reuse_window = timedelta(minutes=getattr(settings, "BOOST_REUSE_PENDING_MINUTES", 5))
     reuse_pending = (
         method == "mobile"
         and timezone.now() - _snapshot["updated_at"] <= reuse_window
     )
 
-    # ── Phase 2: HTTP calls (NO lock, NO transaction) ──
     if existing_ref:
         sd = None
         try:
@@ -507,9 +514,6 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
         if sd:
             ps = (sd.get("payment_status") or "").upper()
             if ps == "SUCCESS":
-                # Tayari imelipwa FimiPay: itumie na uwashe boost sasa
-                # (webhook inaweza kuwa imekosa). Errors zinapita juu kwa
-                # makusudi — usiunde order ya pili.
                 mark_boost_as_paid_from_webhook(
                     ref_id=_snapshot["pk"],
                     payment_reference=sd.get("transid") or existing_ref,
@@ -518,8 +522,6 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
             if ps in ("PENDING", "INPROGRESS", "PROCESSING") and reuse_pending:
                 return sd
 
-    # Kadi/bank: FimiPay inamrudisha mteja kwenye URL hii baada ya kulipa. Weka kwenye settings, mfano
-    # BOOST_PAYMENT_REDIRECT_URL = "https://sokomkononi.co.tz/dashboard/boosts" (bila hiyo, hakuna redirect_url).
     redirect_url = ""
     if method in ("card", "bank"):
         redirect_url = getattr(settings, "BOOST_PAYMENT_REDIRECT_URL", "") or ""
@@ -535,8 +537,6 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
         redirect_url=redirect_url,
     )
 
-    # Toa URL ya ukurasa wa malipo (kadi/bank) kama `gateway_url`, na andika majina ya field kwenye logi
-    # (si thamani) ili uthibitishe jina halisi la FimiPay.
     data = dict(data)
     gateway_url = _extract_gateway_url(data, our_redirect_url=redirect_url)
     logger.info(
@@ -546,7 +546,6 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
     if gateway_url:
         data["gateway_url"] = gateway_url
 
-    # ── Phase 3: re-lock, persist reference ──
     with db_transaction.atomic():
         b = ListingBoost.objects.select_for_update(of=("self",)).get(pk=_snapshot["pk"])
         b.payment_reference = data.get("order_id") or order_id
@@ -575,11 +574,6 @@ def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
 
-    # Activate right away. Without this, a customer who pays and then
-    # closes the browser is charged but never boosted, because the
-    # frontend is the only other place that calls /activate/.
-    # A failure here (e.g. listing no longer AVAILABLE) must not undo
-    # the recorded payment, so it is logged and left for review.
     try:
         boost = activate_boost(boost=boost)
     except ValidationError:
@@ -588,6 +582,7 @@ def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
         )
 
     return boost
+
 
 @db_transaction.atomic
 def mark_boost_as_refunded(*, ref_id, reason=""):

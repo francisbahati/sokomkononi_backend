@@ -8,10 +8,8 @@ class BannerAdSerializer(serializers.ModelSerializer):
     listingId = serializers.IntegerField(source="listing_id", read_only=True)
     listingTitle = serializers.CharField(source="listing_title", read_only=True)
     sellerName = serializers.CharField(source="seller_name", read_only=True)
-    package_name = serializers.CharField(source="package.name", read_only=True)
-    package_hours = serializers.IntegerField(
-        source="package.duration_hours", read_only=True, allow_null=True,
-    )
+    package_name = serializers.SerializerMethodField()
+    package_hours = serializers.SerializerMethodField()
 
     class Meta:
         model = BannerAd
@@ -24,15 +22,23 @@ class BannerAdSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_package_name(self, obj):
+        return obj.package.name if obj.package else None
+
+    def get_package_hours(self, obj):
+        return obj.package.duration_hours if obj.package else None
+
 
 class BannerAdCreateSerializer(serializers.Serializer):
     listing = serializers.IntegerField()
-    package = serializers.IntegerField(required=True)
+    package = serializers.IntegerField(required=False, allow_null=True)
     payment_reference = serializers.CharField(
         max_length=255, required=False, allow_blank=True,
     )
 
     def validate_package(self, value):
+        if value is None:
+            return None
         from apps.advertisement_fees.models import AdvertisementPackage
         pkg = AdvertisementPackage.objects.filter(
             pk=value, is_active=True,
@@ -42,6 +48,15 @@ class BannerAdCreateSerializer(serializers.Serializer):
                 "Advertisement package haipo active."
             )
         return pkg
+
+    def validate(self, attrs):
+        from apps.advertisement_fees.models import AdvertisementFeeConfig
+        fee_enabled = AdvertisementFeeConfig.get_solo().is_enabled
+        if fee_enabled and not attrs.get("package"):
+            raise serializers.ValidationError({
+                "package": ["Advertisement package inahitajika."],
+            })
+        return attrs
 
 
 # ============================================================
@@ -65,7 +80,6 @@ class CampaignSerializer(serializers.ModelSerializer):
 
     def validate_name(self, value):
         if isinstance(value, str):
-            # Convert string to bilingual
             value = {"sw": value, "en": value}
         if not isinstance(value, dict):
             raise serializers.ValidationError(

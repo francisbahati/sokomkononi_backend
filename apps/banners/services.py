@@ -1,8 +1,8 @@
-from decimal import Decimal
 # apps/banners/services.py
 """
 Banner ad creation + activation + campaign pricing.
-Inatumia `AdvertisementPackage` kwa bei na muda.
+Inatumia `AdvertisementPackage` kwa bei na muda, au default (168h = siku 7)
+kama advertisement fee imezimwa (package=None).
 """
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -17,10 +17,22 @@ from .models import BannerAd, Campaign
 
 
 ZERO = Decimal("0.00")
+DEFAULT_BANNER_HOURS = 168  # siku 7 — default kama package=None
 
 
 def _round(v):
     return Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _advertisement_fee_enabled():
+    """True kama advertisement fee inatumika; False kama ni bure."""
+    try:
+        from apps.advertisement_fees.models import AdvertisementFeeConfig
+        cfg = AdvertisementFeeConfig.get_solo()
+        return bool(cfg and cfg.is_enabled)
+    except Exception:
+        # Fail-closed: kama lookup inashindwa, chukulia fee inatumika
+        return True
 
 
 # ============================================================================
@@ -31,9 +43,19 @@ def _round(v):
 def create_banner_ad(*, listing_id, seller, package, payment_reference=""):
     """
     Unda PENDING banner ad. Hai-activate listing bado — inasubiri malipo.
+
+    `package` inaweza kuwa None kama advertisement fee imezimwa.
     """
-    if not package or not package.is_active:
-        raise ValidationError({"package": "Advertisement package haipo active."})
+    fee_enabled = _advertisement_fee_enabled()
+
+    if fee_enabled:
+        if not package or not package.is_active:
+            raise ValidationError({"package": "Advertisement package haipo active."})
+    else:
+        # Free mode: package hiari. Kama package imetolewa lakini si active,
+        # tunaichukulia kama None.
+        if package is not None and not package.is_active:
+            package = None
 
     try:
         listing = Listing.objects.select_for_update().get(pk=listing_id)
@@ -57,6 +79,15 @@ def create_banner_ad(*, listing_id, seller, package, payment_reference=""):
         })
 
     now = timezone.now()
+
+    # Bei na muda: kama package ipo, tumia; kama haipo (fee imezimwa), 0 na 168h.
+    if package is not None:
+        amount = package.price
+        duration_hours = package.duration_hours
+    else:
+        amount = ZERO
+        duration_hours = DEFAULT_BANNER_HOURS
+
     banner = BannerAd.objects.create(
         listing=listing,
         seller=seller,
@@ -66,11 +97,11 @@ def create_banner_ad(*, listing_id, seller, package, payment_reference=""):
         location=listing.location or "",
         price=listing.price,
         seller_name=seller.name,
-        amount=package.price,
+        amount=amount,
         payment_reference=(payment_reference or "").strip() or None,
         active=False,
         payment_status="PENDING",
-        expires_at=now + timedelta(hours=package.duration_hours),
+        expires_at=now + timedelta(hours=duration_hours),
     )
     return banner
 
@@ -100,7 +131,7 @@ def mark_banner_paid_and_activate(*, banner, payment_reference):
         raise ValidationError("Payment reference hii tayari imetumika.")
 
     now = timezone.now()
-    hours = banner.package.duration_hours if banner.package else 168
+    hours = banner.package.duration_hours if banner.package else DEFAULT_BANNER_HOURS
     banner.payment_status = "PAID"
     banner.payment_reference = ref
     banner.paid_at = now
@@ -128,8 +159,13 @@ def initiate_banner_payment(*, banner, user, payment_method='mobile', phone=''):
     if banner.seller_id != user.id:
         raise ValidationError("Huruhusiwi kulipia banner hii.")
     if banner.payment_status == "PAID":
-        # Bila hii, order mpya ingeundwa na mteja angelipa mara ya pili.
         raise ValidationError("Banner hii tayari imelipiwa.")
+
+    # Kama ni bure (amount=0), hakuna haja ya FimiPay
+    if not banner.amount or Decimal(str(banner.amount)) <= ZERO:
+        raise ValidationError(
+            "Banner hii haina kiasi cha kulipia. Tumia 'free' reference."
+        )
 
     from apps.payments.fimipay import get_order_status as _fp_get_status
 
@@ -143,9 +179,6 @@ def initiate_banner_payment(*, banner, user, payment_method='mobile', phone=''):
         if sd:
             ps = (sd.get("payment_status") or "").upper()
             if ps == "SUCCESS":
-                # Tayari imelipwa FimiPay: itumie na uwashe banner sasa
-                # (webhook inaweza kuwa imekosa). Errors zinapita juu kwa
-                # makusudi — usiunde order ya pili.
                 mark_banner_paid_from_webhook(
                     ref_id=banner.pk,
                     payment_reference=sd.get("transid") or existing_ref,
@@ -180,7 +213,7 @@ def mark_banner_paid_from_webhook(*, ref_id, payment_reference):
     if BannerAd.objects.filter(payment_reference=ref).exclude(pk=banner.pk).exists():
         raise ValidationError("Payment reference hii tayari imetumika.")
 
-    hours = banner.package.duration_hours if banner.package else 168
+    hours = banner.package.duration_hours if banner.package else DEFAULT_BANNER_HOURS
     banner.payment_status = "PAID"
     banner.payment_reference = ref
     banner.paid_at = timezone.now()
@@ -226,24 +259,6 @@ def get_active_campaign(applies_to):
 
 
 def calculate_promotion_price(base_price, applies_to):
-    """
-    Hesabu bei ya promotion baada ya discount.
-
-    Args:
-        base_price: Decimal — bei ya kawaida
-        applies_to: "BOOST" | "LEADING" | "ADVERTISEMENT"
-
-    Returns:
-        dict {
-            base_price: Decimal,
-            discount_percent: Decimal,
-            discount_amount: Decimal,
-            final_price: Decimal,
-            campaign_id: int | None,
-            campaign_name: dict | None,
-            campaign_end_date: datetime | None,
-        }
-    """
     base_price = Decimal(str(base_price or 0))
     campaign = get_active_campaign(applies_to)
 
@@ -272,6 +287,7 @@ def calculate_promotion_price(base_price, applies_to):
         "campaign_name": None,
         "campaign_end_date": None,
     }
+
 
 @transaction.atomic
 def mark_banner_as_refunded(*, ref_id, reason=""):

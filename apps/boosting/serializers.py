@@ -33,12 +33,8 @@ class BoostPackageSerializer(serializers.ModelSerializer):
 
 
 class ListingBoostSerializer(serializers.ModelSerializer):
-    package_name = serializers.CharField(
-        source="package.name", read_only=True,
-    )
-    duration_hours = serializers.IntegerField(
-        source="package.duration_hours", read_only=True,
-    )
+    package_name = serializers.SerializerMethodField()
+    duration_hours = serializers.SerializerMethodField()
     duration_days = serializers.SerializerMethodField()
     listing_title = serializers.CharField(
         source="listing.title", read_only=True,
@@ -64,18 +60,27 @@ class ListingBoostSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
 
+    def get_package_name(self, obj):
+        return obj.package.name if obj.package else None
+
+    def get_duration_hours(self, obj):
+        return obj.package.duration_hours if obj.package else None
+
     def get_duration_days(self, obj):
-        return obj.package.duration_hours / 24
+        return (obj.package.duration_hours / 24) if obj.package else None
 
 
 class BoostCreateSerializer(serializers.Serializer):
-    listing = serializers.IntegerField(min_value=Decimal("1"))
-
+    listing = serializers.IntegerField(min_value=1)
     package = serializers.PrimaryKeyRelatedField(
         queryset=BoostPackage.all_objects.all(),
+        required=False,
+        allow_null=True,
     )
 
     def validate_package(self, package):
+        if package is None:
+            return None
         if not package.is_active or package.is_deleted:
             raise serializers.ValidationError(
                 "Boost package hii haipo active."
@@ -90,6 +95,12 @@ class BoostCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Lazima uwe umeingia kwenye akaunti."
             )
+
+        fee_enabled = BoostFeeConfig.get_solo().is_active
+        if fee_enabled and not attrs.get("package"):
+            raise serializers.ValidationError({
+                "package": ["Package inahitajika kwa boost yenye malipo."],
+            })
 
         return attrs
 

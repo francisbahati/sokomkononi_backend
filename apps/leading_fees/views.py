@@ -34,13 +34,6 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 
 
 class LeadingFeeConfigViewSet(viewsets.GenericViewSet):
-    """
-    Singleton viewset — LeadingFeeConfig moja (pk=1).
-
-    GET     /api/leading-fees/             → config
-    PATCH   /api/leading-fees/             → update config
-    POST    /api/leading-fees/toggle/      → toggle is_enabled
-    """
     queryset = LeadingFeeConfig.objects.all()
     serializer_class = LeadingFeeConfigSerializer
 
@@ -79,15 +72,6 @@ class LeadingFeeConfigViewSet(viewsets.GenericViewSet):
 
 
 class LeadingPackageViewSet(viewsets.ModelViewSet):
-    """
-    CRUD kwa Leading Packages.
-
-    GET    /api/leading-fees/packages/           → list
-    POST   /api/leading-fees/packages/           → create
-    PATCH  /api/leading-fees/packages/{id}/      → update
-    DELETE /api/leading-fees/packages/{id}/      → delete
-    POST   /api/leading-fees/packages/{id}/toggle/ → toggle is_active
-    """
     serializer_class = LeadingPackageSerializer
     permission_classes = [IsAdminOrReadOnly]
     queryset = LeadingPackage.objects.all()
@@ -129,6 +113,78 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             return qs
         return qs.filter(seller=user)
 
+    # ── NEW: status ya leading kwa listing ─────────────────────
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"status/(?P<listing_id>\d+)",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def listing_status(self, request, listing_id=None):
+        """GET /api/leading-fees/purchases/status/<listing_id>/"""
+        listing = Listing.objects.filter(pk=listing_id).first()
+        if not listing:
+            return Response(
+                {"detail": "Tangazo halipatikani."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if request.user.id != listing.seller_id and not request.user.is_staff:
+            return Response(
+                {"detail": "Huna ruhusa."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        leadings = (
+            ListingLeading.objects
+            .filter(listing=listing)
+            .select_related("package")
+            .order_by("-created_at")
+        )
+        active = leadings.filter(
+            status=ListingLeading.Status.ACTIVE,
+            expires_at__gt=timezone.now(),
+        ).first()
+        pending = leadings.filter(
+            payment_status=ListingLeading.PaymentStatus.PENDING,
+        ).first()
+
+        return Response({
+            "listing_id": listing.id,
+            "has_active": bool(active),
+            "active": ListingLeadingSerializer(active).data if active else None,
+            "has_pending": bool(pending),
+            "pending": ListingLeadingSerializer(pending).data if pending else None,
+            "can_create_new": not active and not pending,
+        })
+
+    # ── NEW: cancel pending purchase ───────────────────────────
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="cancel",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def cancel(self, request, pk=None):
+        """POST /api/leading-fees/purchases/<pk>/cancel/"""
+        leading = get_object_or_404(self.get_queryset(), pk=pk)
+
+        if leading.payment_status != ListingLeading.PaymentStatus.PENDING:
+            return Response(
+                {"detail": f"Haiwezi kufutwa. Status: {leading.payment_status}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        leading.payment_status = ListingLeading.PaymentStatus.FAILED
+        leading.status = ListingLeading.Status.CANCELLED
+        leading.save(update_fields=["payment_status", "status", "updated_at"])
+
+        return Response({
+            "detail": "Leading imefutwa.",
+            "purchase": ListingLeadingSerializer(
+                leading, context={"request": request}
+            ).data,
+        })
+
     @action(detail=False, methods=["post"], url_path="apply")
     def apply(self, request):
         serializer = LeadingApplySerializer(
@@ -140,11 +196,15 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             Listing.objects.select_related("seller"),
             pk=serializer.validated_data["listing"],
         )
-        package = get_object_or_404(
-            LeadingPackage,
-            pk=serializer.validated_data["package"],
-            is_active=True,
-        )
+
+        package_id = serializer.validated_data.get("package")
+        package = None
+        if package_id:
+            package = get_object_or_404(
+                LeadingPackage,
+                pk=package_id,
+                is_active=True,
+            )
 
         leading = create_leading(
             listing_id=listing.id,
@@ -174,16 +234,12 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
 
         payment_reference = (request.data.get("payment_reference") or "").strip()
 
-        # ── Resolve the current fee state once, for both branches. ──
         try:
             from .models import LeadingFeeConfig
             _leading_fee_enabled = LeadingFeeConfig.get_solo().is_enabled
         except Exception:
-            _leading_fee_enabled = True  # fail closed: assume paid
+            _leading_fee_enabled = True
 
-        # Free path: either an explicit "free" reference, OR an empty
-        # body while the fee is disabled. The frontend sends `{}` now;
-        # the "free" sentinel is kept for backwards compatibility.
         _wants_free = (
             payment_reference == "free"
             or (not payment_reference and not _leading_fee_enabled)
@@ -200,10 +256,6 @@ class ListingLeadingViewSet(viewsets.ModelViewSet):
             from django.db import transaction
             with transaction.atomic():
                 now = timezone.now()
-                leading.payment_status = "PAID"
-                leading.payment_reference = f"free-{leading.pk}-{uuid.uuid4().hex[:8]}"
-                leading.paid_at = now
-                # Only mark paid here; use _activate to stack the window.
                 leading.payment_status = "PAID"
                 leading.payment_reference = f"free-{leading.pk}-{uuid.uuid4().hex[:8]}"
                 leading.paid_at = now

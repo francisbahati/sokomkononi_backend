@@ -1,20 +1,20 @@
 """
 POST /api/listings/{id}/release-reservation/
 
-Frees the current RESERVED reservation on a listing and advances
-the waiting list (Option A):
-    1. Mark the listing LIVE again.
-    2. Expire/cancel the previous reservation + transaction.
-    3. Mark the first WAITING entry as NOTIFIED and give it a
-       response window (default 24 h, overridable via settings).
-    4. Emit WAITING_LIST_AVAILABLE notifications.
+Inarudisha mali hewani na kuendeleza waiting list (Option A).
 
-Idempotent: safe to call when there is no active reservation.
+Mtiririko:
+    1. Tumia release_reserved_listing() — inaghairi transaction,
+       deal, reservation na kuweka listing LIVE.
+    2. Mwalike mwanzo kwenye waiting list (NOTIFIED + response window).
+    3. Tuma notification ya WAITING_LIST_AVAILABLE.
+
+Idempotent: salama kuita wakati hakuna reservation hai.
 """
 import logging
 from datetime import timedelta
 
-from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import permissions, status
@@ -22,106 +22,45 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.listings.models import Listing
+from apps.listings.serializers import ListingDetailSerializer
+from apps.transactions.services.transaction import release_reserved_listing
+from apps.waiting_list.constants import RESPONSE_WINDOW_HOURS
 
 logger = logging.getLogger(__name__)
 
-from apps.waiting_list.constants import RESPONSE_WINDOW_HOURS
-
 
 class ReleaseReservationView(APIView):
+    """Admin-only: rudisha mali hewani + endeleza waiting list."""
+
     permission_classes = [permissions.IsAdminUser]
 
     def post(self, request, pk=None):
-        # Owner or staff only (release is safe to allow anyone who owns
-        # the listing; anonymous is a no-op).
-        listing = (
-            Listing.all_objects
-            .select_related("seller")
-            .filter(pk=pk)
-            .first()
-        )
-        if not listing:
+        reason = (request.data.get("reason") or "").strip()
+
+        try:
+            listing = release_reserved_listing(
+                listing_id=pk,
+                admin_user=request.user,
+                reason=reason,
+            )
+        except Listing.DoesNotExist:
             return Response(
                 {"detail": "Tangazo halipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-
-        user = request.user
-        is_owner = user and user.is_authenticated and user.id == listing.seller_id
-        is_staff = user and getattr(user, "is_staff", False)
-
-        # Anonymous callers: this is a webhook-style idempotent nudge.
-        # We allow it, but only when the reservation window has actually
-        # elapsed (checked below).
-        with transaction.atomic():
-            listing = Listing.objects.select_for_update().get(pk=listing.pk)
-
-            # Only act when there is an expired reservation on this listing.
-            txn = getattr(listing, "transactions", None)
-            reservation = None
-            try:
-                from apps.transactions.models import Reservation
-                reservation = (
-                    Reservation.objects
-                    .select_for_update()
-                    .select_related("transaction")
-                    .filter(transaction__listing=listing)
-                    .order_by("-created_at")
-                    .first()
-                )
-            except Exception:
-                reservation = None
-
-            now = timezone.now()
-            expired = (
-                reservation
-                and reservation.status in ("PENDING_PAYMENT", "ACTIVE")
-                and reservation.expires_at
-                and reservation.expires_at <= now
+        except DjangoValidationError as exc:
+            msg = getattr(exc, "messages", [str(exc)])
+            return Response(
+                {"detail": msg[0] if isinstance(msg, list) else msg},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            if not (expired or is_owner or is_staff):
-                # Nothing to do — return the current state as-is.
-                return Response(
-                    {
-                        "released": False,
-                        "reason": "reservation_not_expired",
-                        "listing_id": listing.id,
-                        "status": listing.status,
-                    },
-                    status=status.HTTP_200_OK,
-                )
+        # ── Waiting list advancement (Option A) ──
+        advanced_id = None
+        try:
+            from apps.waiting_list.models import WaitingListEntry
 
-            # 1. Free the listing
-            was_reserved = listing.status == Listing.Status.RESERVED
-            if was_reserved:
-                listing.status = Listing.Status.LIVE
-                listing.save(update_fields=["status", "updated_at"])
-
-            # 2. Cancel the reservation + transaction
-            if reservation:
-                reservation.status = "CANCELLED"
-                reservation.save(update_fields=["status", "updated_at"])
-                try:
-                    txn_obj = reservation.transaction
-                    if txn_obj.status in (
-                        "RESERVED", "INSPECTION",
-                        "RESERVATION_PENDING", "READY_FOR_FINAL_PAYMENT",
-                    ):
-                        txn_obj.status = "CANCELLED"
-                        txn_obj.cancelled_at = now
-                        txn_obj.cancellation_reason = "Reservation released."
-                        txn_obj.save(update_fields=[
-                            "status", "cancelled_at",
-                            "cancellation_reason", "updated_at",
-                        ])
-                except Exception:
-                    logger.exception("Could not cancel parent transaction")
-
-            # 3. Advance the waiting list — Option A
-            advanced = None
-            try:
-                from apps.waiting_list.models import WaitingListEntry
+            with transaction.atomic():
                 first = (
                     WaitingListEntry.objects
                     .select_for_update()
@@ -133,28 +72,30 @@ class ReleaseReservationView(APIView):
                     .first()
                 )
                 if first:
+                    now = timezone.now()
                     first.status = WaitingListEntry.Status.NOTIFIED
                     first.notified_at = now
-                    # Record the deadline in the (optional) field
                     if hasattr(first, "respond_by"):
                         first.respond_by = now + timedelta(
                             hours=RESPONSE_WINDOW_HOURS
                         )
                     first.save()
-                    advanced = first.id
-            except Exception:
-                logger.exception("Failed to advance waiting list")
+                    advanced_id = first.id
+        except Exception:
+            logger.exception("Waiting-list advancement failed")
 
-        # Fire notifications after commit
-        if advanced:
+        # ── Notify first waiter ──
+        if advanced_id:
             try:
+                from apps.waiting_list.models import WaitingListEntry
                 from apps.notifications.models import Notification
                 from apps.notifications.services.notification import (
                     create_notification,
                 )
-                first = WaitingListEntry.objects.get(pk=advanced)
+
+                entry = WaitingListEntry.objects.get(pk=advanced_id)
                 create_notification(
-                    recipient=first.buyer,
+                    recipient=entry.buyer,
                     notification_type=(
                         Notification.NotificationType.WAITING_LIST_AVAILABLE
                     ),
@@ -168,7 +109,7 @@ class ReleaseReservationView(APIView):
                     priority=Notification.Priority.URGENT,
                     related_object_type="Listing",
                     related_object_id=listing.id,
-                    action_url=f"/dashboard/buyer/waiting",
+                    action_url="/dashboard/buyer/waiting",
                 )
             except Exception:
                 logger.exception("Failed to notify first waiter")
@@ -178,7 +119,10 @@ class ReleaseReservationView(APIView):
                 "released": True,
                 "listing_id": listing.id,
                 "status": listing.status,
-                "advanced_waitlist_entry": advanced,
+                "advanced_waitlist_entry": advanced_id,
+                "listing": ListingDetailSerializer(
+                    listing, context={"request": request}
+                ).data,
             },
             status=status.HTTP_200_OK,
         )

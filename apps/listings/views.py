@@ -822,6 +822,16 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         "[listings] deals app not available, skipping"
                     )
 
+                # 4b. Mazungumzo ya wanunuzi (apps.messaging)  ← MPYA
+                try:
+                    from apps.messaging.models import Conversation
+
+                    Conversation._base_manager.filter(listing=listing).delete()
+                except ImportError:
+                    logger.warning(
+                        "[listings] messaging app not available, skipping"
+                    )
+
                 # 5. Related models
                 related_fields = [
                     "images",

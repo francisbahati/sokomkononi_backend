@@ -503,3 +503,63 @@ def cancel_transaction(*, transaction, user, reason):
         )
 
     return transaction
+
+
+# ============================================================
+# RELEASE RESERVED LISTING (admin)
+# ============================================================
+DEFAULT_RELEASE_REASON = (
+    "Mnunuzi hakukamilisha ununuzi. Ada ya reservation haitarudishwa."
+)
+
+
+@db_transaction.atomic
+def release_reserved_listing(*, listing_id, admin_user, reason=""):
+    from apps.deals.models import NegotiationOffer
+
+    reason = (reason or "").strip() or DEFAULT_RELEASE_REASON
+
+    listing = Listing.objects.select_for_update().get(pk=listing_id)
+    if listing.status != Listing.Status.RESERVED:
+        raise ValidationError("Tangazo hili halijahifadhiwa (si RESERVED).")
+
+    # Kesi 1: kuna Transaction hai -> tumia cancel_transaction iliyopo.
+    tx = (
+        Transaction.objects
+        .select_for_update(of=("self",))
+        .select_related("deal_room")
+        .filter(listing=listing)
+        .exclude(status__in=[
+            Transaction.Status.COMPLETED,
+            Transaction.Status.CANCELLED,
+        ])
+        .order_by("-created_at")
+        .first()
+    )
+    if tx:
+        if tx.deal_room.status == DealRoom.Status.PAYMENT_PROOF_SUBMITTED:
+            raise ValidationError(
+                "Mnunuzi ametuma uthibitisho wa malipo ya mwisho. "
+                "Kagua deal hiyo kwanza."
+            )
+        cancel_transaction(transaction=tx, user=admin_user, reason=reason)
+        listing.refresh_from_db()
+        return listing
+
+    # Kesi 2: hakuna Transaction, deal bado ACCEPTED -> ighairi mwenyewe.
+    room = (
+        DealRoom.objects.select_for_update()
+        .filter(listing=listing, status=DealRoom.Status.ACCEPTED)
+        .first()
+    )
+    if room:
+        room.status = DealRoom.Status.CANCELLED
+        room.save(update_fields=["status", "updated_at"])
+        NegotiationOffer.objects.filter(
+            deal_room=room, status=NegotiationOffer.Status.PENDING,
+        ).update(status=NegotiationOffer.Status.CANCELLED)
+
+    listing.status = Listing.Status.LIVE
+    listing.save(update_fields=["status", "updated_at"])
+    db_transaction.on_commit(lambda: notify_waiting_buyers(listing=listing))
+    return listing

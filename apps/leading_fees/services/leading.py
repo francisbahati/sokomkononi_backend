@@ -67,7 +67,8 @@ def create_leading(*, listing_id, user, package, payment_reference=""):
     # Kama package ipo, tumia; kama haipo, default
     if package is not None:
         days = round(package.duration_hours / 24) or 1
-        price = package.price
+        # Fee imezimwa -> bure, hata kama package imetumwa (muda tu unatoka kwenye package)
+        price = package.price if fee_enabled else ZERO
     else:
         days = round(DEFAULT_LEADING_HOURS / 24) or 1
         price = ZERO

@@ -82,7 +82,8 @@ def create_banner_ad(*, listing_id, seller, package, payment_reference=""):
 
     # Bei na muda: kama package ipo, tumia; kama haipo (fee imezimwa), 0 na 168h.
     if package is not None:
-        amount = package.price
+        # Fee imezimwa -> bure, hata kama package imetumwa (muda tu unatoka kwenye package)
+        amount = package.price if fee_enabled else ZERO
         duration_hours = package.duration_hours
     else:
         amount = ZERO

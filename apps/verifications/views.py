@@ -28,7 +28,7 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-def _log(request, action, target="", target_id=None, details=""):
+def _log(request, action, target="", target_id=None, details="", params=None):
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -37,6 +37,7 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         logger.exception("audit failed: %s", action)
@@ -183,12 +184,13 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 "request %s: %s", obj.id, exc,
             )
 
+        # ✅ Tumia params
         _log(
             request,
             action="verification.approved",
             target="VerificationRequest",
             target_id=obj.id,
-            details=f"Approved: type={obj.type}, subject={obj.subject}",
+            params={"name": f"{obj.type} - {obj.subject}"},
         )
 
         try:
@@ -231,15 +233,16 @@ class VerificationViewSet(viewsets.GenericViewSet):
             "reviewed_at", "updated_at",
         ])
 
+        # ✅ Tumia params
         _log(
             request,
             action="verification.rejected",
             target="VerificationRequest",
             target_id=obj.id,
-            details=(
-                f"Rejected: "
-                f"{serializer.validated_data['rejection_reason'][:200]}"
-            ),
+            params={
+                "name": f"{obj.type} - {obj.subject}",
+                "reason": serializer.validated_data["rejection_reason"][:200],
+            },
         )
 
         try:
@@ -256,7 +259,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
             ).data,
         )
 
-    # ══════════════════════════════════════════════════════════
+        # ══════════════════════════════════════════════════════════
     # ADMIN: request documents zaidi
     # ══════════════════════════════════════════════════════════
     @extend_schema(

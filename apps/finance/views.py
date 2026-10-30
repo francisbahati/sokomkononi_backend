@@ -36,9 +36,9 @@ from apps.core.permissions import IsAdminUser  # noqa: E402
 
 
 # ============================================================
-# AUDIT LOG HELPER
+# AUDIT LOG HELPER — imebadilishwa kupokea params=None
 # ============================================================
-def _log(request, action, target="", target_id=None, details=""):
+def _log(request, action, target="", target_id=None, details="", params=None):
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -47,6 +47,7 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         import logging
@@ -189,7 +190,7 @@ class MyTransactionsView(APIView):
                 "created_at": item.created_at,
             })
 
-        # LEADINGS — ⬅️ MPYA
+        # LEADINGS
         from apps.leading_fees.models import ListingLeading
 
         for item in ListingLeading.objects.filter(
@@ -362,12 +363,16 @@ class SuccessFeeConfigView(APIView):
         new_snapshot = self._snapshot(obj)
         diff = self._diff(old_snapshot, new_snapshot)
         if diff != "no change":
+            # ✅ Tumia details={"sw","en"}
             _log(
                 request,
                 action="fee.updated",
                 target="SuccessFeeConfig",
                 target_id=obj.id,
-                details=f"Updated success fee config ({diff})",
+                details={
+                    "sw": f"Mipangilio ya ada ya mafanikio imebadilishwa ({diff})",
+                    "en": f"Updated success fee config ({diff})",
+                },
             )
 
         return Response(serializer.data)
@@ -381,15 +386,16 @@ class SuccessFeeConfigView(APIView):
             new_state = bool(obj.is_enabled)
 
             if old_state != new_state:
+                # ✅ Tumia details={"sw","en"}
                 _log(
                     request,
                     action="fee.updated",
                     target="SuccessFeeConfig",
                     target_id=obj.id,
-                    details=(
-                        f"Success fee toggle: "
-                        f"is_enabled: {old_state} → {new_state}"
-                    ),
+                    details={
+                        "sw": f"Ada ya mafanikio {'imewashwa' if new_state else 'imezimwa'}.",
+                        "en": f"Success fee {'enabled' if new_state else 'disabled'}.",
+                    },
                 )
 
             return Response({
@@ -439,15 +445,16 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
 
         new_state = bool(toggle.is_enabled)
         if old_state != new_state:
+            # ✅ Tumia details={"sw","en"}
             _log(
                 request,
                 action="fee.updated",
                 target="SystemFeatureToggle",
                 target_id=toggle.id,
-                details=(
-                    f"Feature toggle '{toggle.key}': "
-                    f"is_enabled: {old_state} → {new_state}"
-                ),
+                details={
+                    "sw": f"Kipengele '{toggle.key}' {'kimewashwa' if new_state else 'kimezimwa'}.",
+                    "en": f"Feature toggle '{toggle.key}' {'enabled' if new_state else 'disabled'}.",
+                },
             )
 
         return Response(SystemFeatureToggleSerializer(toggle).data)
@@ -465,15 +472,16 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
 
         new_state = bool(toggle.is_enabled)
         if old_state != new_state:
+            # ✅ Tumia details={"sw","en"}
             _log(
                 request,
                 action="fee.updated",
                 target="SystemFeatureToggle",
                 target_id=toggle.id,
-                details=(
-                    f"Feature toggle '{toggle.key}': "
-                    f"is_enabled: {old_state} → {new_state}"
-                ),
+                details={
+                    "sw": f"Kipengele '{toggle.key}' {'kimewashwa' if new_state else 'kimezimwa'}.",
+                    "en": f"Feature toggle '{toggle.key}' {'enabled' if new_state else 'disabled'}.",
+                },
             )
 
         return Response({
@@ -497,15 +505,16 @@ class SystemFeatureToggleViewSet(viewsets.ModelViewSet):
                 new_state = bool(toggle.is_enabled)
 
                 if old_state != new_state:
+                    # ✅ Tumia details={"sw","en"}
                     _log(
                         request,
                         action="fee.updated",
                         target="SystemFeatureToggle",
                         target_id=toggle.id,
-                        details=(
-                            f"Bulk toggle '{toggle.key}': "
-                            f"is_enabled: {old_state} → {new_state}"
-                        ),
+                        details={
+                            "sw": f"Kipengele '{toggle.key}' {'kimewashwa' if new_state else 'kimezimwa'} (kwa pamoja).",
+                            "en": f"Bulk toggle '{toggle.key}': {'enabled' if new_state else 'disabled'}.",
+                        },
                     )
 
                 updated.append({

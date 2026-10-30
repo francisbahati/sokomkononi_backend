@@ -5,11 +5,13 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser, AllowAny
 
 from .models import ReservationSettings, ReservationTier
-def _log(request, action, target="", target_id=None, details=""):
+
+
+def _log(request, action, target="", target_id=None, details="", params=None):
     try:
         from apps.audit.services.audit import log_action
         log_action(request=request, action=action, target=target,
-                   target_id=target_id, details=details)
+                   target_id=target_id, details=details, params=params)
     except Exception:
         import logging
         logging.getLogger(__name__).exception("audit failed")
@@ -24,10 +26,6 @@ from .serializers import (
 class ReservationSettingsViewSet(viewsets.GenericViewSet):
     """
     Singleton settings (is_enabled pekee).
-
-    GET   /api/reservation-settings/          → { is_enabled, ... }
-    PATCH /api/reservation-settings/          → update
-    POST  /api/reservation-settings/toggle/   → toggle is_enabled
     """
     serializer_class = ReservationSettingsSerializer
     queryset = ReservationSettings.objects.all()
@@ -64,13 +62,6 @@ class ReservationSettingsViewSet(viewsets.GenericViewSet):
 class ReservationTierViewSet(viewsets.ModelViewSet):
     """
     CRUD kwa reservation tiers.
-
-    GET    /api/reservation-tiers/           → list
-    POST   /api/reservation-tiers/           → create
-    GET    /api/reservation-tiers/{id}/      → retrieve
-    PATCH  /api/reservation-tiers/{id}/      → update
-    DELETE /api/reservation-tiers/{id}/      → delete
-    POST   /api/reservation-tiers/{id}/toggle/ → toggle is_active
     """
     serializer_class = ReservationTierSerializer
     queryset = ReservationTier.objects.all()

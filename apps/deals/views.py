@@ -46,7 +46,7 @@ from .services.notifications import (
 )
 
 
-def _log(request, action, target="", target_id=None, details=""):
+def _log(request, action, target="", target_id=None, details="", params=None):
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -55,6 +55,7 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         import logging
@@ -314,7 +315,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             "confirmed_at": txn.seller_confirmed_at,
         })
 
-    # ============================================================
+        # ============================================================
     # REPORT — inaunda Ticket ya category=DEAL_REPORT
     # ============================================================
     @extend_schema(
@@ -385,16 +386,24 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             text=description,
         )
 
+        # ✅ Tumia details={"sw","en"} kwa sababu ina data nyingi za kiufundi
         _log(
             request,
             action="deal.reported",
             target="Ticket",
             target_id=ticket.id,
-            details=(
-                f"User {request.user.id} ({reporter_role}) reported "
-                f"user {reported_user.id} in deal #{deal_room.id} "
-                f"— reason={reason}"
-            ),
+            details={
+                "sw": (
+                    f"Mtumiaji {request.user.id} ({reporter_role}) amemripoti "
+                    f"mtumiaji {reported_user.id} kwenye deal #{deal_room.id} — "
+                    f"sababu={reason}"
+                ),
+                "en": (
+                    f"User {request.user.id} ({reporter_role}) reported "
+                    f"user {reported_user.id} in deal #{deal_room.id} — "
+                    f"reason={reason}"
+                ),
+            },
         )
 
         return Response(
@@ -743,16 +752,24 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
 
         if request.user.is_staff:
+            # ✅ Tumia details={"sw","en"}
             _log(
                 request,
                 action="deal.cancelled_by_admin",
                 target="DealRoom",
                 target_id=deal_room.id,
-                details=(
-                    f"Admin cancelled Deal Room #{deal_room.id} "
-                    f"(listing: {deal_room.listing.title}). "
-                    f"Reason: {cancellation_reason or '—'}"
-                ),
+                details={
+                    "sw": (
+                        f"Admin amefuta Deal Room #{deal_room.id} "
+                        f"(tangazo: {deal_room.listing.title}). "
+                        f"Sababu: {cancellation_reason or '—'}"
+                    ),
+                    "en": (
+                        f"Admin cancelled Deal Room #{deal_room.id} "
+                        f"(listing: {deal_room.listing.title}). "
+                        f"Reason: {cancellation_reason or '—'}"
+                    ),
+                },
             )
 
         transaction.on_commit(

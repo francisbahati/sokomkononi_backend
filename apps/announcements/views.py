@@ -6,7 +6,7 @@
 # Marekebisho:
 #  - Ondoa __import__() — tumia timezone + Q moja kwa moja
 #  - create(): sent default = False kama scheduled_for ipo
-#  - Audit logging kupitia _log() helper
+#  - Audit logging kupitia _log() helper (sasa na params=)
 # ============================================================
 from django.db.models import Q
 from django.utils import timezone
@@ -25,7 +25,7 @@ from .serializers import (
 # ============================================================
 # AUDIT LOG HELPER
 # ============================================================
-def _log(request, action, target="", target_id=None, details=""):
+def _log(request, action, target="", target_id=None, details="", params=None):
     """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
     try:
         from apps.audit.services.audit import log_action
@@ -35,6 +35,7 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         import logging
@@ -146,15 +147,13 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
             created_by=request.user,
         )
 
+        # ✅ Tumia params
         _log(
             request,
             action="announcement.created",
             target="Announcement",
             target_id=obj.id,
-            details=(
-                f"Announcement: {obj.title} "
-                f"(type={obj.type}, sent={obj.sent})"
-            ),
+            params={"name": obj.title},
         )
 
         return Response(
@@ -173,12 +172,13 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
 
         obj.delete()
 
+        # ✅ Tumia params
         _log(
             request,
             action="announcement.deleted",
             target="Announcement",
             target_id=obj_id,
-            details=f"Deleted announcement: {obj_title}",
+            params={"name": obj_title},
         )
 
         return Response(status=status.HTTP_204_NO_CONTENT)

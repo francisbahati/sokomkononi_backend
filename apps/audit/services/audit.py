@@ -15,15 +15,16 @@ logger = logging.getLogger(__name__)
 #                          target=listing.title, params={"name": listing.title})
 # Hii inahakikisha details_sw na details_en ZOTE mbili zinajazwa kila wakati,
 # bila kila caller kuandika tafsiri mwenyewe.
-# Placeholders: {name}, {reason}, {count}, {role}, {user}. Kisichotolewa kinakuwa "—".
+# Placeholders: {name}, {reason}, {count}, {role}, {user}, {code}, {old}, {new}, {fields}, {ids}, {items}, {days}, {name}.
+# Kisichotolewa kinakuwa "—".
 # ---------------------------------------------------------------------------
 AUDIT_TEMPLATES = {
-    # Listings
+    # Listings (msingi)
     "listing.approved":  ('Tangazo "{name}" limeidhinishwa.', 'Listing "{name}" was approved.'),
     "listing.rejected":  ('Tangazo "{name}" limekataliwa. Sababu: {reason}', 'Listing "{name}" was rejected. Reason: {reason}'),
     "listing.deleted":   ('Tangazo "{name}" limefutwa.', 'Listing "{name}" was deleted.'),
     "listing.restored":  ('Tangazo "{name}" limerudishwa.', 'Listing "{name}" was restored.'),
-    # Users
+    # Users (msingi)
     "user.suspended":    ('Mtumiaji "{name}" amesimamishwa. Sababu: {reason}', 'User "{name}" was suspended. Reason: {reason}'),
     "user.activated":    ('Mtumiaji "{name}" ameamilishwa.', 'User "{name}" was activated.'),
     "user.verified":     ('Mtumiaji "{name}" amethibitishwa.', 'User "{name}" was verified.'),
@@ -35,7 +36,7 @@ AUDIT_TEMPLATES = {
     "dispute.resolved":  ('Mgogoro "{name}" umetatuliwa.', 'Dispute "{name}" was resolved.'),
     "deal.cancelled":    ('Muamala "{name}" umefutwa.', 'Deal "{name}" was cancelled.'),
     "refund.issued":     ('Marejesho yametolewa kwa "{name}".', 'Refund issued for "{name}".'),
-    # Fees
+    # Fees (msingi)
     "fee.updated":       ('Ada "{name}" imebadilishwa.', 'Fee "{name}" was updated.'),
     # Categories
     "category.created":  ('Kategoria "{name}" imeundwa.', 'Category "{name}" was created.'),
@@ -59,10 +60,9 @@ AUDIT_TEMPLATES = {
     "rbac.role.deleted": ('Role "{name}" imefutwa.', 'Role "{name}" was deleted.'),
     "rbac.staff.assigned": ('Role "{role}" imepewa "{user}".', 'Role "{role}" was assigned to "{user}".'),
     "rbac.staff.removed":  ('Role "{role}" imeondolewa kwa "{user}".', 'Role "{role}" was removed from "{user}".'),
-    # Trash
+    # Trash (msingi)
     "trash.restored":      ('"{name}" imerudishwa kutoka tupio.', '"{name}" was restored from trash.'),
     "trash.hard_deleted":  ('"{name}" imefutwa kabisa.', '"{name}" was permanently deleted.'),
-    "core.purge_soft_deleted": ('Vitu {count} vilivyofutwa vimeondolewa kabisa.', '{count} soft-deleted items were permanently purged.'),
     # System
     "webhook.created":   ('Webhook "{name}" imeundwa.', 'Webhook "{name}" was created.'),
     "webhook.deleted":   ('Webhook "{name}" imefutwa.', 'Webhook "{name}" was deleted.'),
@@ -70,6 +70,42 @@ AUDIT_TEMPLATES = {
     # Audit
     "audit.deleted":     ('Log imefutwa: {name}', 'Log deleted: {name}'),
     "audit.cleared":     ('Logs {count} zimefutwa.', 'Cleared {count} audit logs.'),
+
+    # ============================================================
+    # PATCH 1 TEMPLATES
+    # ============================================================
+    # Users (mpya)
+    "user.updated": ('Mtumiaji "{name}" amebadilishwa. Sehemu: {fields}', 'User "{name}" was updated. Fields: {fields}'),
+    "user.permanent_deleted": ('Mtumiaji "{name}" amefutwa kabisa. Sababu: {reason}', 'User "{name}" was permanently deleted. Reason: {reason}'),
+    # Listings moderation (mpya)
+    "listing.disapproved":       ('Idhini ya tangazo "{name}" imeondolewa. Sababu: {reason}', 'Listing "{name}" was disapproved. Reason: {reason}'),
+    "listing.marked_sold":       ('Tangazo "{name}" limewekwa kama LIMEUZWA.', 'Listing "{name}" was marked as SOLD.'),
+    "listing.request_edit":      ('Marekebisho yameombwa kwa tangazo "{name}". Sababu: {reason}', 'Edit requested for listing "{name}". Reason: {reason}'),
+    "listing.request_payment":   ('Malipo yameombwa kwa tangazo "{name}".', 'Payment requested for listing "{name}".'),
+    "listing.finalize_approved": ('Idhini ya mwisho ya tangazo "{name}" imekamilika.', 'Listing "{name}" received final approval.'),
+    "listing.bulk_approved":     ('Matangazo {count} yameidhinishwa kwa pamoja. IDs: {ids}', 'Bulk approved {count} listings. IDs: {ids}'),
+    "listing.bulk_rejected":     ('Matangazo {count} yamekataliwa kwa pamoja. IDs: {ids}', 'Bulk rejected {count} listings. IDs: {ids}'),
+    "listing.bulk_deleted":      ('Matangazo {count} yamefutwa kwa pamoja. IDs: {ids}', 'Bulk deleted {count} listings. IDs: {ids}'),
+    # Tickets (mpya)
+    "ticket.created":              ('Tiketi {code} imeundwa: {name}', 'Ticket {code} was created: {name}'),
+    "ticket.message_added":        ('Ujumbe umeongezwa kwenye tiketi {code} na {user} (viambatisho: {count}).', 'Message added to ticket {code} by {user} (attachments: {count}).'),
+    "ticket.attachments_uploaded": ('Viambatisho {count} vimepakiwa kwenye tiketi {code}.', '{count} attachments were uploaded to ticket {code}.'),
+    "ticket.status_changed":       ('Hali ya tiketi {code} imebadilishwa: {old} → {new}.', 'Status of ticket {code} changed: {old} → {new}.'),
+    "ticket.priority_changed":     ('Kipaumbele cha tiketi {code} kimebadilishwa: {old} → {new}.', 'Priority of ticket {code} changed: {old} → {new}.'),
+    "ticket.assigned":             ('Tiketi {code} imekabidhiwa: {old} → {new}.', 'Ticket {code} was assigned: {old} → {new}.'),
+    "ticket.deleted":              ('Tiketi {code} imefutwa.', 'Ticket {code} was deleted.'),
+
+    # ============================================================
+    # PATCH 2 TEMPLATES
+    # ============================================================
+    # Fees (mpya)
+    "fee.created": ('Ada "{name}" imeundwa.', 'Fee "{name}" was created.'),
+    "fee.deleted": ('Ada "{name}" imefutwa.', 'Fee "{name}" was deleted.'),
+    # Trash (mpya)
+    "trash.refunds_created": ('Marejesho {count} yameundwa kwa "{name}": {items}', 'Created {count} refund(s) for "{name}": {items}'),
+    "trash.cascade_deleted": ('Vitu {count} vinavyohusiana vimefutwa pamoja na "{name}": {items}', 'Cascade-deleted {count} related item(s) with "{name}": {items}'),
+    # core.purge_soft_deleted (imesasishwa — sasa inatumika kwa kitu kimoja)
+    "core.purge_soft_deleted": ('"{name}" imefutwa kabisa baada ya siku {days} kwenye kikapu.', '"{name}" was permanently deleted after {days} days in trash.'),
 }
 
 
@@ -117,11 +153,8 @@ def _client_ip(request):
 
 def _split_details(details, details_sw, details_en):
     """
-    `details` inaweza kuwa:
-      - str                      -> logs za zamani (lugha moja)
-      - {"sw": "...", "en": ...} -> logs mpya (lugha mbili)
-    Inarudisha (legacy, sw, en). `legacy` daima ina kitu (sw -> en -> str ya zamani)
-    ili utafutaji na clients za zamani ziendelee kufanya kazi.
+    Inarudisha (legacy, sw, en).
+    Inashughulikia kama `details` ni dict au string ya kawaida.
     """
     if isinstance(details, dict):
         details_sw = details_sw or details.get("sw") or ""
@@ -155,6 +188,11 @@ def log_action(*, request, action, target="", target_id=None,
         if rendered:
             details_sw, details_en = rendered
             details = ""
+        else:
+            logger.warning(
+                "audit: action=%r haipo kwenye AUDIT_TEMPLATES; maelezo yamepotea.",
+                action,
+            )
 
     legacy, d_sw, d_en = _split_details(details, details_sw, details_en)
 
@@ -166,6 +204,7 @@ def log_action(*, request, action, target="", target_id=None,
         )
     elif not legacy and not params and action in AUDIT_TEMPLATES:
         logger.info("audit: action=%r haina maelezo (params hazikutolewa).", action)
+
     return AuditLog.objects.create(
         action=action,
         admin_user=user,

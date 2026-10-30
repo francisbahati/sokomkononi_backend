@@ -4,7 +4,7 @@
 # Marekebisho:
 #  - Ongeza bulk() action — enable/disable/mark_popular/
 #    unmark_popular/delete kwa categories nyingi kwa wakati mmoja
-#  - Audit log: category.bulk_<action>
+#  - Audit log: category.bulk_<action> (sasa na params=)
 # ============================================================
 import uuid
 
@@ -42,7 +42,7 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 # ============================================================
 # AUDIT LOG HELPER
 # ============================================================
-def _log(request, action, target="", target_id=None, details=""):
+def _log(request, action, target="", target_id=None, details="", params=None):
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -51,6 +51,7 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         import logging
@@ -106,15 +107,13 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         if response.status_code == status.HTTP_201_CREATED:
             data = response.data or {}
+            # ✅ Tumia params
             _log(
                 request,
                 action="category.created",
                 target="Category",
                 target_id=data.get("id"),
-                details=(
-                    f"Created category: "
-                    f"{data.get('name') or data.get('slug') or '—'}"
-                ),
+                params={"name": data.get("name") or data.get("slug") or "—"},
             )
 
         return response
@@ -131,12 +130,13 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             status.HTTP_200_OK,
             status.HTTP_202_ACCEPTED,
         ):
+            # ✅ Tumia params
             _log(
                 request,
                 action="category.updated",
                 target="Category",
                 target_id=instance.id,
-                details=f"Updated category: {old_name}",
+                params={"name": old_name},
             )
 
         return response
@@ -150,12 +150,13 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             status.HTTP_200_OK,
             status.HTTP_202_ACCEPTED,
         ):
+            # ✅ Tumia params
             _log(
                 request,
                 action="category.updated",
                 target="Category",
                 target_id=instance.id,
-                details=f"Updated category (partial): {old_name}",
+                params={"name": old_name},
             )
 
         return response
@@ -175,15 +176,13 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             status.HTTP_204_NO_CONTENT,
             status.HTTP_200_OK,
         ):
+            # ✅ Tumia params
             _log(
                 request,
                 action="category.deleted",
                 target="Category",
                 target_id=cat_id,
-                details=(
-                    f"Deleted category: {cat_name} "
-                    f"(slug={cat_slug})"
-                ),
+                params={"name": f"{cat_name} (slug={cat_slug})"},
             )
 
         return response
@@ -272,15 +271,16 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # ✅ Tumia details={"sw","en"} kwa sababu action ni dynamic
         _log(
             request,
             action=f"category.bulk_{action_name}",
             target="Category",
             target_id=None,
-            details=(
-                f"Bulk {action_name} on {count} categories "
-                f"(ids={clean_ids[:20]})"
-            ),
+            details={
+                "sw": f"Kategoria {count} zimefanyiwa '{action_name}' (ids={clean_ids[:20]})",
+                "en": f"Bulk {action_name} on {count} categories (ids={clean_ids[:20]})",
+            },
         )
 
         return Response({
@@ -368,12 +368,16 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 cat.save(update_fields=["ordering"])
                 updated += 1
 
+        # ✅ Tumia details={"sw","en"} — au unaweza kuongeza template kama unataka
         _log(
             request,
             action="category.reordered",
             target="Category",
             target_id=None,
-            details=f"Reordered {updated} categories",
+            details={
+                "sw": f"Kategoria {updated} zimepangwa upya.",
+                "en": f"Reordered {updated} categories.",
+            },
         )
 
         return Response({

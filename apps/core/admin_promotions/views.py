@@ -112,7 +112,6 @@ class AdminPromotionActionView(APIView):
             obj.admin_note = reason
             obj.save(update_fields=["paused_by_admin", "admin_note", "updated_at"])
         else:
-            # Fallback kwa models zisizo na fields hizi
             if hasattr(obj, "active"):
                 obj.active = False
                 obj.save(update_fields=["active"])
@@ -125,7 +124,10 @@ class AdminPromotionActionView(APIView):
             action=f"promotion.{type}.paused",
             target=type.capitalize(),
             target_id=obj.pk,
-            details=f"Paused {type} #{obj.pk}. Reason: {reason or '—'}",
+            details={
+                "sw": f"{type.capitalize()} #{obj.pk} imesimamishwa. Sababu: {reason or '—'}",
+                "en": f"Paused {type} #{obj.pk}. Reason: {reason or '—'}",
+            },
         )
 
         return Response({
@@ -155,7 +157,10 @@ class AdminPromotionActionView(APIView):
             action=f"promotion.{type}.resumed",
             target=type.capitalize(),
             target_id=obj.pk,
-            details=f"Resumed {type} #{obj.pk}. Note: {note or '—'}",
+            details={
+                "sw": f"{type.capitalize()} #{obj.pk} imewashwa tena. Maelezo: {note or '—'}",
+                "en": f"Resumed {type} #{obj.pk}. Note: {note or '—'}",
+            },
         )
 
         return Response({
@@ -179,7 +184,6 @@ class AdminPromotionActionView(APIView):
             obj.admin_note = reason
         obj.save()
 
-        # Refund — kama admin amechagua
         if refund:
             try:
                 from apps.payments.refunds import refund_promotion
@@ -195,10 +199,18 @@ class AdminPromotionActionView(APIView):
             action=f"promotion.{type}.cancelled",
             target=type.capitalize(),
             target_id=obj.pk,
-            details=(
-                f"Cancelled {type} #{obj.pk}. "
-                f"Refund: {refund}. Reason: {reason or '—'}"
-            ),
+            details={
+                "sw": (
+                    f"{type.capitalize()} #{obj.pk} imefutwa. "
+                    f"Marejesho: {'ndiyo' if refund else 'hapana'}. "
+                    f"Sababu: {reason or '—'}"
+                ),
+                "en": (
+                    f"Cancelled {type} #{obj.pk}. "
+                    f"Refund: {'yes' if refund else 'no'}. "
+                    f"Reason: {reason or '—'}"
+                ),
+            },
         )
 
         return Response({

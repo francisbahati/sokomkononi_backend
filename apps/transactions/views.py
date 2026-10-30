@@ -65,11 +65,11 @@ from .services.transaction import (
 # PERMISSION
 # ============================================================================
 
-def _log(request, action, target="", target_id=None, details=""):
+def _log(request, action, target="", target_id=None, details="", params=None):
     try:
         from apps.audit.services.audit import log_action
         log_action(request=request, action=action, target=target,
-                   target_id=target_id, details=details)
+                   target_id=target_id, details=details, params=params)
     except Exception:
         import logging; logging.getLogger(__name__).exception("audit failed: %s", action)
 
@@ -384,7 +384,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ============================================================
+        # ============================================================
     # REJECT PAYMENT PROOF (seller) — MPYA
     # ============================================================
     @action(detail=True, methods=["post"], url_path="reject-payment-proof")
@@ -411,12 +411,13 @@ class TransactionViewSet(viewsets.GenericViewSet):
             reason=reason,
         )
 
+        # ✅ Tumia params
         _log(
             request,
             action="transaction.payment_proof_rejected",
             target="Transaction",
             target_id=updated_transaction.id,
-            details=f"reason={(reason or '')[:200]}",
+            params={"name": f"Transaction #{updated_transaction.id}", "reason": reason[:200]},
         )
 
         return Response(
@@ -465,8 +466,18 @@ class TransactionViewSet(viewsets.GenericViewSet):
             transaction=transaction, admin_user=request.user,
             resolution=resolution, note=note,
         )
-        _log(request, "transaction.dispute_resolved", "Transaction",
-             transaction.id, f"resolution={resolution} note={(note or '')[:200]}")
+        
+        # ✅ Tumia details={"sw","en"}
+        _log(
+            request,
+            action="transaction.dispute_resolved",
+            target="Transaction",
+            target_id=transaction.id,
+            details={
+                "sw": f"Mgogoro wa Transaction #{transaction.id} umetatuliwa: resolution={resolution}, note={note[:200]}",
+                "en": f"Dispute for Transaction #{transaction.id} resolved: resolution={resolution}, note={note[:200]}",
+            },
+        )
 
         return Response(
             TransactionDetailSerializer(
@@ -489,8 +500,15 @@ class TransactionViewSet(viewsets.GenericViewSet):
             raise ValidationError("Transaction hii haina Reservation.")
 
         reservation = expire_reservation(reservation=reservation)
-        _log(request, "reservation.expired", "Reservation",
-             reservation.id, f"Transaction #{transaction.id}")
+        
+        # ✅ Tumia params
+        _log(
+            request,
+            action="reservation.expired",
+            target="Reservation",
+            target_id=reservation.id,
+            params={"name": f"Reservation #{reservation.id} (Transaction #{transaction.id})"},
+        )
 
         return Response(
             ReservationSerializer(
@@ -513,8 +531,15 @@ class TransactionViewSet(viewsets.GenericViewSet):
             raise ValidationError("Transaction hii haina Inspection Period.")
 
         inspection = expire_inspection_period(inspection=inspection)
-        _log(request, "inspection.expired", "InspectionPeriod",
-             inspection.id, f"Transaction #{transaction.id}")
+        
+        # ✅ Tumia params
+        _log(
+            request,
+            action="inspection.expired",
+            target="InspectionPeriod",
+            target_id=inspection.id,
+            params={"name": f"Inspection #{inspection.id} (Transaction #{transaction.id})"},
+        )
 
         return Response(
             InspectionPeriodSerializer(
@@ -581,16 +606,18 @@ class TransactionViewSet(viewsets.GenericViewSet):
                 )
 
         reservation = Reservation.objects.get(pk=reservation.pk)
+        
+        # ✅ Tumia params
         _log(
             request,
             action="reservation.extended",
             target="Reservation",
             target_id=reservation.id,
-            details=(
-                f"Reservation #{reservation.id} extended by "
-                f"{extension.additional_hours}h (fee TZS {extension.fee}) "
-                f"for Transaction #{transaction.id}"
-            ),
+            params={
+                "name": f"Reservation #{reservation.id}",
+                "hours": extension.additional_hours,
+                "fee": str(extension.fee),
+            },
         )
 
         return Response(
@@ -618,15 +645,15 @@ class TransactionViewSet(viewsets.GenericViewSet):
 
         reservation = remove_reservation_by_buyer(reservation=reservation)
 
+        # ✅ Tumia params
         _log(
             request,
             action="reservation.removed_by_buyer",
             target="Reservation",
             target_id=reservation.id,
-            details=(
-                f"Reservation #{reservation.id} removed by buyer "
-                f"for Transaction #{transaction.id}"
-            ),
+            params={
+                "name": f"Reservation #{reservation.id} (Transaction #{transaction.id})",
+            },
         )
 
         return Response(

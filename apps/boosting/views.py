@@ -35,7 +35,7 @@ from .services.boost import (
 # ============================================================
 # AUDIT LOG HELPER
 # ============================================================
-def _log(request, action, target="", target_id=None, details=""):
+def _log(request, action, target="", target_id=None, details="", params=None):
     """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
     try:
         from apps.audit.services.audit import log_action
@@ -45,6 +45,7 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         import logging
@@ -104,11 +105,7 @@ class BoostPackageViewSet(
                 action="fee.created",
                 target="BoostPackage",
                 target_id=data.get("id"),
-                details=(
-                    f"Created boost package: "
-                    f"{data.get('name') or '—'} "
-                    f"(price: {data.get('price') or 0})"
-                ),
+                params={"name": data.get("name") or "—"},
             )
 
         return response
@@ -130,10 +127,10 @@ class BoostPackageViewSet(
                 action="fee.updated",
                 target="BoostPackage",
                 target_id=instance.id,
-                details=(
-                    f"Updated boost package: "
-                    f"{instance.name or '—'} ({diff})"
-                ),
+                details={
+                    "sw": f"Kifurushi cha boost '{instance.name or '—'}' kimebadilishwa ({diff})",
+                    "en": f"Updated boost package '{instance.name or '—'}' ({diff})",
+                },
             )
 
         return response
@@ -155,10 +152,10 @@ class BoostPackageViewSet(
                 action="fee.updated",
                 target="BoostPackage",
                 target_id=instance.id,
-                details=(
-                    f"Updated boost package: "
-                    f"{instance.name or '—'} ({diff})"
-                ),
+                details={
+                    "sw": f"Kifurushi cha boost '{instance.name or '—'}' kimebadilishwa ({diff})",
+                    "en": f"Updated boost package '{instance.name or '—'}' ({diff})",
+                },
             )
 
         return response
@@ -180,7 +177,7 @@ class BoostPackageViewSet(
                 action="fee.deleted",
                 target="BoostPackage",
                 target_id=pkg_id,
-                details=f"Deleted boost package: {pkg_name}",
+                params={"name": pkg_name},
             )
 
         return response
@@ -203,6 +200,7 @@ class BoostPackageViewSet(
         return ", ".join(changes) if changes else "no change"
 
 
+# ✅ HAPA NDIPO ILIPOONDOLEWA KWENYE DARASA LA BoostPackageViewSet
 class BoostFeeConfigView(APIView):
     """
     GET   /boosting/fee-config/  -> anyone: is the boost fee enabled?
@@ -241,10 +239,10 @@ class BoostFeeConfigView(APIView):
                 action="fee.updated",
                 target="BoostFeeConfig",
                 target_id=obj.id,
-                details=(
-                    f"Boost fee toggle: "
-                    f"is_active: {old_state} → {new_state}"
-                ),
+                details={
+                    "sw": f"Ada ya boost {'imewashwa' if new_state else 'imezimwa'}.",
+                    "en": f"Boost fee {'enabled' if new_state else 'disabled'}.",
+                },
             )
 
         return Response(serializer.data)

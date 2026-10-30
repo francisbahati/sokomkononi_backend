@@ -11,12 +11,6 @@ from .serializers_fee_rules import ListingFeeRuleSerializer
 
 
 class FeeRulePagination(PageNumberPagination):
-    """
-    Frontend inaomba /fee-rules/?page_size=200. Bila page_size_query_param,
-    DRF inapuuza parameter hiyo na kurudisha rules 20 tu — rules za
-    kategoria mpya (zilizo mwishoni) hazionekani, na kujaribu kuziongeza
-    kunaleta 400 DUPLICATE_ACTIVE_RULE.
-    """
     page_size = 100
     page_size_query_param = "page_size"
     max_page_size = 500
@@ -32,7 +26,9 @@ class IsAdminOrReadOnly(permissions.BasePermission):
             and request.user.is_staff
         )
 
-def _log(request, action, target="", target_id=None, details=""):
+
+# ✅ Ongeza params=None kwenye signature
+def _log(request, action, target="", target_id=None, details="", params=None):
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -41,12 +37,14 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         import logging
         logging.getLogger(__name__).exception(
             "Failed to write audit log: %s", action,
         )
+
 
 class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     serializer_class = ListingFeeRuleSerializer
@@ -109,12 +107,13 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             or data.get("category")
             or "—"
         )
+        # ✅ Tumia params
         _log(
             request,
             action="fee.created",
             target="ListingFeeRule",
             target_id=data.get("id"),
-            details=f"Created listing fee rule: {name}",
+            params={"name": name},
         )
 
         return response
@@ -153,16 +152,24 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         instance.refresh_from_db()
         diff = self._diff(old_snapshot, self._snapshot(instance))
+        # ✅ Tumia details={"sw","en"} kwa sababu diff ni ya kiufundi
         _log(
             request,
             action="fee.updated",
             target="ListingFeeRule",
             target_id=instance.id,
-            details=(
-                f"Updated listing fee rule: "
-                f"{instance.name or instance.category_slug or '—'} "
-                f"({diff})"
-            ),
+            details={
+                "sw": (
+                    f"Kanuni ya ada ya tangazo "
+                    f"'{instance.name or instance.category_slug or '—'}' "
+                    f"imebadilishwa ({diff})"
+                ),
+                "en": (
+                    f"Updated listing fee rule: "
+                    f"{instance.name or instance.category_slug or '—'} "
+                    f"({diff})"
+                ),
+            },
         )
 
         return Response(serializer.data)
@@ -188,12 +195,13 @@ class ListingFeeRuleViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             drf_status.HTTP_204_NO_CONTENT,
             drf_status.HTTP_200_OK,
         ):
+            # ✅ Tumia params
             _log(
                 request,
                 action="fee.deleted",
                 target="ListingFeeRule",
                 target_id=rule_id,
-                details=f"Deleted listing fee rule: {rule_name}",
+                params={"name": rule_name},
             )
 
         return response

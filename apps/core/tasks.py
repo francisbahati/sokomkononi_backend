@@ -33,13 +33,30 @@ def _audit_purge(model, obj):
     """Write an AuditLog entry before a hard-delete via the purge task."""
     try:
         from apps.audit.models import AuditLog
+        from apps.audit.services.audit import render_details
+
+        # ✅ Tumia render_details kupata lugha mbili
+        rendered = render_details(
+            "core.purge_soft_deleted",
+            {
+                "name": f"{model.__name__}#{obj.pk}",
+                "days": SOFT_DELETE_RETENTION_DAYS,
+            },
+        )
+        d_sw, d_en = rendered or (
+            f"Imefutwa kabisa baada ya siku {SOFT_DELETE_RETENTION_DAYS} kwenye kikapu.",
+            f"Hard-deleted after {SOFT_DELETE_RETENTION_DAYS} days in trash.",
+        )
+        
         AuditLog.objects.create(
             action="core.purge_soft_deleted",
             admin_user=None,
             admin_name="system",
             target=model.__name__,
             target_id=obj.pk,
-            details=f"Hard-deleted after {SOFT_DELETE_RETENTION_DAYS} days in trash.",
+            details=d_sw,          # legacy field (sw)
+            details_sw=d_sw,
+            details_en=d_en,
         )
     except Exception:
         logger.exception(

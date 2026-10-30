@@ -67,12 +67,13 @@ class RoleViewSet(viewsets.GenericViewSet):
         )
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="rbac.role.created",
                 target="Role",
                 target_id=obj.id,
-                details=f"Role: {obj.key}",
+                params={"name": obj.key},
             )
         except Exception:
             pass
@@ -124,7 +125,6 @@ class StaffViewSet(viewsets.GenericViewSet):
     serializer_class = StaffAssignmentSerializer
 
     def get_permissions(self):
-        # Reads: any staff. Writes: superuser only (privilege escalation guard).
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
             return [IsAdminUser()]
         return [IsSuperUser()]
@@ -148,19 +148,18 @@ class StaffViewSet(viewsets.GenericViewSet):
             user=user,
             defaults={"role": role, "active": d.get("active", True)},
         )
-        # Grant admin access so role.permissions can be enforced by
-        # IsAdminUser / IsAdminOrReadOnly checks throughout the codebase.
         if not user.is_staff:
             user.is_staff = True
             user.save(update_fields=["is_staff", "updated_at"])
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="rbac.staff.assigned",
                 target="User",
                 target_id=user.id,
-                details=f"Role: {role.key}",
+                params={"role": role.key, "user": user.name},
             )
         except Exception:
             pass
@@ -189,8 +188,6 @@ class StaffViewSet(viewsets.GenericViewSet):
         obj = get_object_or_404(StaffAssignment, pk=pk)
         user = obj.user
         obj.delete()
-        # Revoke is_staff only if no other active assignment remains
-        # and the user is not a superuser.
         still_active = StaffAssignment.objects.filter(
             user=user, active=True,
         ).exists()

@@ -43,7 +43,7 @@ def generate_ticket_code():
 # ============================================================
 # AUDIT LOG HELPER
 # ============================================================
-def _log(request, action, target="", target_id=None, details=""):
+def _log(request, action, target="", target_id=None, details="", params=None):
     try:
         log_action(
             request=request,
@@ -51,6 +51,7 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         logger.exception("Failed to write audit log: %s", action)
@@ -73,7 +74,6 @@ class TicketViewSet(viewsets.GenericViewSet):
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
-    # ── Rate limit tofauti: user 5/h, admin 100/h ──
     def get_throttles(self):
         if self.request.user.is_staff:
             self.throttle_scope = "support_ticket_admin"
@@ -138,7 +138,6 @@ class TicketViewSet(viewsets.GenericViewSet):
                 user=request.user,
                 user_name=request.user.name,
                 user_email=request.user.email or "",
-                # ── SLA: saa 24 kutoka sasa ──
                 sla_deadline=timezone.now() + timedelta(hours=24),
             )
 
@@ -155,7 +154,6 @@ class TicketViewSet(viewsets.GenericViewSet):
                 text=data["description"],
             )
 
-            # ── Attachments za kwanza (kama zipo) ──
             files = request.FILES.getlist("attachments") or request.FILES.getlist("files")
             for f in files:
                 TicketAttachment.objects.create(
@@ -167,12 +165,13 @@ class TicketViewSet(viewsets.GenericViewSet):
                     uploaded_by_name=request.user.name,
                 )
 
+        # ✅ Tumia params
         _log(
             request,
             action="ticket.created",
             target="Ticket",
             target_id=ticket.id,
-            details=f"Created ticket: {ticket.code} — {ticket.subject}",
+            params={"code": ticket.code, "name": ticket.subject},
         )
 
         return Response(
@@ -217,7 +216,6 @@ class TicketViewSet(viewsets.GenericViewSet):
             text=text or "[attachment]",
         )
 
-        # ── Save attachments ──
         created_attachments = []
         for f in files:
             att = TicketAttachment.objects.create(
@@ -230,22 +228,22 @@ class TicketViewSet(viewsets.GenericViewSet):
             )
             created_attachments.append(att)
 
-        # ── Admin reply → clear SLA reminder flag ──
         if request.user.is_staff:
             ticket.save(update_fields=["updated_at"])
         else:
             ticket.save(update_fields=["updated_at"])
 
+        # ✅ Tumia params
         _log(
             request,
             action="ticket.message_added",
             target="Ticket",
             target_id=ticket.id,
-            details=(
-                f"Message added to {ticket.code} "
-                f"by {request.user.name} "
-                f"(attachments: {len(created_attachments)})"
-            ),
+            params={
+                "code": ticket.code,
+                "user": request.user.name,
+                "count": len(created_attachments),
+            },
         )
 
         return Response(
@@ -288,12 +286,13 @@ class TicketViewSet(viewsets.GenericViewSet):
             )
             created.append(att)
 
+        # ✅ Tumia params
         _log(
             request,
             action="ticket.attachments_uploaded",
             target="Ticket",
             target_id=ticket.id,
-            details=f"Uploaded {len(created)} attachments to {ticket.code}",
+            params={"count": len(created), "code": ticket.code},
         )
 
         return Response(
@@ -324,7 +323,6 @@ class TicketViewSet(viewsets.GenericViewSet):
         new_status = serializer.validated_data["status"]
         old_status = ticket.status
 
-        # ── GUARD: close lazima iwe resolved kwanza ──
         if new_status == Ticket.Status.CLOSED and old_status != Ticket.Status.RESOLVED:
             return Response(
                 {
@@ -341,18 +339,19 @@ class TicketViewSet(viewsets.GenericViewSet):
             ticket.resolved_at = timezone.now()
         ticket.save(update_fields=["status", "resolved_at", "updated_at"])
 
+        # ✅ Tumia params
         _log(
             request,
             action="ticket.status_changed",
             target="Ticket",
             target_id=ticket.id,
-            details=(
-                f"Status changed for {ticket.code}: "
-                f"{old_status} → {new_status}"
-            ),
+            params={
+                "code": ticket.code,
+                "old": old_status,
+                "new": new_status,
+            },
         )
 
-        # ── Notify user ──
         try:
             from apps.notifications.services.notification import create_notification
             from apps.notifications.models import Notification
@@ -393,15 +392,17 @@ class TicketViewSet(viewsets.GenericViewSet):
         ticket.priority = serializer.validated_data["priority"]
         ticket.save(update_fields=["priority", "updated_at"])
 
+        # ✅ Tumia params
         _log(
             request,
             action="ticket.priority_changed",
             target="Ticket",
             target_id=ticket.id,
-            details=(
-                f"Priority changed for {ticket.code}: "
-                f"{old_priority} → {ticket.priority}"
-            ),
+            params={
+                "code": ticket.code,
+                "old": old_priority,
+                "new": ticket.priority,
+            },
         )
 
         return Response(
@@ -433,14 +434,17 @@ class TicketViewSet(viewsets.GenericViewSet):
             "assigned_to", "assigned_to_name", "updated_at",
         ])
 
+        # ✅ Tumia params
         _log(
             request,
             action="ticket.assigned",
             target="Ticket",
             target_id=ticket.id,
-            details=(
-                f"Assigned {ticket.code}: {old_staff} → {staff.name}"
-            ),
+            params={
+                "code": ticket.code,
+                "old": old_staff,
+                "new": staff.name,
+            },
         )
 
         return Response(
@@ -460,12 +464,13 @@ class TicketViewSet(viewsets.GenericViewSet):
         code = obj.code
         obj.delete(by=request.user, reason="Ticket deleted by owner/admin")
 
+        # ✅ Tumia params
         _log(
             request,
             action="ticket.deleted",
             target="Ticket",
             target_id=obj.id,
-            details=f"Deleted ticket: {code}",
+            params={"code": code},
         )
 
         return Response(

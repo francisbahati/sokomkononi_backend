@@ -40,11 +40,6 @@ logger = logging.getLogger(__name__)
 class ListingLocationUpdateView(APIView):
     """
     Update only the location fields of a listing.
-
-    Accepts either:
-        { "latitude": -6.7924, "longitude": 39.2083, "location": "Kariakoo" }
-        { "latitude": -6.7924, "longitude": 39.2083, "address_text": "..." }
-        { "location": "Kariakoo, Dar es Salaam" }   (no coords — just text)
     """
     permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
@@ -87,12 +82,16 @@ class ListingLocationUpdateView(APIView):
         # Log
         try:
             from apps.core.audit import log_admin_action
+            # ✅ Tumia details={"sw","en"}
             log_admin_action(
                 request=request,
                 action="listing.location_updated",
                 target="Listing",
                 target_id=listing.id,
-                details=f"lat={listing.latitude} lng={listing.longitude}",
+                details={
+                    "sw": f"Eneo la tangazo limebadilishwa: lat={listing.latitude} lng={listing.longitude}",
+                    "en": f"Listing location updated: lat={listing.latitude} lng={listing.longitude}",
+                },
             )
         except Exception:
             logger.exception("audit log failed for location update")
@@ -111,10 +110,6 @@ class ListingLocationUpdateView(APIView):
 class ListingImagesBulkUploadView(APIView):
     """
     Upload multiple images at once.
-
-    multipart/form-data:
-        images = [file, file, file, ...]
-        is_primary_first = "true" (default: true)
     """
     permission_classes = [
         permissions.IsAuthenticated,
@@ -194,21 +189,6 @@ class ListingImagesBulkUploadView(APIView):
 class ListingCreateWithImagesView(APIView):
     """
     Create a listing + images in a single multipart request.
-
-    multipart/form-data:
-        category      = <id>
-        title         = "..."
-        description   = "..."
-        price         = "350000000"
-        location      = "Mikocheni, Dar es Salaam"
-        latitude      = "-6.7710"       (optional)
-        longitude     = "39.2338"       (optional)
-        address_text  = "..."           (optional)
-        attributes    = '{"bedrooms": 4}'  (optional JSON string)
-        images        = [file, file, ...]  (up to 10, first is primary)
-
-    Response:
-        Full ListingDetailSerializer + payment block
     """
     permission_classes = [permissions.IsAuthenticated, IsVerifiedUser]
     parser_classes = [MultiPartParser, FormParser, JSONParser]

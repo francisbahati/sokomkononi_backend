@@ -33,7 +33,8 @@ class AdminUserPagination(PageNumberPagination):
     max_page_size = 100
 
 
-def _log(request, action, target="", target_id=None, details=""):
+# ✅ Ongeza params=None kwenye signature
+def _log(request, action, target="", target_id=None, details="", params=None):
     """Helper — ina-logi admin action bila kuvunja request kama log inashindwa."""
     try:
         from apps.audit.services.audit import log_action
@@ -43,6 +44,7 @@ def _log(request, action, target="", target_id=None, details=""):
             target=target,
             target_id=target_id,
             details=details,
+            params=params,
         )
     except Exception:
         logger.exception("Failed to write audit log: %s", action)
@@ -77,7 +79,6 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         )
         has_deals = DealRoom.objects.filter(buyer=OuterRef("pk"))
 
-        # ⬇️ Verified = kuna VerificationRequest ya APPROVED
         has_verified = VerificationRequest.objects.filter(
             user=OuterRef("pk"),
             status=VerificationRequest.Status.APPROVED,
@@ -86,7 +87,7 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         qs = qs.annotate(
             _has_listings=Exists(has_listings),
             _has_deals=Exists(has_deals),
-            _has_verified=Exists(has_verified),  # ⬅️ MPYA
+            _has_verified=Exists(has_verified),
         )
 
         q = self.request.query_params.get("q")
@@ -119,7 +120,6 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         elif status_filter == "suspended":
             qs = qs.filter(is_active=False)
 
-        # ⬇️ Filter kwa VerificationRequest, sio User.is_verified
         if verified_filter == "verified":
             qs = qs.filter(_has_verified=True)
         elif verified_filter == "unverified":
@@ -179,16 +179,16 @@ class AdminUserViewSet(viewsets.GenericViewSet):
             updates.append("updated_at")
             user.save(update_fields=updates)
 
+            # ✅ Tumia params
             _log(
                 request,
                 action="user.updated",
                 target="User",
                 target_id=user.id,
-                details=(
-                    f"Updated {user.name} "
-                    f"({user.email or user.deleted_email or '—'}): "
-                    f"fields={', '.join(changed_fields) or 'none'}"
-                ),
+                params={
+                    "name": f"{user.name} ({user.email or user.deleted_email or '—'})",
+                    "fields": ", ".join(changed_fields) or "—",
+                },
             )
 
         return Response(
@@ -212,12 +212,13 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user_email = user.email or user.deleted_email or "—"
         user.delete(by=request.user, reason="Admin deleted")
 
+        # ✅ Tumia params
         _log(
             request,
             action="user.deleted",
             target="User",
             target_id=user.id,
-            details=f"Soft-deleted user: {user_name} ({user_email})",
+            params={"name": f"{user_name} ({user_email})"},
         )
 
         return Response(
@@ -270,16 +271,16 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         except Exception:
             logger.exception("Failed to send suspension email to %s", user.id)
 
-        # ── Audit log ───────────────────────────────────────
+        # ✅ Tumia params
         _log(
             request,
             action="user.suspended",
             target="User",
             target_id=user.id,
-            details=(
-                f"Suspended user: {user.name} "
-                f"({user.email or '—'}) | Reason: {reason}"
-            ),
+            params={
+                "name": f"{user.name} ({user.email or '—'})",
+                "reason": reason,
+            },
         )
 
         return Response({"detail": "Mtumiaji amesimamishwa."})
@@ -298,12 +299,13 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user.is_active = True
         user.save(update_fields=["is_active", "updated_at"])
 
+        # ✅ Tumia params
         _log(
             request,
             action="user.activated",
             target="User",
             target_id=user.id,
-            details=f"Activated user: {user.name} ({user.email or '—'})",
+            params={"name": f"{user.name} ({user.email or '—'})"},
         )
 
         return Response({"detail": "Mtumiaji amewashwa."})
@@ -322,12 +324,13 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         user.is_verified = True
         user.save(update_fields=["is_verified", "updated_at"])
 
+        # ✅ Tumia params
         _log(
             request,
             action="user.verified",
             target="User",
             target_id=user.id,
-            details=f"Verified user: {user.name} ({user.email or '—'})",
+            params={"name": f"{user.name} ({user.email or '—'})"},
         )
 
         return Response({"detail": "Mtumiaji amethibitishwa."})
@@ -344,9 +347,6 @@ class AdminUserViewSet(viewsets.GenericViewSet):
     def permanent_delete(self, request, pk=None):
         """
         Hard delete user — HAIRUDISHWI.
-
-        Body (JSON):
-            { "reason": "...", "confirm_text": "DELETE" }
         """
         user = self._get_user(pk)
         if not user:
@@ -367,7 +367,6 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # ── Validate reason + confirm_text ──────────────────
         data = request.data or {}
         reason = (data.get("reason") or "").strip()
         confirm_text = (data.get("confirm_text") or "").strip()
@@ -384,12 +383,10 @@ class AdminUserViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── Capture data kabla ya kufuta ────────────────────
         user_id = user.id
         user_email = user.email or user.deleted_email or "—"
         user_name = user.name
 
-        # ── Send email (kabla ya kufuta — email inahitajika) ─
         try:
             from apps.accounts.email_service import send_account_deleted_email
             send_account_deleted_email(
@@ -400,22 +397,18 @@ class AdminUserViewSet(viewsets.GenericViewSet):
         except Exception:
             logger.exception("Failed to send deletion email to %s", user_id)
 
-        # ── Hard delete ─────────────────────────────────────
         try:
             user.hard_delete()
         except AttributeError:
             user.delete(by=request.user, reason=reason)
 
-        # ── Audit log ───────────────────────────────────────
+        # ✅ Tumia params
         _log(
             request,
             action="user.permanent_deleted",
             target="User",
             target_id=user_id,
-            details=(
-                f"Permanently deleted user: {user_name} ({user_email}) "
-                f"| Reason: {reason}"
-            ),
+            params={"name": f"{user_name} ({user_email})", "reason": reason},
         )
 
         return Response(

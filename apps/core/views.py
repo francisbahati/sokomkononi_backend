@@ -9,7 +9,8 @@ from .constants import AUDIT_PROTECTED_MODEL_NAMES  # kept for compat
 from .models import SoftDeleteModel
 
 
-def _audit(request, action, model, pk, details):
+# ✅ Wrapper imebadilishwa kupokea params=None
+def _audit(request, action, model, pk, details="", params=None):
     try:
         from apps.audit.services.audit import log_action
         log_action(
@@ -18,6 +19,7 @@ def _audit(request, action, model, pk, details):
             target=model.__name__,
             target_id=pk,
             details=details,
+            params=params,
         )
     except Exception:
         import logging
@@ -92,10 +94,6 @@ _LISTING_RELATED_TABLES = [
 
 
 def _cleanup_listing_relations(listing_id):
-    """
-    Futa related records za listing kwa SQL moja kwa moja.
-    Returns: list[str] ya items zilizofutwa (kwa audit).
-    """
     import logging
     log = logging.getLogger(__name__)
     removed = []
@@ -175,15 +173,6 @@ def _cleanup_listing_relations(listing_id):
 
 
 def _create_refunds_for_listing(listing, admin_user):
-    """
-    Unda refund kwa promotions zilizolipiwa za listing hili
-    ambazo bado zina muda. Returns: list[str] ya refunds zilizoundwa.
-
-    NOTE: Inatumia `Refund` kutoka `apps.payments.models` — fields
-    zake ni tofauti na nilizopendekeza awali (promotion_type ni
-    uppercase, kuna user_phone, user_email, user_payment_method,
-    amount_refunded, method, processed_by).
-    """
     import logging
     log = logging.getLogger(__name__)
     created = []
@@ -197,7 +186,6 @@ def _create_refunds_for_listing(listing, admin_user):
 
         now = timezone.now()
 
-        # ── Boosts zilizolipiwa na bado zina muda ──────────
         boosts = ListingBoost.objects.filter(
             listing=listing,
             payment_status="PAID",
@@ -228,7 +216,6 @@ def _create_refunds_for_listing(listing, admin_user):
                 refund.pk, boost.pk,
             )
 
-        # ── Leadings zilizolipiwa na bado zina muda ────────
         leadings = ListingLeading.objects.filter(
             listing=listing,
             payment_status=ListingLeading.PaymentStatus.PAID,
@@ -259,7 +246,6 @@ def _create_refunds_for_listing(listing, admin_user):
                 refund.pk, leading.pk,
             )
 
-        # ── Advertisements zilizolipiwa na bado zina muda ──
         banners = BannerAd.objects.filter(
             listing=listing,
             payment_status="PAID",
@@ -297,10 +283,6 @@ def _create_refunds_for_listing(listing, admin_user):
 
 
 def _cascade_protected(obj, max_depth=5):
-    """
-    Futa related objects zinazozuia `obj` kufutwa (PROTECT FK).
-    Returns: (success: bool, removed: list[str], error: str|None)
-    """
     import logging
     log = logging.getLogger(__name__)
 
@@ -513,9 +495,10 @@ class TrashRestoreView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         obj.restore()
+        # ✅ Tumia params
         _audit(
             request, "trash.restored", model, obj.pk,
-            f"Restored {model.__name__}#{obj.pk}",
+            params={"name": f"{model.__name__}#{obj.pk}"},
         )
         return Response({"detail": "Imerejeshwa."})
 
@@ -543,9 +526,10 @@ class TrashPermanentDeleteView(APIView):
 
         try:
             with transaction.atomic():
+                # ✅ Tumia params
                 _audit(
                     request, "trash.hard_deleted", model, obj.pk,
-                    f"Hard-deleted {model.__name__}#{obj.pk} [FORCED]",
+                    params={"name": f"{model.__name__}#{obj.pk}"},
                 )
 
                 if model.__name__ == "Listing":
@@ -553,10 +537,14 @@ class TrashPermanentDeleteView(APIView):
                         obj, request.user
                     )
                     if refunds_created:
+                        # ✅ Tumia params kwa refunds
                         _audit(
                             request, "trash.refunds_created", model, obj.pk,
-                            f"Created {len(refunds_created)} refund(s): "
-                            + ", ".join(refunds_created[:10]),
+                            params={
+                                "name": f"{model.__name__}#{obj.pk}",
+                                "count": len(refunds_created),
+                                "items": ", ".join(refunds_created[:10]),
+                            },
                         )
 
                 ok, removed, err = _cascade_protected(obj)
@@ -573,10 +561,14 @@ class TrashPermanentDeleteView(APIView):
                         status=status.HTTP_409_CONFLICT,
                     )
                 if removed:
+                    # ✅ Tumia params kwa cascade
                     _audit(
                         request, "trash.cascade_deleted", model, obj.pk,
-                        f"Cascade-deleted {len(removed)} related: "
-                        + ", ".join(removed[:10]),
+                        params={
+                            "name": f"{model.__name__}#{obj.pk}",
+                            "count": len(removed),
+                            "items": ", ".join(removed[:10]),
+                        },
                     )
         except ProtectedError as e:
             return Response(
@@ -622,9 +614,13 @@ class TrashEmptyByTypeView(APIView):
         for obj in model.all_objects.filter(is_deleted=True).iterator():
             try:
                 with transaction.atomic():
+                    # ✅ Tumia details={"sw","en"} kwa muktadha wa "empty-by-type"
                     _audit(
                         request, "trash.hard_deleted", model, obj.pk,
-                        f"Empty-by-type: {model.__name__}#{obj.pk} [FORCED]",
+                        details={
+                            "sw": f"Kufuta kikapu cha aina: {model.__name__}#{obj.pk} kimefutwa kabisa [KWA NGUVU]",
+                            "en": f"Empty-by-type: {model.__name__}#{obj.pk} [FORCED]",
+                        },
                     )
 
                     if model.__name__ == "Listing":
@@ -637,9 +633,14 @@ class TrashEmptyByTypeView(APIView):
                         protected_objs.extend(removed[:5] or [err])
                         continue
                     if removed:
+                        # ✅ Tumia params kwa cascade
                         _audit(
                             request, "trash.cascade_deleted", model, obj.pk,
-                            f"Cascade-deleted {len(removed)} related",
+                            params={
+                                "name": f"{model.__name__}#{obj.pk}",
+                                "count": len(removed),
+                                "items": ", ".join(removed[:10]),
+                            },
                         )
                 deleted += 1
             except ProtectedError as e:
@@ -683,9 +684,13 @@ class TrashEmptyAllView(APIView):
             for obj in model.all_objects.filter(is_deleted=True).iterator():
                 try:
                     with transaction.atomic():
+                        # ✅ Tumia details={"sw","en"} kwa muktadha wa "empty-all"
                         _audit(
                             request, "trash.hard_deleted", model, obj.pk,
-                            f"Empty-all: {model.__name__}#{obj.pk} [FORCED]",
+                            details={
+                                "sw": f"Kufuta kikapu chote: {model.__name__}#{obj.pk} kimefutwa kabisa [KWA NGUVU]",
+                                "en": f"Empty-all: {model.__name__}#{obj.pk} [FORCED]",
+                            },
                         )
 
                         if model.__name__ == "Listing":

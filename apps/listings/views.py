@@ -487,7 +487,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         listing = self.get_object()
         self.check_object_permissions(request, listing)
 
-        # ⬅️ ONGEZA PENDING_PAYMENT
         if listing.status not in (
             Listing.Status.DRAFT,
             Listing.Status.PENDING_PAYMENT,
@@ -570,12 +569,16 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.disapproved",
                 target="Listing",
                 target_id=listing.id,
-                details=f"Disapproved: {listing.title}",
+                params={
+                    "name": listing.title,
+                    "reason": listing.rejection_reason,
+                },
             )
         except Exception:
             pass
@@ -651,7 +654,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Kama tayari SOLD, usifanye kitu
         if listing.status == Listing.Status.SOLD:
             return Response(
                 ListingDetailSerializer(
@@ -660,11 +662,9 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        # ── Badilisha status ────────────────────────────────
         listing.status = Listing.Status.SOLD
         listing.save(update_fields=["status", "updated_at"])
 
-        # ── Notify admins ──────────────────────────────────
         try:
             from apps.notifications.models import Notification
             from apps.notifications.services.notification import (
@@ -698,15 +698,15 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 "Failed to notify admins about sold listing %s", listing.pk,
             )
 
-        # ── Audit log ──────────────────────────────────────
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.marked_sold",
                 target="Listing",
                 target_id=listing.id,
-                details=f'Listing "{listing.title}" marked as SOLD',
+                params={"name": listing.title},
             )
         except Exception:
             pass
@@ -715,7 +715,8 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             ListingDetailSerializer(listing, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
-    # ========================================================================
+
+        # ========================================================================
     # DESTROY - soft delete (default) au hard delete (admin)
     # ========================================================================
     def destroy(self, request, *args, **kwargs):
@@ -822,7 +823,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                         "[listings] deals app not available, skipping"
                     )
 
-                # 4b. Mazungumzo ya wanunuzi (apps.messaging)  ← MPYA
+                # 4b. Mazungumzo ya wanunuzi (apps.messaging)
                 try:
                     from apps.messaging.models import Conversation
 
@@ -1553,9 +1554,6 @@ class ListingFeePaymentView(APIView):
                     "updated_at",
                 ])
 
-                # Admin tayari amekagua (APPROVED_PENDING_PAYMENT) -> anabaki
-                # kuidhinisha mwisho. Awali ilirudi PENDING_APPROVAL na
-                # kusababisha mzunguko usioisha wa "Omba Malipo".
                 listing.status = (
                     Listing.Status.PAID_PENDING_APPROVAL
                     if listing.status == Listing.Status.APPROVED_PENDING_PAYMENT
@@ -1672,8 +1670,7 @@ class ListingFeePaymentView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
-
-# ============================================================================
+    # ============================================================================
 # ADMIN — PENDING LISTINGS
 # ============================================================================
 
@@ -1744,12 +1741,13 @@ class AdminApproveListingView(APIView):
 
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.approved",
                 target="Listing",
                 target_id=listing.id,
-                details=f"Approved: {listing.title}",
+                params={"name": listing.title},
             )
         except Exception:
             pass
@@ -1800,12 +1798,16 @@ class AdminRejectListingView(APIView):
 
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.rejected",
                 target="Listing",
                 target_id=listing.id,
-                details=f"Rejected: {listing.title} | Reason: {serializer.validated_data.get('rejection_reason', '')}",
+                params={
+                    "name": listing.title,
+                    "reason": serializer.validated_data.get("rejection_reason", ""),
+                },
             )
         except Exception:
             pass
@@ -1821,7 +1823,6 @@ class AdminRejectListingView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
 
 # ============================================================================
 # ADMIN — REQUEST EDIT (Chaguo B)
@@ -1858,12 +1859,13 @@ class AdminRequestEditListingView(APIView):
 
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.request_edit",
                 target="Listing",
                 target_id=listing.id,
-                details=f"Requested edit: {listing.title} | Reason: {reason}",
+                params={"name": listing.title, "reason": reason},
             )
         except Exception:
             pass
@@ -1914,12 +1916,13 @@ class AdminRequestPaymentListingView(APIView):
 
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.request_payment",
                 target="Listing",
                 target_id=listing.id,
-                details=f"Requested payment: {listing.title}",
+                params={"name": listing.title},
             )
         except Exception:
             pass
@@ -1967,12 +1970,13 @@ class AdminFinalizeApprovalView(APIView):
 
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.finalize_approved",
                 target="Listing",
                 target_id=listing.id,
-                details=f"Finalized: {listing.title}",
+                params={"name": listing.title},
             )
         except Exception:
             pass
@@ -2148,12 +2152,16 @@ class AdminBulkApproveView(APIView):
                 failed.append({"id": pk, "error": str(exc)})
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.bulk_approved",
                 target="Listing",
                 target_id=None,
-                details=f"Bulk approved {len(succeeded)}: ids={succeeded[:20]}",
+                params={
+                    "count": len(succeeded),
+                    "ids": str(succeeded[:20]),
+                },
             )
         except Exception:
             pass
@@ -2179,12 +2187,16 @@ class AdminBulkRejectView(APIView):
                 failed.append({"id": pk, "error": str(exc)})
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.bulk_rejected",
                 target="Listing",
                 target_id=None,
-                details=f"Bulk rejected {len(succeeded)}: ids={succeeded[:20]}",
+                params={
+                    "count": len(succeeded),
+                    "ids": str(succeeded[:20]),
+                },
             )
         except Exception:
             pass
@@ -2210,12 +2222,16 @@ class AdminBulkDeleteView(APIView):
                 failed.append({"id": pk, "error": str(exc)})
         try:
             from apps.audit.services.audit import log_action
+            # ✅ Tumia params
             log_action(
                 request=request,
                 action="listing.bulk_deleted",
                 target="Listing",
                 target_id=None,
-                details=f"Bulk deleted {len(succeeded)}: ids={succeeded[:20]}",
+                params={
+                    "count": len(succeeded),
+                    "ids": str(succeeded[:20]),
+                },
             )
         except Exception:
             pass

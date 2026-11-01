@@ -53,7 +53,7 @@ def notify_approved(r):
                 notification_type=Notification.NotificationType.ACCOUNT_VERIFIED,
                 title="Uthibitisho wako umeidhinishwa",
                 message=(
-                    f"Ombi lako la {r.type} limeidhinishwa. "
+                    f"Ombi lako la kuthibitishwa kuwa {r.type} limeidhinishwa. "
                     f"Sasa unaweza kufanya biashara kwa uhuru."
                 ),
                 priority=Notification.Priority.HIGH,
@@ -92,7 +92,7 @@ def notify_rejected(r, reason=""):
                 recipient=r.user,
                 notification_type=Notification.NotificationType.GENERAL,
                 title="Uthibitisho umekataliwa",
-                message=f"Ombi lako la {r.type} limekataliwa. Sababu: {reason}",
+                message=f"Ombi lako la kuthibitishwa kuwa {r.type} limekataliwa. Sababu: {reason}",
                 priority=Notification.Priority.HIGH,
                 related_object_type="verification",
                 related_object_id=r.id,

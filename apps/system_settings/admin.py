@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AppStoreLinks, PlatformPolicy, Webhook
+from .models import AppStoreLinks, PlatformPolicy, Webhook, ContactInfo
 
 
 @admin.register(Webhook)
@@ -28,6 +28,17 @@ class PlatformPolicyAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return not PlatformPolicy.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ContactInfo)
+class ContactInfoAdmin(admin.ModelAdmin):
+    list_display = ("email", "phone", "whatsapp", "address", "updated_at")
+
+    def has_add_permission(self, request):
+        return not ContactInfo.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
         return False

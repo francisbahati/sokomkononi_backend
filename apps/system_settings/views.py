@@ -7,11 +7,12 @@ from rest_framework.response import Response
 
 from apps.core.permissions import IsAdminUser  # noqa: E402
 from apps.accounts.models import User
-from .models import AppStoreLinks, PlatformPolicy, Webhook
+from .models import AppStoreLinks, PlatformPolicy, Webhook, ContactInfo
 from .serializers import (
     AppStoreLinksSerializer,
     PlatformPolicySerializer,
     WebhookSerializer,
+    ContactInfoSerializer,
 )
 
 
@@ -98,3 +99,25 @@ class PlatformPolicyView(viewsets.ViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class ContactInfoView(viewsets.ViewSet):
+    serializer_class = ContactInfoSerializer
+
+    def get_permissions(self):
+        if self.action == "list":
+            return [permissions.AllowAny()]
+        return [IsAdminUser()]
+
+    def list(self, request):
+        obj, _ = ContactInfo.objects.get_or_create(pk=1)
+        return Response(ContactInfoSerializer(obj).data)
+
+    def create(self, request):
+        obj, _ = ContactInfo.objects.get_or_create(pk=1)
+        serializer = ContactInfoSerializer(
+            obj, data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(ContactInfoSerializer(obj).data)

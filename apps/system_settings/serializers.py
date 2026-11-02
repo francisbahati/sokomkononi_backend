@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import AppStoreLinks, PlatformPolicy, Webhook
+from .models import AppStoreLinks, PlatformPolicy, Webhook, ContactInfo
 
 
 class WebhookSerializer(serializers.ModelSerializer):
@@ -21,4 +21,11 @@ class PlatformPolicySerializer(serializers.ModelSerializer):
     class Meta:
         model = PlatformPolicy
         fields = ["listing_lifetime_days", "updated_at"]
+        read_only_fields = ["updated_at"]
+
+
+class ContactInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactInfo
+        fields = ["email", "phone", "whatsapp", "address", "updated_at"]
         read_only_fields = ["updated_at"]

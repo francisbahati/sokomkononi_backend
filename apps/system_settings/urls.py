@@ -5,6 +5,7 @@ from .views import (
     AppStoreLinksView,
     PlatformPolicyView,
     WebhookViewSet,
+    ContactInfoView,
 )
 
 # RBAC StaffViewSet is reused so legacy frontends that hit
@@ -32,5 +33,10 @@ urlpatterns = [
         "platform-policy/",
         PlatformPolicyView.as_view({"get": "list", "post": "create"}),
         name="platform-policy",
+    ),
+    path(
+        "contact-info/",
+        ContactInfoView.as_view({"get": "list", "post": "create"}),
+        name="contact-info",
     ),
 ]

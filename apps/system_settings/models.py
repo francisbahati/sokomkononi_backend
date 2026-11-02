@@ -61,3 +61,31 @@ class PlatformPolicy(models.Model):
 
     def __str__(self):
         return "Platform Policy"
+
+
+class ContactInfo(models.Model):
+    def save(self, *a, **k):
+        self.pk = 1
+        super().save(*a, **k)
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    """
+    Singleton (only one row). Enforced via `pk=1` convention.
+    """
+    email = models.EmailField(default="support@sokomkononi.co.tz")
+    phone = models.CharField(max_length=20, default="+255743895038")
+    whatsapp = models.CharField(max_length=20, default="255743895038")
+    address = models.CharField(max_length=255, default="Dar es Salaam, Tanzania")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "contact_info"
+        verbose_name = "Contact Info"
+        verbose_name_plural = "Contact Info"
+
+    def __str__(self):
+        return self.email

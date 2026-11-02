@@ -163,3 +163,45 @@ def notify_deal_room_cancelled(*, deal_room, cancelled_by, reason=""):
             related_object_id=deal_room.id,
             action_url=f"/deals/{deal_room.id}",
         )
+
+
+def notify_deal_room_reopened(*, deal_room, reopened_by, note=""):
+    """
+    Notify the other party that the Deal Room was reopened.
+    The reopener already knows — only the counterparty gets notified.
+    """
+    if reopened_by.id == deal_room.buyer_id:
+        recipient = deal_room.seller
+        reopened_by_role_key = "buyer"
+    else:
+        recipient = deal_room.buyer
+        reopened_by_role_key = "seller"
+
+    lang = user_lang(recipient)
+    with override(lang):
+        reopened_by_role = (
+            _("Mnunuzi") if reopened_by_role_key == "buyer"
+            else _("Muuzaji")
+        )
+
+        message = _(
+            "{role} amefufua Deal Room ya '{title}'. "
+            "Mazungumzo yenu yote yamehifadhiwa — mnaendelea "
+            "kujadiliana kutoka mlipoishia."
+        ).format(
+            role=reopened_by_role,
+            title=deal_room.listing.title,
+        )
+        if note:
+            message += " " + _("Ujumbe: {note}").format(note=note)
+
+        create_notification(
+            recipient=recipient,
+            notification_type=Notification.NotificationType.GENERAL,
+            title=_("Deal Room Imefufuliwa"),
+            message=message,
+            priority=Notification.Priority.HIGH,
+            related_object_type="DealRoom",
+            related_object_id=deal_room.id,
+            action_url=f"/deals/{deal_room.id}",
+        )

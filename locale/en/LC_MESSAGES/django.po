@@ -5,8 +5,8 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: SokoMkononi 1.0\n"
-"Report-Msgid-Bugs-To: support@sokomkononi.co.tz\n"
-"POT-Creation-Date: 2026-11-02 00:55-0800\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-02 02:13-0800\n"
 "PO-Revision-Date: 2026-11-02 00:00+0300\n"
 "Last-Translator: SokoMkononi Team <support@sokomkononi.co.tz>\n"
 "Language-Team: English\n"
@@ -45,10 +45,12 @@ msgid "SokoMkononi — Akaunti yako imesimamishwa"
 msgstr "SokoMkononi — Your account has been suspended"
 
 #: .\apps\accounts\email_service.py:179 .\apps\accounts\email_service.py:211
+#: .\apps\transactions\services\notifications.py:191
 msgid "Muuzaji"
 msgstr "Seller"
 
 #: .\apps\accounts\email_service.py:180 .\apps\accounts\email_service.py:212
+#: .\apps\transactions\services\notifications.py:190
 msgid "Mnunuzi"
 msgstr "Buyer"
 
@@ -276,9 +278,8 @@ msgid ""
 "Hongera! Ombi lako la uthibitisho <strong>%(verification_type)s</strong> "
 "limeidhinishwa na timu ya SokoMkononi."
 msgstr ""
-"Congratulations! Your verification request as "
-"<strong>%(verification_type)s</strong> has been approved by the SokoMkononi "
-"team."
+"Congratulations! Your verification request as <strong>%(verification_type)s</"
+"strong> has been approved by the SokoMkononi team."
 
 #: .\apps\accounts\templates\accounts\emails\verification_approved.html:10
 #: .\apps\accounts\templates\accounts\emails\verification_approved.txt:7
@@ -311,8 +312,8 @@ msgid ""
 "Hongera! Ombi lako la uthibitisho %(verification_type)s limeidhinishwa na "
 "timu ya SokoMkononi."
 msgstr ""
-"Congratulations! Your verification request as %(verification_type)s has "
-"been approved by the SokoMkononi team."
+"Congratulations! Your verification request as %(verification_type)s has been "
+"approved by the SokoMkononi team."
 
 #: .\apps\accounts\templates\accounts\emails\verification_documents_requested.html:7
 #: .\apps\accounts\templates\accounts\emails\verification_documents_requested.txt:1
@@ -372,8 +373,7 @@ msgstr "Check request status"
 #: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:5
 #, python-format
 msgid "Ombi lako la uthibitisho %(verification_type)s halikuidhinishwa."
-msgstr ""
-"Your verification request as %(verification_type)s was not approved."
+msgstr "Your verification request as %(verification_type)s was not approved."
 
 #: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:11
 msgid "Angalia hali ya ombi"
@@ -400,6 +400,182 @@ msgstr "Welcome to SokoMkononi! Your account has been verified."
 #: .\apps\accounts\templates\accounts\emails\welcome.txt:5
 msgid "Ingia"
 msgstr "Sign in"
+
+#: .\apps\transactions\services\notifications.py:25
+msgid "Muamala umeundwa"
+msgstr "Transaction created"
+
+#: .\apps\transactions\services\notifications.py:27
+#, python-brace-format
+msgid ""
+"Transaction #{id} imeundwa kwa tangazo '{title}'. Bei iliyokubaliwa ni TZS "
+"{price}."
+msgstr ""
+"Transaction #{id} has been created for listing '{title}'. Agreed price is "
+"TZS {price}."
+
+#: .\apps\transactions\services\notifications.py:48
+msgid "Tayari kwa malipo ya mwisho"
+msgstr "Ready for final payment"
+
+#: .\apps\transactions\services\notifications.py:50
+msgid "Bidhaa haifanani na maelezo"
+msgstr "Item does not match description"
+
+#: .\apps\transactions\services\notifications.py:52
+msgid "Anaomba mazungumzo zaidi"
+msgstr "Requesting further negotiation"
+
+#: .\apps\transactions\services\notifications.py:54
+msgid "Anataka kughairi Transaction"
+msgstr "Wants to cancel Transaction"
+
+#: .\apps\transactions\services\notifications.py:66
+#, python-brace-format
+msgid ""
+"Mnunuzi ametoa uamuzi wa inspection kwenye Transaction #{id}: {decision}."
+msgstr ""
+"Buyer has made an inspection decision on Transaction #{id}: {decision}."
+
+#: .\apps\transactions\services\notifications.py:71
+#, python-brace-format
+msgid "Maelezo: {note}"
+msgstr "Note: {note}"
+
+#: .\apps\transactions\services\notifications.py:78
+msgid "Uamuzi wa Mnunuzi"
+msgstr "Buyer decision"
+
+#: .\apps\transactions\services\notifications.py:96
+#, python-brace-format
+msgid ""
+"Mnunuzi amepakia ushahidi wa malipo ya mwisho kwa Transaction #{id}. "
+"Tafadhali hakikisha umepokea malipo kabla ya kuyathibitisha."
+msgstr ""
+"Buyer has uploaded final payment proof for Transaction #{id}. Please verify "
+"you received the payment before confirming."
+
+#: .\apps\transactions\services\notifications.py:102
+#, python-brace-format
+msgid "Reference: {ref}."
+msgstr "Reference: {ref}."
+
+#: .\apps\transactions\services\notifications.py:111
+msgid "Ushahidi wa Malipo Umewekwa"
+msgstr "Payment proof uploaded"
+
+#: .\apps\transactions\services\notifications.py:133
+msgid "Malipo Yamethibitishwa"
+msgstr "Payment confirmed"
+
+#: .\apps\transactions\services\notifications.py:135
+#, python-brace-format
+msgid "Muuzaji amethibitisha kupokea malipo ya mwisho kwa Transaction #{id}."
+msgstr ""
+"Seller has confirmed receipt of the final payment for Transaction #{id}."
+
+#: .\apps\transactions\services\notifications.py:158
+msgid "Muamala umekamilika"
+msgstr "Transaction completed"
+
+#: .\apps\transactions\services\notifications.py:160
+#, python-brace-format
+msgid ""
+"Transaction #{id} ya '{title}' imekamilika. Tangazo sasa limewekwa SOLD."
+msgstr ""
+"Transaction #{id} for '{title}' is completed. Listing is now marked SOLD."
+
+#: .\apps\transactions\services\notifications.py:195
+#, python-brace-format
+msgid "{role} ameghairi Transaction #{id} ya '{title}'."
+msgstr "{role} has cancelled Transaction #{id} for '{title}'."
+
+#: .\apps\transactions\services\notifications.py:202
+#, python-brace-format
+msgid "Sababu: {reason}"
+msgstr "Reason: {reason}"
+
+#: .\apps\transactions\services\notifications.py:209
+msgid "Muamala umeghairiwa"
+msgstr "Transaction cancelled"
+
+#: .\apps\transactions\services\notifications.py:233
+msgid "Reservation imeanzishwa"
+msgstr "Reservation created"
+
+#: .\apps\transactions\services\notifications.py:235
+#, python-brace-format
+msgid ""
+"Reservation imeanzishwa kwa Transaction #{id} ya '{title}'. Deposit "
+"inayotakiwa ni TZS {deposit}. Tafadhali kamilisha malipo ya reservation."
+msgstr ""
+"Reservation has been created for Transaction #{id} for '{title}'. Required "
+"deposit is TZS {deposit}. Please complete the reservation payment."
+
+#: .\apps\transactions\services\notifications.py:257
+msgid "Reservation mpya"
+msgstr "New reservation"
+
+#: .\apps\transactions\services\notifications.py:259
+#, python-brace-format
+msgid ""
+"Mnunuzi ameanzisha reservation kwa Transaction #{id} ya tangazo '{title}'. "
+"Inasubiri malipo ya reservation."
+msgstr ""
+"Buyer has started a reservation for Transaction #{id} for listing '{title}'. "
+"Awaiting reservation payment."
+
+#: .\apps\transactions\services\notifications.py:284
+msgid "Reservation imelipwa"
+msgstr "Reservation paid"
+
+#: .\apps\transactions\services\notifications.py:286
+#, python-brace-format
+msgid ""
+"Malipo ya reservation ya Transaction #{id} yamethibitishwa. Reservation ni "
+"ya saa {hours} na imeanza rasmi."
+msgstr ""
+"Reservation payment for Transaction #{id} has been confirmed. Reservation is "
+"{hours} hours and has officially started."
+
+#: .\apps\transactions\services\notifications.py:315
+msgid "Reservation imeisha"
+msgstr "Reservation expired"
+
+#: .\apps\transactions\services\notifications.py:317
+#, python-brace-format
+msgid ""
+"Reservation ya Transaction #{id} ya '{title}' imeisha muda. Transaction "
+"imefungwa na tangazo limerudishwa kwenye hali ya AVAILABLE."
+msgstr ""
+"Reservation for Transaction #{id} for '{title}' has expired. Transaction is "
+"closed and listing is back to AVAILABLE."
+
+#: .\apps\transactions\services\notifications.py:346
+msgid "Inspection imeanza"
+msgstr "Inspection started"
+
+#: .\apps\transactions\services\notifications.py:348
+#, python-brace-format
+msgid ""
+"Inspection ya Transaction #{id} imeanza. Muda wa inspection ni saa {hours}. "
+"Tafadhali kamilisha ukaguzi kabla ya muda kuisha."
+msgstr ""
+"Inspection for Transaction #{id} has started. Inspection duration is {hours} "
+"hours. Please complete the inspection before time runs out."
+
+#: .\apps\transactions\services\notifications.py:373
+#, python-brace-format
+msgid "Inspection ya Transaction #{id} imekamilika."
+msgstr "Inspection for Transaction #{id} is completed."
+
+#: .\apps\transactions\services\notifications.py:378
+msgid "Mnunuzi bado hajatoa uamuzi wa inspection."
+msgstr "Buyer has not yet made an inspection decision."
+
+#: .\apps\transactions\services\notifications.py:386
+msgid "Inspection imekamilika"
+msgstr "Inspection completed"
 
 #: .\apps\verifications\admin.py:38
 msgid "Faili"

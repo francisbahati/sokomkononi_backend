@@ -1,144 +1,498 @@
 # English translations for SokoMkononi
-# Generated manually — verification + auth + common strings
-
+# Copyright (C) 2026 SokoMkononi
+# This file is distributed under the same license as the SokoMkononi project.
+#
 msgid ""
 msgstr ""
+"Project-Id-Version: SokoMkononi 1.0\n"
+"Report-Msgid-Bugs-To: support@sokomkononi.co.tz\n"
+"POT-Creation-Date: 2026-11-02 00:55-0800\n"
+"PO-Revision-Date: 2026-11-02 00:00+0300\n"
+"Last-Translator: SokoMkononi Team <support@sokomkononi.co.tz>\n"
+"Language-Team: English\n"
 "Language: en\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-# ══════════════════════════════════════════════════════════
-# COMMON
-# ══════════════════════════════════════════════════════════
+#: .\apps\accounts\email_service.py:99 .\apps\accounts\email_service.py:115
+#: .\apps\accounts\email_service.py:118 .\apps\accounts\email_service.py:121
+#: .\apps\accounts\email_service.py:143 .\apps\accounts\email_service.py:158
+#: .\apps\accounts\email_service.py:190 .\apps\accounts\email_service.py:222
+#: .\apps\accounts\email_service.py:250 .\apps\verifications\notify.py:63
 msgid "mteja"
 msgstr "customer"
 
-msgid "hakuna sababu"
-msgstr "no reason provided"
-
-msgid "Muuzaji"
-msgstr "Seller"
-
-msgid "Mnunuzi"
-msgstr "Buyer"
-
-# ══════════════════════════════════════════════════════════
-# NOTIFICATIONS (create_notification — verifications)
-# ══════════════════════════════════════════════════════════
-msgid "Uthibitisho wako umeidhinishwa"
-msgstr "Your verification has been approved"
-
-msgid ""
-"Ombi lako la kuthibitishwa kuwa {type} limeidhinishwa. Sasa unaweza "
-"kufanya biashara kwa uhuru."
-msgstr ""
-"Your request to be verified as {type} has been approved. You can now "
-"trade freely."
-
-msgid "Uthibitisho umekataliwa"
-msgstr "Verification rejected"
-
-msgid ""
-"Ombi lako la kuthibitishwa kuwa {type} limekataliwa. Sababu: {reason}"
-msgstr ""
-"Your request to be verified as {type} has been rejected. Reason: {reason}"
-
-msgid "Nyaraka zaidi zinahitajika"
-msgstr "More documents required"
-
-msgid "Tafadhali pakia nyaraka zaidi."
-msgstr "Please upload more documents."
-
-# ══════════════════════════════════════════════════════════
-# EMAIL SUBJECTS (email_service.py)
-# ══════════════════════════════════════════════════════════
+#: .\apps\accounts\email_service.py:101
 msgid "SokoMkononi — Nambari yako ya uthibitisho"
 msgstr "SokoMkononi — Your verification code"
 
+#: .\apps\accounts\email_service.py:104
 msgid "SokoMkononi — Kubadilisha nenosiri"
 msgstr "SokoMkononi — Password reset"
 
+#: .\apps\accounts\email_service.py:128
 msgid "Karibu SokoMkononi!"
 msgstr "Welcome to SokoMkononi!"
 
+#: .\apps\accounts\email_service.py:140
 msgid "SokoMkononi — Akaunti yako imefutwa"
 msgstr "SokoMkononi — Your account has been deleted"
 
+#: .\apps\accounts\email_service.py:155
 msgid "SokoMkononi — Akaunti yako imesimamishwa"
 msgstr "SokoMkononi — Your account has been suspended"
 
+#: .\apps\accounts\email_service.py:179 .\apps\accounts\email_service.py:211
+msgid "Muuzaji"
+msgstr "Seller"
+
+#: .\apps\accounts\email_service.py:180 .\apps\accounts\email_service.py:212
+msgid "Mnunuzi"
+msgstr "Buyer"
+
+#: .\apps\accounts\email_service.py:183
 msgid "SokoMkononi — Uthibitisho wako umeidhinishwa"
 msgstr "SokoMkononi — Your verification has been approved"
 
+#: .\apps\accounts\email_service.py:215
 msgid "SokoMkononi — Uthibitisho umekataliwa"
 msgstr "SokoMkononi — Verification rejected"
 
+#: .\apps\accounts\email_service.py:242
 msgid "SokoMkononi — Nyaraka zaidi zinahitajika"
 msgstr "SokoMkononi — More documents required"
 
-# ══════════════════════════════════════════════════════════
-# ADMIN (admin.py — bulk actions)
-# ══════════════════════════════════════════════════════════
-msgid "Idhinisha maombi yaliyochaguliwa"
-msgstr "Approve selected requests"
+#: .\apps\accounts\email_service.py:243 .\apps\verifications\notify.py:206
+#: .\apps\verifications\notify.py:224
+msgid "Tafadhali pakia nyaraka zaidi."
+msgstr "Please upload more documents."
 
-msgid "Kataa maombi yaliyochaguliwa"
-msgstr "Reject selected requests"
+#: .\apps\accounts\templates\accounts\emails\_base.html:18
+msgid "SokoMkononi · Mahali pa Kununua na Kuuza kwa Kujiamini"
+msgstr "SokoMkononi · The trusted place to buy and sell"
 
-msgid "Omba nyaraka zaidi (kwa uteuzi)"
-msgstr "Request more documents (for selection)"
+#: .\apps\accounts\templates\accounts\emails\account_deleted.html:4
+msgid "Akaunti yako imefutwa"
+msgstr "Your account has been deleted"
 
-msgid "Hakuna maombi ya PENDING kwenye uteuzi."
-msgstr "No PENDING requests in the selection."
+#: .\apps\accounts\templates\accounts\emails\account_deleted.html:5
+#: .\apps\accounts\templates\accounts\emails\account_deleted.txt:3
+#: .\apps\accounts\templates\accounts\emails\account_suspended.html:5
+#: .\apps\accounts\templates\accounts\emails\account_suspended.txt:3
+#: .\apps\accounts\templates\accounts\emails\notification.html:6
+#: .\apps\accounts\templates\accounts\emails\notification.txt:3
+#: .\apps\accounts\templates\accounts\emails\otp_verification.txt:1
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:8
+#: .\apps\accounts\templates\accounts\emails\verification_approved.txt:3
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.html:8
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.txt:3
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.html:8
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:3
+#: .\apps\accounts\templates\accounts\emails\welcome.txt:1
+msgid "Habari"
+msgstr "Hello"
 
-msgid "Maombi %(n)s yameidhinishwa."
-msgstr "%(n)s request(s) approved."
-
-msgid "Maombi %(n)s yameshindwa."
-msgstr "%(n)s request(s) failed."
-
-msgid "Maombi %(n)s yamekataliwa."
-msgstr "%(n)s request(s) rejected."
-
-msgid "Maombi %(n)s yameombwa nyaraka."
-msgstr "%(n)s request(s) have been asked for documents."
-
+#: .\apps\accounts\templates\accounts\emails\account_deleted.html:6
 msgid ""
-"Ombi limekataliwa na admin. Tafadhali wasiliana na support "
-"kwa maelezo zaidi."
+"Akaunti yako ya SokoMkononi imefutwa kabisa. Huwezi kuingia tena kwa barua "
+"pepe hii."
 msgstr ""
-"The request has been rejected by an admin. Please contact support "
-"for more details."
+"Your SokoMkononi account has been permanently deleted. You can no longer "
+"sign in with this email."
 
-msgid "Tafadhali pakia nyaraka za ziada ili kukamilisha uthibitisho."
-msgstr "Please upload additional documents to complete verification."
+#: .\apps\accounts\templates\accounts\emails\account_deleted.html:7
+#: .\apps\accounts\templates\accounts\emails\account_deleted.txt:6
+#: .\apps\accounts\templates\accounts\emails\account_suspended.html:7
+#: .\apps\accounts\templates\accounts\emails\account_suspended.txt:6
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.html:12
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:7
+msgid "Sababu"
+msgstr "Reason"
 
-# ══════════════════════════════════════════════════════════
-# APP LABELS / MODEL VERBOSE NAMES (admin)
-# ══════════════════════════════════════════════════════════
-msgid "Ombi la uthibitisho"
-msgstr "Verification request"
+#: .\apps\accounts\templates\accounts\emails\account_deleted.html:8
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.html:20
+msgid ""
+"Kama una maswali, wasiliana nasi kwa <a "
+"href=\"mailto:support@sokomkononi.co.tz\">support@sokomkononi.co.tz</a>."
+msgstr ""
+"If you have questions, contact us at <a "
+"href=\"mailto:support@sokomkononi.co.tz\">support@sokomkononi.co.tz</a>."
 
-msgid "Maombi ya uthibitisho"
-msgstr "Verification requests"
+#: .\apps\accounts\templates\accounts\emails\account_deleted.html:9
+#: .\apps\accounts\templates\accounts\emails\account_suspended.html:9
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:20
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.html:21
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.html:22
+msgid "SokoMkononi — Nunua na Uza Mali kwa Urahisi."
+msgstr "SokoMkononi — Buy and sell with confidence."
 
-msgid "Nyaraka ya uthibitisho"
-msgstr "Verification document"
+#: .\apps\accounts\templates\accounts\emails\account_deleted.txt:1
+msgid "Akaunti yako ya SokoMkononi imefutwa"
+msgstr "Your SokoMkononi account has been deleted"
 
-msgid "Nyaraka za uthibitisho"
-msgstr "Verification documents"
+#: .\apps\accounts\templates\accounts\emails\account_deleted.txt:5
+msgid "Akaunti yako imefutwa kabisa. Huwezi kuingia tena kwa barua pepe hii."
+msgstr ""
+"Your account has been permanently deleted. You can no longer sign in with "
+"this email."
 
+#: .\apps\accounts\templates\accounts\emails\account_deleted.txt:8
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:13
+msgid "Kama una maswali, wasiliana nasi"
+msgstr "If you have questions, contact us"
+
+#: .\apps\accounts\templates\accounts\emails\account_suspended.html:4
+msgid "Akaunti yako imesimamishwa"
+msgstr "Your account has been suspended"
+
+#: .\apps\accounts\templates\accounts\emails\account_suspended.html:6
+msgid ""
+"Akaunti yako ya SokoMkononi imesimamishwa kwa muda. Huwezi kuingia au kuweka "
+"mali mpya kwa sasa."
+msgstr ""
+"Your SokoMkononi account has been temporarily suspended. You cannot sign in "
+"or post new listings at this time."
+
+#: .\apps\accounts\templates\accounts\emails\account_suspended.html:8
+msgid ""
+"Kama unadhani hii ni kosa, wasiliana nasi kwa <a "
+"href=\"mailto:support@sokomkononi.co.tz\">support@sokomkononi.co.tz</a>."
+msgstr ""
+"If you believe this is a mistake, contact us at <a "
+"href=\"mailto:support@sokomkononi.co.tz\">support@sokomkononi.co.tz</a>."
+
+#: .\apps\accounts\templates\accounts\emails\account_suspended.txt:1
+msgid "Akaunti yako ya SokoMkononi imesimamishwa"
+msgstr "Your SokoMkononi account has been suspended"
+
+#: .\apps\accounts\templates\accounts\emails\account_suspended.txt:5
+msgid "Akaunti yako imesimamishwa kwa muda."
+msgstr "Your account has been temporarily suspended."
+
+#: .\apps\accounts\templates\accounts\emails\account_suspended.txt:8
+msgid "Kama unadhani hii ni kosa, wasiliana nasi"
+msgstr "If you believe this is a mistake, contact us"
+
+#: .\apps\accounts\templates\accounts\emails\notification.html:10
+#: .\apps\accounts\templates\accounts\emails\notification.txt:7
+msgid "Fungua"
+msgstr "Open"
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.html:3
+msgid "Nambari yako ya uthibitisho"
+msgstr "Your verification code"
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.html:5
+msgid "Uthibitisho wa Akaunti"
+msgstr "Account verification"
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.html:6
+#, python-format
+msgid ""
+"Habari %(name)s, karibu SokoMkononi. Tumia nambari hii kukamilisha usajili "
+"wako."
+msgstr ""
+"Hello %(name)s, welcome to SokoMkononi. Use this code to complete your "
+"registration."
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.html:8
+#: .\apps\accounts\templates\accounts\emails\password_reset.html:8
+msgid "Nambari ya Uthibitisho"
+msgstr "Verification code"
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.html:10
+#: .\apps\accounts\templates\accounts\emails\password_reset.html:10
+msgid "Ni halali kwa dakika 10 pekee"
+msgstr "Valid for 10 minutes only"
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.html:12
+msgid "Muhimu"
+msgstr "Important"
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.html:12
+msgid "Usimshirikishe mtu mwingine nambari hii."
+msgstr "Do not share this code with anyone."
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.html:13
+msgid "Kama hukuaomba nambari hii, unaweza kupuuza ujumbe huu."
+msgstr "If you did not request this code, you can ignore this message."
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.txt:3
+msgid "Karibu SokoMkononi. Nambari yako ya uthibitisho ni"
+msgstr "Welcome to SokoMkononi. Your verification code is"
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.txt:7
+#: .\apps\accounts\templates\accounts\emails\password_reset.txt:7
+msgid "Ni halali kwa dakika 10 pekee."
+msgstr "Valid for 10 minutes only."
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.txt:9
+msgid ""
+"USIMSHIRIKISHE mtu mwingine nambari hii. Timu ya SokoMkononi haitakuomba "
+"nambari yako kupitia simu, WhatsApp, SMS, au barua pepe."
+msgstr ""
+"DO NOT share this code with anyone. The SokoMkononi team will never ask for "
+"your code via phone, WhatsApp, SMS, or email."
+
+#: .\apps\accounts\templates\accounts\emails\otp_verification.txt:11
+msgid "Kama hukuaomba nambari hii, puuza ujumbe huu."
+msgstr "If you did not request this code, ignore this message."
+
+#: .\apps\accounts\templates\accounts\emails\password_reset.html:3
+msgid "Kubadilisha nenosiri"
+msgstr "Reset password"
+
+#: .\apps\accounts\templates\accounts\emails\password_reset.html:5
+msgid "Kubadilisha Nenosiri"
+msgstr "Reset Password"
+
+#: .\apps\accounts\templates\accounts\emails\password_reset.html:6
+msgid "Tumepokea ombi la kubadilisha nenosiri la akaunti yako."
+msgstr "We received a request to reset your account password."
+
+#: .\apps\accounts\templates\accounts\emails\password_reset.html:12
+#: .\apps\accounts\templates\accounts\emails\password_reset.txt:9
+msgid "Kama hukuomba kubadilisha nenosiri, puuza ujumbe huu."
+msgstr "If you did not request a password reset, ignore this message."
+
+#: .\apps\accounts\templates\accounts\emails\password_reset.txt:1
+msgid "Tumepokea ombi la kubadilisha nenosiri la akaunti yako ya SokoMkononi."
+msgstr "We received a request to reset your SokoMkononi account password."
+
+#: .\apps\accounts\templates\accounts\emails\password_reset.txt:3
+msgid "Nambari yako ya uthibitisho ni"
+msgstr "Your verification code is"
+
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:7
+#: .\apps\accounts\templates\accounts\emails\verification_approved.txt:1
+msgid "Uthibitisho wako umeidhinishwa!"
+msgstr "Your verification has been approved!"
+
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:9
+#, python-format
+msgid ""
+"Hongera! Ombi lako la uthibitisho <strong>%(verification_type)s</strong> "
+"limeidhinishwa na timu ya SokoMkononi."
+msgstr ""
+"Congratulations! Your verification request as "
+"<strong>%(verification_type)s</strong> has been approved by the SokoMkononi "
+"team."
+
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:10
+#: .\apps\accounts\templates\accounts\emails\verification_approved.txt:7
+msgid "Sasa unaweza kufanya biashara kwa uhuru kwenye jukwaa letu:"
+msgstr "You can now trade freely on our platform:"
+
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:12
+#: .\apps\accounts\templates\accounts\emails\verification_approved.txt:8
+msgid "Weka matangazo yako"
+msgstr "Post your listings"
+
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:13
+#: .\apps\accounts\templates\accounts\emails\verification_approved.txt:9
+msgid "Wasiliana na wanunuzi"
+msgstr "Connect with buyers"
+
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:14
+#: .\apps\accounts\templates\accounts\emails\verification_approved.txt:10
+msgid "Fanya deals kwa usalama"
+msgstr "Make deals safely"
+
+#: .\apps\accounts\templates\accounts\emails\verification_approved.html:17
+#: .\apps\accounts\templates\accounts\emails\verification_approved.txt:12
+msgid "Nenda kwenye Dashboard"
+msgstr "Go to Dashboard"
+
+#: .\apps\accounts\templates\accounts\emails\verification_approved.txt:5
+#, python-format
+msgid ""
+"Hongera! Ombi lako la uthibitisho %(verification_type)s limeidhinishwa na "
+"timu ya SokoMkononi."
+msgstr ""
+"Congratulations! Your verification request as %(verification_type)s has "
+"been approved by the SokoMkononi team."
+
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.html:7
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.txt:1
+#: .\apps\verifications\notify.py:205
+msgid "Nyaraka zaidi zinahitajika"
+msgstr "More documents required"
+
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.html:9
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.txt:5
+msgid ""
+"Ili kuendelea na uthibitisho wako, timu yetu inahitaji nyaraka zaidi kutoka "
+"kwako."
+msgstr ""
+"To continue with your verification, our team needs more documents from you."
+
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.html:12
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.txt:7
+msgid "Ujumbe kutoka Admin"
+msgstr "Message from Admin"
+
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.html:16
+msgid "Tafadhali ingia kwenye dashboard yako na pakia nyaraka zinazohitajika."
+msgstr "Please sign in to your dashboard and upload the required documents."
+
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.html:18
+msgid "Pakia Nyaraka"
+msgstr "Upload documents"
+
+#: .\apps\accounts\templates\accounts\emails\verification_documents_requested.txt:10
+msgid "Tafadhali ingia kwenye dashboard yako na pakia nyaraka zinazohitajika"
+msgstr "Please sign in to your dashboard and upload the required documents"
+
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.html:7
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:1
+#: .\apps\verifications\notify.py:145
+msgid "Uthibitisho umekataliwa"
+msgstr "Verification rejected"
+
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.html:9
+#, python-format
+msgid ""
+"Ombi lako la uthibitisho <strong>%(verification_type)s</strong> "
+"halikuidhinishwa."
+msgstr ""
+"Your verification request as <strong>%(verification_type)s</strong> was not "
+"approved."
+
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.html:16
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:9
+msgid "Unaweza kuwasilisha ombi jipya baada ya kurekebisha yale yaliyotajwa."
+msgstr "You can submit a new request after correcting the issues mentioned."
+
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.html:18
+msgid "Angalia Hali ya Ombi"
+msgstr "Check request status"
+
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:5
+#, python-format
+msgid "Ombi lako la uthibitisho %(verification_type)s halikuidhinishwa."
+msgstr ""
+"Your verification request as %(verification_type)s was not approved."
+
+#: .\apps\accounts\templates\accounts\emails\verification_rejected.txt:11
+msgid "Angalia hali ya ombi"
+msgstr "Check request status"
+
+#: .\apps\accounts\templates\accounts\emails\welcome.html:3
+#: .\apps\accounts\templates\accounts\emails\welcome.html:5
+msgid "Karibu SokoMkononi"
+msgstr "Welcome to SokoMkononi"
+
+#: .\apps\accounts\templates\accounts\emails\welcome.html:6
+#, python-format
+msgid "Habari %(name)s, akaunti yako imethibitishwa."
+msgstr "Hello %(name)s, your account has been verified."
+
+#: .\apps\accounts\templates\accounts\emails\welcome.html:8
+msgid "Ingia kwenye Dashboard"
+msgstr "Go to Dashboard"
+
+#: .\apps\accounts\templates\accounts\emails\welcome.txt:3
+msgid "Karibu SokoMkononi! Akaunti yako imethibitishwa."
+msgstr "Welcome to SokoMkononi! Your account has been verified."
+
+#: .\apps\accounts\templates\accounts\emails\welcome.txt:5
+msgid "Ingia"
+msgstr "Sign in"
+
+#: .\apps\verifications\admin.py:38
+msgid "Faili"
+msgstr "File"
+
+#: .\apps\verifications\admin.py:76
+msgid "Taarifa za ombi"
+msgstr "Request information"
+
+#: .\apps\verifications\admin.py:81
 msgid "Mtumiaji"
 msgstr "User"
 
-msgid "Watumiaji"
-msgstr "Users"
+#: .\apps\verifications\admin.py:86
+msgid "Ukaguzi"
+msgstr "Review"
 
-# ══════════════════════════════════════════════════════════
-# EXTENSIBLE — ongeza tafsiri za app nyingine hapa
-# ══════════════════════════════════════════════════════════
-# Mfano (listings, deals, payments):
-# msgid "..."
-# msgstr "..."
+#: .\apps\verifications\admin.py:92
+msgid "Nyaraka zaidi"
+msgstr "More documents"
+
+#: .\apps\verifications\admin.py:98
+msgid "Muda"
+msgstr "Time"
+
+#: .\apps\verifications\admin.py:109
+msgid "Idhinisha maombi yaliyochaguliwa"
+msgstr "Approve selected requests"
+
+#: .\apps\verifications\admin.py:116 .\apps\verifications\admin.py:175
+#: .\apps\verifications\admin.py:223
+msgid "Hakuna maombi ya PENDING kwenye uteuzi."
+msgstr "No PENDING requests in the selection."
+
+#: .\apps\verifications\admin.py:153
+#, python-format
+msgid "Maombi %(n)s yameidhinishwa."
+msgstr "%(n)s request(s) approved."
+
+#: .\apps\verifications\admin.py:159 .\apps\verifications\admin.py:212
+#: .\apps\verifications\admin.py:255
+#, python-format
+msgid "Maombi %(n)s yameshindwa."
+msgstr "%(n)s request(s) failed."
+
+#: .\apps\verifications\admin.py:163
+msgid "Kataa maombi yaliyochaguliwa"
+msgstr "Reject selected requests"
+
+#: .\apps\verifications\admin.py:183
+msgid ""
+"Ombi limekataliwa na admin. Tafadhali wasiliana na support kwa maelezo zaidi."
+msgstr ""
+"The request has been rejected by an admin. Please contact support for more "
+"details."
+
+#: .\apps\verifications\admin.py:206
+#, python-format
+msgid "Maombi %(n)s yamekataliwa."
+msgstr "%(n)s request(s) rejected."
+
+#: .\apps\verifications\admin.py:216
+msgid "Omba nyaraka zaidi (kwa uteuzi)"
+msgstr "Request more documents (for selection)"
+
+#: .\apps\verifications\admin.py:229
+msgid "Tafadhali pakia nyaraka za ziada ili kukamilisha uthibitisho."
+msgstr "Please upload additional documents to complete verification."
+
+#: .\apps\verifications\admin.py:249
+#, python-format
+msgid "Maombi %(n)s yameombwa nyaraka."
+msgstr "%(n)s request(s) have been asked for documents."
+
+#: .\apps\verifications\notify.py:92
+msgid "Uthibitisho wako umeidhinishwa"
+msgstr "Your verification has been approved"
+
+#: .\apps\verifications\notify.py:94
+#, python-brace-format
+msgid ""
+"Ombi lako la kuthibitishwa kuwa {type} limeidhinishwa. Sasa unaweza kufanya "
+"biashara kwa uhuru."
+msgstr ""
+"Your request to be verified as {type} has been approved. You can now trade "
+"freely."
+
+#: .\apps\verifications\notify.py:147
+#, python-brace-format
+msgid "Ombi lako la kuthibitishwa kuwa {type} limekataliwa. Sababu: {reason}"
+msgstr ""
+"Your request to be verified as {type} has been rejected. Reason: {reason}"
+
+#: .\apps\verifications\notify.py:149
+msgid "hakuna sababu"
+msgstr "no reason provided"

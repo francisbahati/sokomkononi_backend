@@ -4,6 +4,7 @@ import secrets
 from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 
 from datetime import timedelta
 
@@ -28,6 +29,7 @@ from .serializers import (
     TicketSerializer,
     TicketStatusSerializer,
 )
+from ._lang import user_lang
 
 
 logger = logging.getLogger(__name__)
@@ -85,7 +87,7 @@ class TicketViewSet(viewsets.GenericViewSet):
         user = self.request.user
         qs = (
             Ticket.objects
-            .select_related("user", "assigned_to")
+            .select_related("user", "user__preferences", "assigned_to")
             .prefetch_related("messages", "attachments")
         )
         if user.is_staff:
@@ -356,16 +358,22 @@ class TicketViewSet(viewsets.GenericViewSet):
             from apps.notifications.services.notification import create_notification
             from apps.notifications.models import Notification
 
-            create_notification(
-                recipient=ticket.user,
-                notification_type=Notification.NotificationType.GENERAL,
-                title=f"Ticket {ticket.code} imeshughulikiwa",
-                message=f"Hali mpya: {ticket.get_status_display()}",
-                priority=Notification.Priority.HIGH,
-                related_object_type="ticket",
-                related_object_id=ticket.id,
-                action_url=f"/dashboard/support/{ticket.id}",
-            )
+            lang = user_lang(ticket.user)
+            with override(lang):
+                create_notification(
+                    recipient=ticket.user,
+                    notification_type=Notification.NotificationType.GENERAL,
+                    title=_("Ticket {code} imeshughulikiwa").format(
+                        code=ticket.code,
+                    ),
+                    message=_("Hali mpya: {status}").format(
+                        status=ticket.get_status_display(),
+                    ),
+                    priority=Notification.Priority.HIGH,
+                    related_object_type="ticket",
+                    related_object_id=ticket.id,
+                    action_url=f"/dashboard/support/{ticket.id}",
+                )
         except Exception:
             logger.exception("ticket notify failed")
 

@@ -976,3 +976,22 @@ msgstr ""
 "You have joined the waiting list for '{title}'. The current "
 "reservation expires in {minutes} minutes. You will be notified if "
 "it expires."
+
+# ══════════════════════════════════════════════════════════
+# TICKETS
+# ══════════════════════════════════════════════════════════
+msgid "SLA imepita: {code}"
+msgstr "SLA breached: {code}"
+
+msgid ""
+"Ticket \"{subject}\" haijajibiwa kwa saa 24+. Priority: {priority}. "
+"Kutoka: {user}."
+msgstr ""
+"Ticket \"{subject}\" has not been answered for 24+ hours. "
+"Priority: {priority}. From: {user}."
+
+msgid "Ticket {code} imeshughulikiwa"
+msgstr "Ticket {code} has been handled"
+
+msgid "Hali mpya: {status}"
+msgstr "New status: {status}"

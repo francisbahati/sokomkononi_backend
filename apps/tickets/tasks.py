@@ -13,6 +13,7 @@ import logging
 
 from celery import shared_task
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification_for_admins
@@ -50,11 +51,14 @@ def send_sla_reminders():
         try:
             create_notification_for_admins(
                 notification_type=Notification.NotificationType.GENERAL,
-                title=f"SLA imepita: {ticket.code}",
-                message=(
-                    f"Ticket \"{ticket.subject}\" haijajibiwa kwa saa 24+. "
-                    f"Priority: {ticket.priority}. "
-                    f"Kutoka: {ticket.user_name or ticket.user_email}."
+                title=_("SLA imepita: {code}").format(code=ticket.code),
+                message=_(
+                    'Ticket "{subject}" haijajibiwa kwa saa 24+. '
+                    "Priority: {priority}. Kutoka: {user}."
+                ).format(
+                    subject=ticket.subject,
+                    priority=ticket.priority,
+                    user=ticket.user_name or ticket.user_email,
                 ),
                 priority=Notification.Priority.URGENT,
                 related_object_type="ticket",

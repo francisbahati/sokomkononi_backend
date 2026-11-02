@@ -15,6 +15,7 @@ import uuid
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from rest_framework.exceptions import ValidationError
 
 from apps.payments.order_ids import make_order_id
@@ -179,10 +180,10 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
         listing = Listing.objects.get(pk=ref_id)
         create_notification_for_admins(
             notification_type=Notification.NotificationType.LISTING_FEE_PAID,
-            title="Ada ya tangazo imelipwa",
-            message=(
-                f'"{listing.title}" — tayari kwa idhini ya mwisho.'
-            ),
+            title=_("Ada ya tangazo imelipwa"),
+            message=_(
+                '"{title}" — tayari kwa idhini ya mwisho.'
+            ).format(title=listing.title),
             related_object_type="listings.Listing",
             related_object_id=ref_id,
             action_url="/smk-control-9x7k/moderation",

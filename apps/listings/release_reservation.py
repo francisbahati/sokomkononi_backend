@@ -17,12 +17,14 @@ from datetime import timedelta
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.listings.models import Listing
 from apps.listings.serializers import ListingDetailSerializer
+from apps.listings.services._lang import user_lang
 from apps.transactions.services.transaction import release_reserved_listing
 from apps.waiting_list.constants import RESPONSE_WINDOW_HOURS
 
@@ -94,23 +96,27 @@ class ReleaseReservationView(APIView):
                 )
 
                 entry = WaitingListEntry.objects.get(pk=advanced_id)
-                create_notification(
-                    recipient=entry.buyer,
-                    notification_type=(
-                        Notification.NotificationType.WAITING_LIST_AVAILABLE
-                    ),
-                    title="Nafasi imefunguliwa!",
-                    message=(
-                        f"Tangazo '{listing.title}' sasa linapatikana. "
-                        f"Una masaa {RESPONSE_WINDOW_HOURS} kuanza "
-                        f"reservation yako kabla ya nafasi kwenda "
-                        f"kwa mtu mwingine."
-                    ),
-                    priority=Notification.Priority.URGENT,
-                    related_object_type="Listing",
-                    related_object_id=listing.id,
-                    action_url="/dashboard/buyer/waiting",
-                )
+                lang = user_lang(entry.buyer)
+                with override(lang):
+                    create_notification(
+                        recipient=entry.buyer,
+                        notification_type=(
+                            Notification.NotificationType.WAITING_LIST_AVAILABLE
+                        ),
+                        title=_("Nafasi imefunguliwa!"),
+                        message=_(
+                            "Tangazo '{title}' sasa linapatikana. "
+                            "Una masaa {hours} kuanza reservation yako "
+                            "kabla ya nafasi kwenda kwa mtu mwingine."
+                        ).format(
+                            title=listing.title,
+                            hours=RESPONSE_WINDOW_HOURS,
+                        ),
+                        priority=Notification.Priority.URGENT,
+                        related_object_type="Listing",
+                        related_object_id=listing.id,
+                        action_url="/dashboard/buyer/waiting",
+                    )
             except Exception:
                 logger.exception("Failed to notify first waiter")
 

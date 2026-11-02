@@ -933,3 +933,46 @@ msgstr "Listing ready for final approval (credits)"
 
 msgid "\"{title}\" imelipwa kwa credits."
 msgstr "\"{title}\" paid with credits."
+
+# ══════════════════════════════════════════════════════════
+# PAYMENTS — refunds
+# ══════════════════════════════════════════════════════════
+msgid "Refund Inasubiri"
+msgstr "Refund Pending"
+
+msgid ""
+"Refund ya TZS {amount} kwa {type} yako inasubiri kushughulikiwa. "
+"Tutawasiliana nawe hivi karibuni."
+msgstr ""
+"Your refund of TZS {amount} for {type} is pending processing. We will "
+"contact you soon."
+
+msgid "Refund Imekamilika"
+msgstr "Refund Completed"
+
+msgid "Refund ya TZS {amount} imekamilika. Kumbukumbu: {ref}"
+msgstr "Your refund of TZS {amount} is complete. Reference: {ref}"
+
+# ══════════════════════════════════════════════════════════
+# WAITING LIST
+# ══════════════════════════════════════════════════════════
+msgid "Tangazo limepatikana tena"
+msgstr "Listing available again"
+
+msgid ""
+"Tangazo '{title}' ulilokuwa ukisubiri sasa linapatikana tena. "
+"Ingia haraka kabla halijachukuliwa."
+msgstr ""
+"The listing '{title}' you were waiting for is now available again. "
+"Act fast before it's taken."
+
+msgid "Umeingia kwenye Waiting List"
+msgstr "You joined the Waiting List"
+
+msgid ""
+"Umejiunga na waiting list ya mali '{title}'. Reservation ya sasa "
+"inaisha baada ya dakika {minutes}. Utapata taarifa endapo itaisha."
+msgstr ""
+"You have joined the waiting list for '{title}'. The current "
+"reservation expires in {minutes} minutes. You will be notified if "
+"it expires."

@@ -9,9 +9,11 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 from rest_framework.exceptions import ValidationError
 
 from .models import Refund
+from ._lang import user_lang
 
 logger = logging.getLogger(__name__)
 
@@ -220,20 +222,24 @@ def _notify_user_refund_pending(refund, obj, type_key):
             create_notification,
         )
 
-        create_notification(
-            recipient=refund.user,
-            notification_type=Notification.NotificationType.GENERAL,
-            title="Refund Inasubiri",
-            message=(
-                f"Refund ya TZS {refund.amount_paid:,.0f} kwa "
-                f"{type_key} yako inasubiri kushughulikiwa. "
-                f"Tutawasiliana nawe hivi karibuni."
-            ),
-            related_object_type="refunds.Refund",
-            related_object_id=refund.pk,
-            action_url="/dashboard/transactions",
-            priority=Notification.Priority.NORMAL,
-        )
+        lang = user_lang(refund.user)
+        with override(lang):
+            create_notification(
+                recipient=refund.user,
+                notification_type=Notification.NotificationType.GENERAL,
+                title=_("Refund Inasubiri"),
+                message=_(
+                    "Refund ya TZS {amount} kwa {type} yako inasubiri "
+                    "kushughulikiwa. Tutawasiliana nawe hivi karibuni."
+                ).format(
+                    amount=f"{refund.amount_paid:,.0f}",
+                    type=type_key,
+                ),
+                related_object_type="refunds.Refund",
+                related_object_id=refund.pk,
+                action_url="/dashboard/transactions",
+                priority=Notification.Priority.NORMAL,
+            )
     except Exception:
         logger.exception(
             "Failed to notify user about refund #%s", refund.pk,
@@ -248,26 +254,33 @@ def _notify_user_refund_completed(refund):
             create_notification,
         )
 
-        create_notification(
-            recipient=refund.user,
-            notification_type=Notification.NotificationType.GENERAL,
-            title="Refund Imekamilika",
-            message=(
-                f"Refund ya TZS {refund.amount_refunded:,.0f} "
-                f"imekamilika. Kumbukumbu: {refund.refund_reference or '—'}"
-            ),
-            related_object_type="refunds.Refund",
-            related_object_id=refund.pk,
-            action_url="/dashboard/transactions",
-            priority=Notification.Priority.HIGH,
-        )
+        lang = user_lang(refund.user)
+        with override(lang):
+            create_notification(
+                recipient=refund.user,
+                notification_type=Notification.NotificationType.GENERAL,
+                title=_("Refund Imekamilika"),
+                message=_(
+                    "Refund ya TZS {amount} imekamilika. "
+                    "Kumbukumbu: {ref}"
+                ).format(
+                    amount=f"{refund.amount_refunded:,.0f}",
+                    ref=refund.refund_reference or "—",
+                ),
+                related_object_type="refunds.Refund",
+                related_object_id=refund.pk,
+                action_url="/dashboard/transactions",
+                priority=Notification.Priority.HIGH,
+            )
     except Exception:
         logger.exception(
             "Failed to notify user about completed refund #%s", refund.pk,
         )
 
-        # apps/payments/refunds.py
 
+# ============================================================
+# MARK REFUND FROM WEBHOOK
+# ============================================================
 def mark_refund_completed_from_webhook(ref_id, payment_reference=""):
     """
     Inaitwa na FimiPay webhook kama refund imekamilika.
@@ -275,7 +288,9 @@ def mark_refund_completed_from_webhook(ref_id, payment_reference=""):
     try:
         refund = Refund.objects.get(pk=ref_id)
     except Refund.DoesNotExist:
-        logger.exception("mark_refund_completed_from_webhook: Refund #%s haipo", ref_id)
+        logger.exception(
+            "mark_refund_completed_from_webhook: Refund #%s haipo", ref_id,
+        )
         return None
 
     if refund.status == Refund.Status.COMPLETED:

@@ -6,13 +6,16 @@ notified and their entry is marked NOTIFIED.
 """
 
 import logging
+from datetime import timedelta
 
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
 from ..models import WaitingListEntry
+from ._lang import user_lang
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +32,7 @@ def notify_waiting_buyers(*, listing):
             listing=listing,
             status=WaitingListEntry.Status.WAITING,
         )
-        .select_related("buyer")
+        .select_related("buyer", "buyer__preferences")
         .order_by("position", "joined_at")
     )
 
@@ -38,32 +41,35 @@ def notify_waiting_buyers(*, listing):
 
     now = timezone.now()
 
-    from datetime import timedelta
     from .constants import RESPONSE_WINDOW_HOURS
     for entry in entries:
         entry.status = WaitingListEntry.Status.NOTIFIED
         entry.notified_at = now
         entry.respond_by = now + timedelta(hours=RESPONSE_WINDOW_HOURS)
-        entry.save(update_fields=["status","notified_at","respond_by","updated_at"])
+        entry.save(update_fields=[
+            "status", "notified_at", "respond_by", "updated_at",
+        ])
 
         try:
-            create_notification(
-                recipient=entry.buyer,
-                notification_type=(
-                    Notification.NotificationType
-                    .WAITING_LIST_AVAILABLE
-                ),
-                title="Tangazo limepatikana tena",
-                message=(
-                    f"Tangazo '{listing.title}' ulilokuwa ukisubiri "
-                    f"sasa linapatikana tena. Ingia haraka kabla "
-                    f"halijachukuliwa."
-                ),
-                priority=Notification.Priority.URGENT,
-                related_object_type="Listing",
-                related_object_id=listing.id,
-                action_url=f"/listings/{listing.id}/",
-            )
+            lang = user_lang(entry.buyer)
+            with override(lang):
+                create_notification(
+                    recipient=entry.buyer,
+                    notification_type=(
+                        Notification.NotificationType
+                        .WAITING_LIST_AVAILABLE
+                    ),
+                    title=_("Tangazo limepatikana tena"),
+                    message=_(
+                        "Tangazo '{title}' ulilokuwa ukisubiri "
+                        "sasa linapatikana tena. Ingia haraka kabla "
+                        "halijachukuliwa."
+                    ).format(title=listing.title),
+                    priority=Notification.Priority.URGENT,
+                    related_object_type="Listing",
+                    related_object_id=listing.id,
+                    action_url=f"/listings/{listing.id}/",
+                )
         except Exception:
             logger.exception(
                 "Failed to notify waiting-list buyer %s for listing %s",

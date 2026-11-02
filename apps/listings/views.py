@@ -3,6 +3,7 @@
 # ============================================================
 
 import logging
+from django.utils.translation import gettext as _
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
@@ -679,11 +680,11 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
 
             create_notification_for_admins(
                 notification_type=Notification.NotificationType.GENERAL,
-                title="Mali Imemarkiwa kama Imepande",
-                message=(
-                    f'{seller_name} amemarki tangazo '
-                    f'"{listing.title}" kama SOLD (imeshauzwa).'
-                ),
+                title=_("Mali Imemarkiwa kama Imepanda"),
+                message=_(
+                    '{seller} amemark tangazo "{title}" kama SOLD '
+                    "(imeshauzwa)."
+                ).format(seller=seller_name, title=listing.title),
                 related_object_type="listings.Listing",
                 related_object_id=listing.id,
                 action_url=(
@@ -1568,11 +1569,13 @@ class ListingFeePaymentView(APIView):
                 )
                 create_notification_for_admins(
                     notification_type=Notification.NotificationType.LISTING_CREATED,
-                    title="Listing tayari kwa idhini (bure)",
-                    message=f'"{listing.title}" imewasilishwa bila ada.',
+                    title=_("Tangazo tayari kwa idhini (bure)"),
+                    message=_(
+                        '"{title}" imewasilishwa bila ada.'
+                    ).format(title=listing.title),
                     related_object_type="listings.Listing",
                     related_object_id=listing.id,
-                    action_url=f"/smk-control-9x7k/moderation",
+                    action_url="/smk-control-9x7k/moderation",
                 )
             except Exception:
                 logger.exception("admin notification for free listing failed")
@@ -1621,11 +1624,13 @@ class ListingFeePaymentView(APIView):
                 )
                 create_notification_for_admins(
                     notification_type=Notification.NotificationType.LISTING_CREATED,
-                    title="Listing tayari kwa idhini ya mwisho (credits)",
-                    message=f'"{listing.title}" imelipwa kwa credits.',
+                    title=_("Tangazo tayari kwa idhini ya mwisho (credits)"),
+                    message=_(
+                        '"{title}" imelipwa kwa credits.'
+                    ).format(title=listing.title),
                     related_object_type="listings.Listing",
                     related_object_id=listing.id,
-                    action_url=f"/smk-control-9x7k/moderation",
+                    action_url="/smk-control-9x7k/moderation",
                 )
             except Exception:
                 logger.exception("admin notification for credits listing failed")

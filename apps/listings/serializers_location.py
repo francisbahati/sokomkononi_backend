@@ -1,5 +1,5 @@
 """Location + multipart create serializers for Listing."""
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from rest_framework import serializers
 
@@ -8,22 +8,38 @@ from apps.categories.models import Category
 from .models import Listing, ListingImage
 
 
+class CoordField(serializers.DecimalField):
+    """
+    Hukubali coordinates zenye decimals nyingi (Leaflet/GPS hutoa ~15)
+    na kuzizungusha hadi tarakimu 6 (~11 cm) kabla ya ukaguzi.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("max_digits", 9)
+        kwargs.setdefault("decimal_places", 6)
+        kwargs.setdefault("required", False)
+        kwargs.setdefault("allow_null", True)
+        super().__init__(**kwargs)
+
+    def to_internal_value(self, data):
+        if data not in (None, ""):
+            try:
+                data = Decimal(str(data).strip()).quantize(
+                    Decimal("0.000001"), rounding=ROUND_HALF_UP
+                )
+            except (InvalidOperation, ValueError):
+                self.fail("invalid")
+        return super().to_internal_value(data)
+
+
 class LocationUpdateSerializer(serializers.Serializer):
     """PATCH /api/listings/{id}/location/"""
 
-    latitude = serializers.DecimalField(
-        max_digits=9, decimal_places=6,
-        min_value=Decimal("-90"),
-        max_value=Decimal("90"),
-        required=False,
-        allow_null=True,
+    latitude = CoordField(
+        min_value=Decimal("-90"), max_value=Decimal("90"),
     )
-    longitude = serializers.DecimalField(
-        max_digits=9, decimal_places=6,
-        min_value=Decimal("-180"),
-        max_value=Decimal("180"),
-        required=False,
-        allow_null=True,
+    longitude = CoordField(
+        min_value=Decimal("-180"), max_value=Decimal("180"),
     )
     location = serializers.CharField(
         max_length=255, required=False, allow_blank=True,
@@ -65,15 +81,11 @@ class ListingCreateWithImagesSerializer(serializers.Serializer):
     description = serializers.CharField()
     price = serializers.DecimalField(max_digits=15, decimal_places=2, min_value=Decimal("0"))
     location = serializers.CharField(max_length=255)
-    latitude = serializers.DecimalField(
-        max_digits=9, decimal_places=6,
+    latitude = CoordField(
         min_value=Decimal("-90"), max_value=Decimal("90"),
-        required=False, allow_null=True,
     )
-    longitude = serializers.DecimalField(
-        max_digits=9, decimal_places=6,
+    longitude = CoordField(
         min_value=Decimal("-180"), max_value=Decimal("180"),
-        required=False, allow_null=True,
     )
     address_text = serializers.CharField(
         max_length=500, required=False, allow_blank=True, default="",

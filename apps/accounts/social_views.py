@@ -25,6 +25,11 @@ APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
 APPLE_ISSUER = "https://appleid.apple.com"
 
 
+def _claim_true(v):
+    """Google hutuma bool, Apple hutuma "true"/"false" kama string."""
+    return v is True or str(v).lower() == "true"
+
+
 def _issue_jwt(user):
     refresh = RefreshToken.for_user(user)
     return {
@@ -39,6 +44,7 @@ def _issue_jwt(user):
             "is_superuser": user.is_superuser,
             "account_type": user.account_type,
             "is_verified": getattr(user, "is_verified", False),
+            "email_verified": getattr(user, "email_verified", False),
             "role": "Admin" if user.is_staff or user.is_superuser else (
                 "Seller" if user.account_type == "BUSINESS" else "Buyer"
             ),
@@ -141,6 +147,13 @@ class SocialLoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Usiunganishe akaunti kwa email ambayo provider hajaithibitisha.
+        if not _claim_true(claims.get("email_verified")):
+            return Response(
+                {"detail": "Barua pepe ya akaunti hii haijathibitishwa na provider."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         user = User.objects.filter(email__iexact=email).first()
         if not user:
             user = User.objects.create_user(
@@ -149,10 +162,6 @@ class SocialLoginView(APIView):
                 password=None,
                 is_active=True,
             )
-            if hasattr(user, "email_verified"):
-                user.email_verified = True
-                user.save(update_fields=["email_verified"])
-
             if hasattr(user, "username"):
                 base_username = username_key
                 username = base_username
@@ -166,5 +175,11 @@ class SocialLoginView(APIView):
             if not user.name and name:
                 user.name = name
                 user.save(update_fields=["name"])
+
+        # Email imethibitishwa na Google/Apple. Fanya kila login (huwarekebisha
+        # pia waliokwama). is_verified (beji ya admin) HAIGUSWI.
+        if not user.email_verified:
+            user.email_verified = True
+            user.save(update_fields=["email_verified"])
 
         return Response(_issue_jwt(user), status=status.HTTP_200_OK)

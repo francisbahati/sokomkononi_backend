@@ -54,10 +54,20 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
         verbose_name="Aina ya akaunti",
     )
 
+    # Beji ya "imethibitishwa" — inawekwa na admin baada ya kuidhinisha
+    # ombi la uthibitisho. HAITUMIKI kuzuia kuweka tangazo.
     is_verified = models.BooleanField(
         default=False,
-        help_text="Account must be verified before full access.",
+        help_text="Admin-approved verified badge (seller/buyer).",
         verbose_name="Imethibitishwa",
+    )
+
+    # Barua pepe imethibitishwa (OTP ya usajili, au Google/Apple).
+    # Hii ndiyo inayohitajika kuweka tangazo (IsVerifiedUser).
+    email_verified = models.BooleanField(
+        default=False,
+        help_text="Email confirmed via OTP or Google/Apple sign-in.",
+        verbose_name="Barua pepe imethibitishwa",
     )
 
     avatar = models.ImageField(

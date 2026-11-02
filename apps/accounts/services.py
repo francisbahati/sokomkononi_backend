@@ -364,7 +364,8 @@ def verify_registration_otp(identifier, otp_code):
         phone=pending.phone,
         account_type=pending.account_type,
         password=pending.password_hash,
-        is_verified=False,
+        is_verified=False,      # beji ya admin — haiguswi hapa
+        email_verified=True,    # email imethibitishwa kwa OTP
         is_active=True,
     )
 

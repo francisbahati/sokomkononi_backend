@@ -1,0 +1,144 @@
+# English translations for SokoMkononi
+# Generated manually — verification + auth + common strings
+
+msgid ""
+msgstr ""
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# ══════════════════════════════════════════════════════════
+# COMMON
+# ══════════════════════════════════════════════════════════
+msgid "mteja"
+msgstr "customer"
+
+msgid "hakuna sababu"
+msgstr "no reason provided"
+
+msgid "Muuzaji"
+msgstr "Seller"
+
+msgid "Mnunuzi"
+msgstr "Buyer"
+
+# ══════════════════════════════════════════════════════════
+# NOTIFICATIONS (create_notification — verifications)
+# ══════════════════════════════════════════════════════════
+msgid "Uthibitisho wako umeidhinishwa"
+msgstr "Your verification has been approved"
+
+msgid ""
+"Ombi lako la kuthibitishwa kuwa {type} limeidhinishwa. Sasa unaweza "
+"kufanya biashara kwa uhuru."
+msgstr ""
+"Your request to be verified as {type} has been approved. You can now "
+"trade freely."
+
+msgid "Uthibitisho umekataliwa"
+msgstr "Verification rejected"
+
+msgid ""
+"Ombi lako la kuthibitishwa kuwa {type} limekataliwa. Sababu: {reason}"
+msgstr ""
+"Your request to be verified as {type} has been rejected. Reason: {reason}"
+
+msgid "Nyaraka zaidi zinahitajika"
+msgstr "More documents required"
+
+msgid "Tafadhali pakia nyaraka zaidi."
+msgstr "Please upload more documents."
+
+# ══════════════════════════════════════════════════════════
+# EMAIL SUBJECTS (email_service.py)
+# ══════════════════════════════════════════════════════════
+msgid "SokoMkononi — Nambari yako ya uthibitisho"
+msgstr "SokoMkononi — Your verification code"
+
+msgid "SokoMkononi — Kubadilisha nenosiri"
+msgstr "SokoMkononi — Password reset"
+
+msgid "Karibu SokoMkononi!"
+msgstr "Welcome to SokoMkononi!"
+
+msgid "SokoMkononi — Akaunti yako imefutwa"
+msgstr "SokoMkononi — Your account has been deleted"
+
+msgid "SokoMkononi — Akaunti yako imesimamishwa"
+msgstr "SokoMkononi — Your account has been suspended"
+
+msgid "SokoMkononi — Uthibitisho wako umeidhinishwa"
+msgstr "SokoMkononi — Your verification has been approved"
+
+msgid "SokoMkononi — Uthibitisho umekataliwa"
+msgstr "SokoMkononi — Verification rejected"
+
+msgid "SokoMkononi — Nyaraka zaidi zinahitajika"
+msgstr "SokoMkononi — More documents required"
+
+# ══════════════════════════════════════════════════════════
+# ADMIN (admin.py — bulk actions)
+# ══════════════════════════════════════════════════════════
+msgid "Idhinisha maombi yaliyochaguliwa"
+msgstr "Approve selected requests"
+
+msgid "Kataa maombi yaliyochaguliwa"
+msgstr "Reject selected requests"
+
+msgid "Omba nyaraka zaidi (kwa uteuzi)"
+msgstr "Request more documents (for selection)"
+
+msgid "Hakuna maombi ya PENDING kwenye uteuzi."
+msgstr "No PENDING requests in the selection."
+
+msgid "Maombi %(n)s yameidhinishwa."
+msgstr "%(n)s request(s) approved."
+
+msgid "Maombi %(n)s yameshindwa."
+msgstr "%(n)s request(s) failed."
+
+msgid "Maombi %(n)s yamekataliwa."
+msgstr "%(n)s request(s) rejected."
+
+msgid "Maombi %(n)s yameombwa nyaraka."
+msgstr "%(n)s request(s) have been asked for documents."
+
+msgid ""
+"Ombi limekataliwa na admin. Tafadhali wasiliana na support "
+"kwa maelezo zaidi."
+msgstr ""
+"The request has been rejected by an admin. Please contact support "
+"for more details."
+
+msgid "Tafadhali pakia nyaraka za ziada ili kukamilisha uthibitisho."
+msgstr "Please upload additional documents to complete verification."
+
+# ══════════════════════════════════════════════════════════
+# APP LABELS / MODEL VERBOSE NAMES (admin)
+# ══════════════════════════════════════════════════════════
+msgid "Ombi la uthibitisho"
+msgstr "Verification request"
+
+msgid "Maombi ya uthibitisho"
+msgstr "Verification requests"
+
+msgid "Nyaraka ya uthibitisho"
+msgstr "Verification document"
+
+msgid "Nyaraka za uthibitisho"
+msgstr "Verification documents"
+
+msgid "Mtumiaji"
+msgstr "User"
+
+msgid "Watumiaji"
+msgstr "Users"
+
+# ══════════════════════════════════════════════════════════
+# EXTENSIBLE — ongeza tafsiri za app nyingine hapa
+# ══════════════════════════════════════════════════════════
+# Mfano (listings, deals, payments):
+# msgid "..."
+# msgstr "..."

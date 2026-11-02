@@ -52,6 +52,16 @@ _LANG_MESSAGES = {
         "sw": "Umetuma maombi mengi kwa muda mfupi. Tafadhali subiri {wait} kisha ujaribu tena. Asante kwa uvumilivu.",
         "en": "You've made too many requests in a short time. Please wait {wait} and try again. Thank you for your patience.",
     },
+    "account_not_verified": {
+        "sw": "Huwezi kuweka tangazo kwa sasa kwa sababu akaunti yako haijathibitishwa. "
+              "Tafadhali toka kisha ingia tena. Ukiendelea kuona hili, wasiliana na msaada.",
+        "en": "You can't post a listing right now because your account isn't verified. "
+              "Please log out and log in again. If this continues, contact support.",
+    },
+    "account_inactive": {
+        "sw": "Akaunti yako imesimamishwa. Tafadhali wasiliana na msaada.",
+        "en": "Your account is suspended. Please contact support.",
+    },
     "server_error": {
         "sw": "Hitilafu imetokea kwenye mfumo. Tafadhali jaribu tena baadaye.",
         "en": "An error occurred on the server. Please try again later.",
@@ -177,6 +187,19 @@ def handler(exc, context):
     # ── ProtectedError ───────────────────────────────────────
     if isinstance(exc, ProtectedError):
         return _protected_response(exc, request)
+
+    # ── Permission yenye sababu maalum (mf. akaunti haijathibitishwa) ──
+    if isinstance(exc, PermissionDenied):
+        perm_code = exc.get_codes()
+        if isinstance(perm_code, str) and perm_code in ("account_not_verified", "account_inactive"):
+            env = {
+                "code": perm_code.upper(),
+                "message": _LANG_MESSAGES[perm_code][lang],
+                "language": lang,
+            }
+            if rid:
+                env["request_id"] = rid
+            return Response({"error": env}, status=exc.status_code)
 
     # ── Exceptions zinazojulikana ────────────────────────────
     known = _translate_known_exception(exc, lang)

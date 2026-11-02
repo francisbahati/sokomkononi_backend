@@ -1,3 +1,5 @@
+# apps/verifications/models.py
+
 from django.conf import settings
 from django.db import models
 
@@ -81,6 +83,7 @@ class VerificationRequest(SoftDeleteModel):
         blank=True,
         related_name="reviewed_verifications",
         verbose_name="Ilirekebishwa na",
+        db_index=True,
     )
     reviewed_at = models.DateTimeField(
         null=True,
@@ -89,6 +92,7 @@ class VerificationRequest(SoftDeleteModel):
     )
     rejection_reason = models.TextField(
         blank=True,
+        max_length=2000,
         verbose_name="Sababu ya kukataa",
     )
 
@@ -124,6 +128,16 @@ class VerificationRequest(SoftDeleteModel):
             ),
         ]
 
+        constraints = [
+            # Mtumiaji anaweza kuwa na ombi MOJA tu la PENDING
+            # kwa kila aina (SELLER au BUYER).
+            models.UniqueConstraint(
+                fields=["user", "type"],
+                condition=models.Q(status="PENDING"),
+                name="uniq_pending_verification_per_type",
+            ),
+        ]
+
     def __str__(self):
         return f"{self.type} — {self.subject} ({self.status})"
 
@@ -147,7 +161,9 @@ def _private_storage():
             if root is None:
                 from pathlib import Path as _P
                 root = _P("media")
-            _private_storage_instance = FileSystemStorage(location=str(root) + "/private")
+            _private_storage_instance = FileSystemStorage(
+                location=str(root) + "/private"
+            )
     except Exception:
         from django.core.files.storage import default_storage
         _private_storage_instance = default_storage

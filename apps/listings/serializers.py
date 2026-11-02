@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db.models import Q
 from rest_framework import serializers
 
@@ -13,6 +15,7 @@ from .models import (
     PropertyDetails,
     VehicleDetails,
 )
+from .serializers_location import CoordField
 from .services.listing_fee import calculate_listing_fee
 
 
@@ -501,6 +504,9 @@ class ListingWriteSerializer(serializers.ModelSerializer):
         required=True,
         write_only=True,
     )
+
+    latitude = CoordField(min_value=Decimal("-90"), max_value=Decimal("90"))
+    longitude = CoordField(min_value=Decimal("-180"), max_value=Decimal("180"))
 
     class Meta:
         model = Listing

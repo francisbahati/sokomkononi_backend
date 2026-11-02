@@ -111,15 +111,23 @@ TEMPLATES = [{
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-DATABASES = {"default": {
-    "ENGINE": "django.db.backends.postgresql",
-    "NAME": os.environ.get("DB_NAME", "sokomkononi"),
-    "USER": os.environ.get("DB_USER", "postgres"),
-    "PASSWORD": os.environ.get("DB_PASSWORD", ""),
-    "HOST": os.environ.get("DB_HOST", "localhost"),
-    "PORT": os.environ.get("DB_PORT", "5432"),
-    "CONN_MAX_AGE": 60,
-}}
+if env_bool("USE_SQLITE", False):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
+else:
+    DATABASES = {"default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("DB_NAME", "sokomkononi"),
+        "USER": os.environ.get("DB_USER", "postgres"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+        "HOST": os.environ.get("DB_HOST", "localhost"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+        "CONN_MAX_AGE": 60,
+    }}
 
 AUTH_USER_MODEL = "accounts.User"
 AUTH_PASSWORD_VALIDATORS = [
@@ -154,10 +162,17 @@ else:
         }
     }
 
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = os.environ.get("LANGUAGE_CODE", "sw")
 TIME_ZONE = "Africa/Dar_es_Salaam"
 USE_I18N = True
 USE_TZ = True
+
+LANGUAGES = [
+    ("sw", "Kiswahili"),
+    ("en", "English"),
+]
+
+LOCALE_PATHS = [BASE_DIR / "locale"]
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

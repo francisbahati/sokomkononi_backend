@@ -3,20 +3,26 @@ from rest_framework import permissions
 
 class IsVerifiedUser(permissions.BasePermission):
     """
-    Only authenticated, active and verified users can create listings.
+    Only authenticated, active users with a confirmed email can create
+    listings. NOTE: this checks `email_verified`, NOT `is_verified`
+    (`is_verified` is the admin-approved badge).
     """
 
-    message = (
-        "Ni watumiaji waliothibitishwa pekee wanaoweza kuweka matangazo."
-    )
+    message = "Barua pepe yako haijathibitishwa."
+    code = "email_not_verified"
 
     def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_active
-            and request.user.is_verified
-        )
+        user = request.user
+        if not (user and user.is_authenticated):
+            # DRF itatoa NotAuthenticated (401) kwa mtumiaji asiyeingia.
+            return False
+        if not user.is_active:
+            self.code = "account_inactive"
+            return False
+        if not getattr(user, "email_verified", False):
+            self.code = "email_not_verified"
+            return False
+        return True
 
 
 class IsOwnerOrAdmin(permissions.BasePermission):

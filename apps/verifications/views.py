@@ -1,6 +1,9 @@
 # apps/verifications/views.py
+
 import logging
 
+from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -56,6 +59,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
         POST    /api/verifications/{id}/reject/        admin only
         POST    /api/verifications/{id}/request-documents/  admin only
         GET     /api/verifications/{id}/documents/{doc_id}/  signed URL mpya
+        GET     /api/verifications/{id}/documents/{doc_id}/stream  bytes
         POST    /api/verifications/{id}/documents/     multipart upload
         DELETE  /api/verifications/{id}/               owner or admin
     """
@@ -66,7 +70,18 @@ class VerificationViewSet(viewsets.GenericViewSet):
 
     def get_throttles(self):
         if self.action == "create":
-            self.throttle_scope = "verification_request"
+            # Guard: usiweke scope kama haipo kwenye settings —
+            # vinginevyo DRF inatupa KeyError.
+            scope = "verification_request"
+            try:
+                from django.conf import settings
+                rates = getattr(settings, "DEFAULT_THROTTLE_RATES", {}) or {}
+                if scope in rates:
+                    self.throttle_scope = scope
+                else:
+                    self.throttle_scope = None
+            except Exception:
+                self.throttle_scope = None
         else:
             self.throttle_scope = None
         return super().get_throttles()
@@ -75,12 +90,37 @@ class VerificationViewSet(viewsets.GenericViewSet):
         user = self.request.user
         qs = (
             VerificationRequest.objects
-            .select_related("user", "reviewed_by")
+            # ✅ user__preferences: inahitajika na notify._user_lang()
+            #    ili kuepuka N+1 wakati notifications zinatumwa kwenye list
+            .select_related("user", "user__preferences", "reviewed_by")
             .prefetch_related("documents")
         )
-        if user.is_staff:
-            return qs
-        return qs.filter(user=user)
+        if not user.is_staff:
+            qs = qs.filter(user=user)
+
+        # ✅ Annotate roles ili kuepuka N+1 kwenye serializer.
+        # Kama apps.listings / apps.deals hazipo (mfano wakati wa tests),
+        # tunaacha queryset bila annotations — serializer itafanya fallback.
+        try:
+            from apps.listings.models import Listing
+            from apps.deals.models import DealRoom
+
+            qs = qs.annotate(
+                has_listings=Exists(
+                    Listing.objects.filter(
+                        seller=OuterRef("user"), is_deleted=False,
+                    )
+                ),
+                has_deals=Exists(
+                    DealRoom.objects.filter(buyer=OuterRef("user"))
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "[verifications] failed to annotate roles for queryset",
+            )
+
+        return qs
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -91,6 +131,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
             return VerificationDocumentSerializer
         return VerificationRequestSerializer
 
+    # ══════════════════════════════════════════════════════════
+    # LIST
+    # ══════════════════════════════════════════════════════════
     def list(self, request):
         qs = self.get_queryset()
         status_filter = request.query_params.get("status")
@@ -109,6 +152,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
+    # ══════════════════════════════════════════════════════════
+    # RETRIEVE
+    # ══════════════════════════════════════════════════════════
     def retrieve(self, request, pk=None):
         obj = get_object_or_404(self.get_queryset(), pk=pk)
         return Response(
@@ -117,6 +163,9 @@ class VerificationViewSet(viewsets.GenericViewSet):
             ).data,
         )
 
+    # ══════════════════════════════════════════════════════════
+    # CREATE
+    # ══════════════════════════════════════════════════════════
     @extend_schema(
         request=VerificationCreateSerializer,
         responses={201: VerificationRequestSerializer},
@@ -126,14 +175,46 @@ class VerificationViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # Kuzuia maombi mawili ya PENDING ya aina moja kwa mtumiaji mmoja.
+        # UniqueConstraint kwenye DB inalinda, lakini hapa tunatoa
+        # error nzuri kwa mtumiaji badala ya IntegrityError.
+        existing = VerificationRequest.objects.filter(
+            user=request.user,
+            type=data["type"],
+            status=VerificationRequest.Status.PENDING,
+        ).exists()
+        if existing:
+            return Response(
+                {
+                    "detail": (
+                        "Una ombi la PENDING la aina hii tayari. "
+                        "Subiri likamilike kabla ya kuunda lingine."
+                    ),
+                    "code": "pending_verification_exists",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         obj = VerificationRequest.objects.create(
             type=data["type"],
             subject=data["subject"],
             subject_id=data.get("subject_id"),
             notes=data.get("notes", ""),
             user=request.user,
-            user_name=request.user.name,
-            user_email=request.user.email or "",
+            user_name=getattr(request.user, "name", "") or "",
+            user_email=getattr(request.user, "email", "") or "",
+        )
+
+        # ✅ Audit trail
+        _log(
+            request,
+            action="verification.created",
+            target="VerificationRequest",
+            target_id=obj.id,
+            params={
+                "type": obj.type,
+                "subject": obj.subject,
+            },
         )
 
         return Response(
@@ -158,45 +239,45 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        obj.status = VerificationRequest.Status.APPROVED
-        obj.reviewed_by = request.user
-        obj.reviewed_at = timezone.now()
-        obj.save(update_fields=[
-            "status", "reviewed_by", "reviewed_at", "updated_at",
-        ])
+        # ✅ Atomic: status + is_verified + notifications kwa pamoja
+        with transaction.atomic():
+            obj.status = VerificationRequest.Status.APPROVED
+            obj.reviewed_by = request.user
+            obj.reviewed_at = timezone.now()
+            obj.save(update_fields=[
+                "status", "reviewed_by", "reviewed_at", "updated_at",
+            ])
 
-        # is_verified — inaruhusu seller NA buyer
-        try:
-            target_user = obj.user
-            if obj.type in (
-                VerificationRequest.Type.SELLER,
-                VerificationRequest.Type.BUYER,
-            ):
-                target_user.is_verified = True
-                target_user.save(update_fields=["is_verified", "updated_at"])
-                logger.info(
-                    "[verifications] user %s marked as verified (type=%s)",
-                    target_user.id, obj.type,
+            try:
+                target_user = obj.user
+                if obj.type in (
+                    VerificationRequest.Type.SELLER,
+                    VerificationRequest.Type.BUYER,
+                ):
+                    target_user.is_verified = True
+                    target_user.save(
+                        update_fields=["is_verified", "updated_at"],
+                    )
+                    logger.info(
+                        "[verifications] user %s marked as verified "
+                        "(type=%s)", target_user.id, obj.type,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[verifications] failed to update user.is_verified "
+                    "for request %s: %s", obj.id, exc,
                 )
-        except Exception as exc:
-            logger.warning(
-                "[verifications] failed to update user.is_verified for "
-                "request %s: %s", obj.id, exc,
+
+            _log(
+                request,
+                action="verification.approved",
+                target="VerificationRequest",
+                target_id=obj.id,
+                params={"name": f"{obj.type} - {obj.subject}"},
             )
 
-        # ✅ Tumia params
-        _log(
-            request,
-            action="verification.approved",
-            target="VerificationRequest",
-            target_id=obj.id,
-            params={"name": f"{obj.type} - {obj.subject}"},
-        )
-
-        try:
+            # on_commit ndani ya atomic — itasubiri commit halisi
             notify_approved(obj)
-        except Exception:
-            logger.exception("notify_approved failed for %s", obj.id)
 
         return Response(
             VerificationRequestSerializer(
@@ -224,34 +305,30 @@ class VerificationViewSet(viewsets.GenericViewSet):
             )
         serializer = VerificationRejectSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        obj.status = VerificationRequest.Status.REJECTED
-        obj.rejection_reason = serializer.validated_data["rejection_reason"]
-        obj.reviewed_by = request.user
-        obj.reviewed_at = timezone.now()
-        obj.save(update_fields=[
-            "status", "rejection_reason", "reviewed_by",
-            "reviewed_at", "updated_at",
-        ])
+        reason = serializer.validated_data["rejection_reason"]
 
-        # ✅ Tumia params
-        _log(
-            request,
-            action="verification.rejected",
-            target="VerificationRequest",
-            target_id=obj.id,
-            params={
-                "name": f"{obj.type} - {obj.subject}",
-                "reason": serializer.validated_data["rejection_reason"][:200],
-            },
-        )
+        with transaction.atomic():
+            obj.status = VerificationRequest.Status.REJECTED
+            obj.rejection_reason = reason
+            obj.reviewed_by = request.user
+            obj.reviewed_at = timezone.now()
+            obj.save(update_fields=[
+                "status", "rejection_reason", "reviewed_by",
+                "reviewed_at", "updated_at",
+            ])
 
-        try:
-            notify_rejected(
-                obj,
-                serializer.validated_data["rejection_reason"],
+            _log(
+                request,
+                action="verification.rejected",
+                target="VerificationRequest",
+                target_id=obj.id,
+                params={
+                    "name": f"{obj.type} - {obj.subject}",
+                    "reason": reason[:200],
+                },
             )
-        except Exception:
-            logger.exception("notify_rejected failed for %s", obj.id)
+
+            notify_rejected(obj, reason)
 
         return Response(
             VerificationRequestSerializer(
@@ -259,7 +336,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
             ).data,
         )
 
-        # ══════════════════════════════════════════════════════════
+    # ══════════════════════════════════════════════════════════
     # ADMIN: request documents zaidi
     # ══════════════════════════════════════════════════════════
     @extend_schema(
@@ -294,20 +371,27 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        obj.documents_requested_at = timezone.now()
-        obj.documents_request_message = message
-        obj.save(update_fields=[
-            "documents_requested_at",
-            "documents_request_message",
-            "updated_at",
-        ])
+        with transaction.atomic():
+            obj.documents_requested_at = timezone.now()
+            obj.documents_request_message = message
+            obj.save(update_fields=[
+                "documents_requested_at",
+                "documents_request_message",
+                "updated_at",
+            ])
 
-        try:
-            notify_documents_requested(obj, message)
-        except Exception:
-            logger.exception(
-                "notify_documents_requested failed for %s", obj.id,
+            _log(
+                request,
+                action="verification.documents_requested",
+                target="VerificationRequest",
+                target_id=obj.id,
+                params={
+                    "name": f"{obj.type} - {obj.subject}",
+                    "message": message[:200],
+                },
             )
+
+            notify_documents_requested(obj, message)
 
         return Response(
             VerificationRequestSerializer(
@@ -316,7 +400,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
         )
 
     # ══════════════════════════════════════════════════════════
-    # DOCUMENT STREAM — bytes kupitia Django (bypass S3 XML)
+    # DOCUMENT STREAM — bytes kupitia Django
     # ══════════════════════════════════════════════════════════
     @action(
         detail=True, methods=["get"],
@@ -326,12 +410,11 @@ class VerificationViewSet(viewsets.GenericViewSet):
         """
         Stream the document bytes through Django — bypasses S3 XML errors.
 
-        Auth: standard DRF auth (Authorization: Bearer <jwt>) because the
-        frontend fetches this with an auth header, NOT window.open().
+        Auth: standard DRF auth (Authorization: Bearer <jwt>).
 
         Inajaribu storage mbili kwa mpangilio:
-          1. `default_storage` (CloudflareR2MediaStorage — bucket kuu)
-          2. `doc.file.storage` (PrivateR2Storage — faili za zamani)
+          1. `default_storage` (CloudflareR2MediaStorage)
+          2. `doc.file.storage` (PrivateR2Storage)
           3. local MEDIA_ROOT (fallback ya legacy)
 
         Returns:
@@ -374,6 +457,14 @@ class VerificationViewSet(viewsets.GenericViewSet):
         try:
             if default_storage.exists(file_name):
                 f = default_storage.open(file_name, "rb")
+                # ✅ Audit trail ya ufikiaji wa document nyeti
+                _log(
+                    request,
+                    action="verification.document_streamed",
+                    target="VerificationDocument",
+                    target_id=doc.pk,
+                    params={"storage": "default"},
+                )
                 return _make_response(f, "default")
         except Exception:
             logger.exception(
@@ -385,6 +476,13 @@ class VerificationViewSet(viewsets.GenericViewSet):
         try:
             if doc.file.storage.exists(file_name):
                 f = doc.file.storage.open(file_name, "rb")
+                _log(
+                    request,
+                    action="verification.document_streamed",
+                    target="VerificationDocument",
+                    target_id=doc.pk,
+                    params={"storage": "private"},
+                )
                 return _make_response(f, "private")
         except Exception:
             logger.exception(
@@ -396,6 +494,13 @@ class VerificationViewSet(viewsets.GenericViewSet):
         try:
             local_path = Path(str(dj_settings.MEDIA_ROOT)) / file_name
             if local_path.exists() and local_path.is_file():
+                _log(
+                    request,
+                    action="verification.document_streamed",
+                    target="VerificationDocument",
+                    target_id=doc.pk,
+                    params={"storage": "local"},
+                )
                 return _make_response(open(local_path, "rb"), "local")
         except Exception:
             logger.exception(
@@ -423,9 +528,6 @@ class VerificationViewSet(viewsets.GenericViewSet):
         Rudisha signed URL mpya kwa document fulani.
 
         GET /api/verifications/{request_id}/documents/{doc_id}/
-
-        Signed URLs zinaisha baada ya SIGNED_URL_EXPIRY, kwa hiyo admin
-        anahitaji kupata URL mpya kila mara anapofungua document.
         """
         obj = get_object_or_404(self.get_queryset(), pk=pk)
         try:
@@ -484,7 +586,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
         if obj.status != VerificationRequest.Status.PENDING:
             return Response(
                 {"detail": "Ombi hili halipokei nyaraka mpya."},
-                status=400,
+                status=status.HTTP_400_BAD_REQUEST,
             )
         f = request.FILES.get("file")
         if not f:
@@ -494,30 +596,51 @@ class VerificationViewSet(viewsets.GenericViewSet):
             )
 
         from apps.core.image_utils import validate_image
+
         if f.content_type == "application/pdf":
             if f.size > 10 * 1024 * 1024:
                 return Response(
                     {"detail": "Faili haiwezi kuzidi 10MB."},
-                    status=400,
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
-            if not (f.read(5) == b"%PDF-"):
-                f.seek(0)
-                return Response(
-                    {"detail": "Faili si PDF halali."}, status=400,
-                )
+            # ✅ Soma header mara moja, kisha seek(0)
+            header = f.read(5)
             f.seek(0)
+            if header != b"%PDF-":
+                return Response(
+                    {"detail": "Faili si PDF halali."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         else:
             ok, err = validate_image(
                 f, max_bytes=10 * 1024 * 1024, field="file",
             )
             if not ok:
-                return Response({"detail": err}, status=400)
+                return Response(
+                    {"detail": err},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         doc = VerificationDocument.objects.create(
             request=obj,
             file=f,
             name=f.name[:255],
         )
+
+        # ✅ Audit trail
+        _log(
+            request,
+            action="verification.document_uploaded",
+            target="VerificationDocument",
+            target_id=doc.pk,
+            params={
+                "request_id": obj.id,
+                "filename": doc.name,
+                "size": getattr(f, "size", None),
+                "content_type": f.content_type,
+            },
+        )
+
         return Response(
             {
                 "id": doc.id,
@@ -537,6 +660,21 @@ class VerificationViewSet(viewsets.GenericViewSet):
                 {"detail": "Huna ruhusa."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        # ✅ Audit kabla ya soft-delete (baada ya delete, obj bado ipo
+        # lakini is_deleted=True; tunataka log iwe na id)
+        _log(
+            request,
+            action="verification.deleted",
+            target="VerificationRequest",
+            target_id=obj.id,
+            params={
+                "name": f"{obj.type} - {obj.subject}",
+                "status": obj.status,
+                "by": "admin" if request.user.is_staff else "owner",
+            },
+        )
+
         obj.delete(by=request.user, reason="Verification request removed")
         return Response(
             {"detail": "Ombi limewekwa kwenye kikapu."},

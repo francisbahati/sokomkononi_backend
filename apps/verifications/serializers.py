@@ -1,3 +1,5 @@
+# apps/verifications/serializers.py
+
 import logging
 
 from django.conf import settings
@@ -142,52 +144,52 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
             return None
         return getattr(u, "name", None) or u.email or None
 
-    def get_is_both_roles(self, obj):
+    def _roles(self, obj):
         """
-        Chaguo B: mfumo unadetect kama mtumiaji ni Both (Seller + Buyer).
-        Inaangalia listings na deals za mtumiaji.
-        """
-        user = obj.user
-        if not user:
-            return False
-        try:
-            from apps.listings.models import Listing
-            from apps.deals.models import DealRoom
+        Tumia annotations zilizoongezwa kwenye queryset
+        (`has_listings`, `has_deals`) ili kuepuka N+1.
 
-            has_listings = Listing.objects.filter(
-                seller=user, is_deleted=False,
-            ).exists()
-            has_deals = DealRoom.objects.filter(buyer=user).exists()
-            return bool(has_listings and has_deals)
-        except Exception:
-            return False
+        Kama hazipo (mfano serializer inatumika standalone bila
+        ku-annotate queryset), fallback kwa queries za moja kwa moja.
+        """
+        has_listings = getattr(obj, "has_listings", None)
+        has_deals = getattr(obj, "has_deals", None)
+
+        if has_listings is None or has_deals is None:
+            # Fallback: queries za moja kwa moja (standalone usage pekee)
+            user = obj.user
+            if not user:
+                return False, False
+            try:
+                from apps.listings.models import Listing
+                from apps.deals.models import DealRoom
+
+                has_listings = Listing.objects.filter(
+                    seller=user, is_deleted=False,
+                ).exists()
+                has_deals = DealRoom.objects.filter(buyer=user).exists()
+            except Exception:
+                logger.exception(
+                    "[verifications] fallback role query failed for %s",
+                    getattr(obj, "pk", None),
+                )
+                return False, False
+
+        return bool(has_listings), bool(has_deals)
+
+    def get_is_both_roles(self, obj):
+        has_listings, has_deals = self._roles(obj)
+        return has_listings and has_deals
 
     def get_current_role(self, obj):
-        """
-        Rudisha role ya mtumiaji kwa sasa: 'seller', 'buyer', 'both', 'neither'.
-        Inahesabiwa kutoka listings + deals.
-        """
-        user = obj.user
-        if not user:
-            return "neither"
-        try:
-            from apps.listings.models import Listing
-            from apps.deals.models import DealRoom
-
-            has_listings = Listing.objects.filter(
-                seller=user, is_deleted=False,
-            ).exists()
-            has_deals = DealRoom.objects.filter(buyer=user).exists()
-
-            if has_listings and has_deals:
-                return "both"
-            if has_listings:
-                return "seller"
-            if has_deals:
-                return "buyer"
-            return "neither"
-        except Exception:
-            return "neither"
+        has_listings, has_deals = self._roles(obj)
+        if has_listings and has_deals:
+            return "both"
+        if has_listings:
+            return "seller"
+        if has_deals:
+            return "buyer"
+        return "neither"
 
 
 class VerificationCreateSerializer(serializers.Serializer):

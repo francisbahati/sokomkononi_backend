@@ -74,6 +74,18 @@ class DealRoom(models.Model):
         verbose_name="Muda wa kukubaliana",
     )
 
+    # ── Kufufua mazungumzo yaliyoghairiwa ──
+    reopened_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Ilifufuliwa mwisho",
+    )
+
+    reopened_count = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Idadi ya kufufuliwa",
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name="Imeundwa",

@@ -1,6 +1,8 @@
 # apps/deals/views.py
+import logging
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
@@ -34,6 +36,7 @@ from .serializers import (
     DealRoomCreateSerializer,
     DealRoomDetailSerializer,
     DealRoomListSerializer,
+    DealRoomReopenSerializer,
     NegotiationOfferCreateSerializer,
     NegotiationOfferSerializer,
 )
@@ -69,6 +72,34 @@ def _generate_ticket_code():
     return f"TKT-{secrets.token_hex(5).upper()}"
 
 
+logger = logging.getLogger(__name__)
+
+
+def _deal_error(code, detail, http_status=status.HTTP_409_CONFLICT):
+    """
+    Kosa la kibiashara lenye `code` — frontend (apiErrors.js) inatumia `code`
+    kuonyesha maelezo mahususi badala ya ujumbe ghafi.
+    """
+    return Response({"detail": detail, "code": code}, status=http_status)
+
+
+def _notify_reopened(deal_room, reopened_by, note=""):
+    """Mjulishe mwenzake. Haivunji reopen ikishindwa."""
+    try:
+        from .services.notifications import notify_deal_room_reopened
+    except ImportError:
+        # Bado haijaongezwa kwenye services/notifications.py
+        return
+    try:
+        notify_deal_room_reopened(
+            deal_room=deal_room, reopened_by=reopened_by, note=note,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to notify deal room reopened: %s", deal_room.pk,
+        )
+
+
 @extend_schema_view(
     list=extend_schema(responses={200: DealRoomListSerializer(many=True)}),
     retrieve=extend_schema(responses={200: DealRoomDetailSerializer}),
@@ -101,6 +132,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return DealRoomAcceptOfferSerializer
         if self.action == "cancel":
             return DealRoomCancelSerializer
+        if self.action == "reopen":
+            return DealRoomReopenSerializer
         if self.action == "report":
             return DealReportSerializer
         if self.action == "messages_create":
@@ -118,7 +151,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated(), IsVerifiedDealUser()]
         if self.action in [
             "retrieve", "offer", "accept_offer", "decline_offer", "cancel",
-            "messages_create", "messages_list", "report",
+            "messages_create", "messages_list", "report", "reopen",
         ]:
             return [
                 permissions.IsAuthenticated(),
@@ -785,5 +818,180 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 deal_room,
                 context={"request": request, "deal_room": deal_room},
             ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    # ============================================================
+    # REOPEN — fufua Deal Room iliyoghairiwa (mazungumzo yanabaki)
+    # ============================================================
+    @extend_schema(
+        request=DealRoomReopenSerializer,
+        responses={200: DealRoomDetailSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="reopen", url_name="reopen")
+    @transaction.atomic
+    def reopen(self, request, pk=None):
+        """
+        Mnunuzi au muuzaji wa Deal Room iliyoghairiwa (CANCELLED) anaifufua.
+
+        - Ujumbe na historia ya offers vinabaki; hali inarudi NEGOTIATING.
+        - Reservation/transaction ya zamani haifufuliwi: deal yenye transaction
+          inakataliwa (DEAL_HAS_TRANSACTION) ipitiwe na support.
+        - Tangazo lazima liwe LIVE (LISTING_UNAVAILABLE vinginevyo).
+        - Kikomo: settings.DEAL_REOPEN_MAX (default 3) kwa kila Deal Room.
+        - Deal ambayo tayari iko OPEN/NEGOTIATING inarudishwa kama ilivyo (200),
+          ili pande mbili zikibonyeza kwa pamoja hakuna kosa.
+
+        Makosa yanarudisha {"detail", "code"}; `code` inalingana na
+        CODE_MESSAGES kwenye frontend (src/api/apiErrors.js).
+        """
+        deal_room = get_object_or_404(
+            DealRoom.objects
+            .select_for_update(of=("self",))
+            .select_related("listing", "listing__category", "buyer", "seller"),
+            pk=pk,
+        )
+        self.check_object_permissions(request, deal_room)
+
+        # Admin anaweza kuona deal, lakini kufufua ni kwa mnunuzi/muuzaji tu.
+        if request.user.id not in (deal_room.buyer_id, deal_room.seller_id):
+            return _deal_error(
+                "NOT_DEAL_PARTICIPANT",
+                "Ni mnunuzi au muuzaji wa deal hii pekee anayeweza kuifufua.",
+                status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = DealRoomReopenSerializer(
+            data=request.data,
+            context={"request": request, "deal_room": deal_room},
+        )
+        serializer.is_valid(raise_exception=True)
+        note = serializer.validated_data.get("note", "")
+
+        detail_context = {"request": request, "deal_room": deal_room}
+
+        # Tayari iko wazi (mwenzake amefufua kwanza) — hakuna cha kufanya.
+        if deal_room.status in (
+            DealRoom.Status.OPEN, DealRoom.Status.NEGOTIATING,
+        ):
+            return Response(
+                DealRoomDetailSerializer(deal_room, context=detail_context).data,
+                status=status.HTTP_200_OK,
+            )
+
+        if deal_room.status != DealRoom.Status.CANCELLED:
+            return _deal_error(
+                "DEAL_NOT_REOPENABLE",
+                "Deal Room hii haiwezi kufufuliwa. "
+                f"Hali ya sasa ni {deal_room.status}.",
+            )
+
+        if getattr(deal_room, "transaction", None) is not None:
+            return _deal_error(
+                "DEAL_HAS_TRANSACTION",
+                "Deal hii ilishafika hatua ya reservation au malipo, kwa hiyo "
+                "inahitaji kukaguliwa na support kabla ya kufufuliwa.",
+            )
+
+        max_reopens = getattr(settings, "DEAL_REOPEN_MAX", 3)
+        if deal_room.reopened_count >= max_reopens:
+            return _deal_error(
+                "REOPEN_LIMIT_REACHED",
+                "Mazungumzo haya yamefufuliwa mara nyingi mno "
+                f"({deal_room.reopened_count}/{max_reopens}).",
+            )
+
+        if deal_room.listing.status != Listing.Status.LIVE:
+            return _deal_error(
+                "LISTING_UNAVAILABLE",
+                "Tangazo hili halipatikani tena (limeuzwa, limewekwa na mtu "
+                "mwingine, au limeondolewa).",
+            )
+
+        active_elsewhere = (
+            DealRoom.objects
+            .filter(
+                listing_id=deal_room.listing_id,
+                buyer_id=deal_room.buyer_id,
+                status__in=[
+                    DealRoom.Status.OPEN,
+                    DealRoom.Status.NEGOTIATING,
+                    DealRoom.Status.ACCEPTED,
+                ],
+            )
+            .exclude(pk=deal_room.pk)
+            .exists()
+        )
+        if active_elsewhere:
+            return _deal_error(
+                "ACTIVE_DEAL_EXISTS",
+                "Kuna Deal Room nyingine iliyo wazi kwa tangazo hili.",
+            )
+
+        deal_room.status = DealRoom.Status.NEGOTIATING
+        deal_room.agreed_price = None
+        deal_room.agreed_at = None
+        deal_room.reopened_at = timezone.now()
+        deal_room.reopened_count += 1
+        try:
+            with transaction.atomic():
+                deal_room.save(update_fields=[
+                    "status", "agreed_price", "agreed_at",
+                    "reopened_at", "reopened_count", "updated_at",
+                ])
+        except IntegrityError:
+            # Constraint ya unique_active_deal_room_listing_buyer
+            return _deal_error(
+                "ACTIVE_DEAL_EXISTS",
+                "Kuna Deal Room nyingine iliyo wazi kwa tangazo hili.",
+            )
+
+        # Alama ndani ya mazungumzo (DealMessage haina "system sender",
+        # kwa hiyo inatumwa kwa jina la aliyefufua).
+        who = getattr(request.user, "name", "") or ""
+        DealMessage.objects.create(
+            deal_room=deal_room,
+            sender=request.user,
+            text=(
+                f"Mazungumzo yamefufuliwa{f' na {who}' if who else ''}. / "
+                f"Conversation reopened{f' by {who}' if who else ''}."
+            ),
+        )
+        if note:
+            DealMessage.objects.create(
+                deal_room=deal_room, sender=request.user, text=note,
+            )
+
+        _log(
+            request,
+            action="deal.reopened",
+            target="DealRoom",
+            target_id=deal_room.id,
+            details={
+                "sw": (
+                    f"Mtumiaji {request.user.id} amefufua Deal Room "
+                    f"#{deal_room.id} (tangazo: {deal_room.listing.title}), "
+                    f"mara ya {deal_room.reopened_count}."
+                ),
+                "en": (
+                    f"User {request.user.id} reopened Deal Room "
+                    f"#{deal_room.id} (listing: {deal_room.listing.title}), "
+                    f"reopen #{deal_room.reopened_count}."
+                ),
+            },
+        )
+
+        transaction.on_commit(
+            lambda: _notify_reopened(deal_room, request.user, note)
+        )
+
+        try:
+            from apps.leads.services.lead import upsert_lead_from_deal_room
+            upsert_lead_from_deal_room(deal_room)
+        except Exception:
+            pass
+
+        return Response(
+            DealRoomDetailSerializer(deal_room, context=detail_context).data,
             status=status.HTTP_200_OK,
         )

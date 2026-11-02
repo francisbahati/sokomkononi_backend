@@ -317,6 +317,7 @@ class DealRoomListSerializer(serializers.ModelSerializer):
             "category", "location",
             "buyer", "seller",
             "status", "agreed_price", "agreed_at", "latest_offer",
+            "reopened_at", "reopened_count",
             # ── MPYA ──
             "transaction_id",
             "reservation_fee", "reservation_hours",
@@ -454,6 +455,7 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             "listing", "buyer", "seller",
             "category", "location",
             "status", "agreed_price", "agreed_at",
+            "reopened_at", "reopened_count",
             "offers", "messages", "offer_count", "latest_offer",
             "transaction_id", "payment_proof",
             "reservation_fee", "reservation_hours",
@@ -638,6 +640,19 @@ class DealRoomCancelSerializer(serializers.Serializer):
     )
 
     def validate_reason(self, value):
+        return value.strip()
+
+
+# ============================================================
+# REOPEN
+# ============================================================
+class DealRoomReopenSerializer(serializers.Serializer):
+    """Ujumbe mfupi wa hiari unaoambatana na kufufua mazungumzo."""
+    note = serializers.CharField(
+        required=False, allow_blank=True, trim_whitespace=True, max_length=500,
+    )
+
+    def validate_note(self, value):
         return value.strip()
 
 

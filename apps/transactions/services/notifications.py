@@ -1,7 +1,12 @@
+# apps/transactions/services/notifications.py
+
+from django.utils.translation import gettext as _, override
+
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
 from ..models import Transaction
+from ._lang import user_lang
 
 
 # ============================================================================
@@ -9,25 +14,28 @@ from ..models import Transaction
 # ============================================================================
 
 def notify_transaction_created(*, transaction):
-    message = (
-        f"Transaction #{transaction.id} imeundwa kwa tangazo "
-        f"'{transaction.listing.title}'. "
-        f"Bei iliyokubaliwa ni TZS {transaction.agreed_price:,.2f}."
-    )
-
     for recipient in (transaction.buyer, transaction.seller):
-        create_notification(
-            recipient=recipient,
-            notification_type=(
-                Notification.NotificationType.TRANSACTION_CREATED
-            ),
-            title="Transaction Imeundwa",
-            message=message,
-            priority=Notification.Priority.HIGH,
-            related_object_type="Transaction",
-            related_object_id=transaction.id,
-            action_url=f"/transactions/{transaction.id}",
-        )
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.TRANSACTION_CREATED
+                ),
+                title=_("Transaction Imeundwa"),
+                message=_(
+                    "Transaction #{id} imeundwa kwa tangazo "
+                    "'{title}'. Bei iliyokubaliwa ni TZS {price}."
+                ).format(
+                    id=transaction.id,
+                    title=transaction.listing.title,
+                    price=f"{transaction.agreed_price:,.2f}",
+                ),
+                priority=Notification.Priority.HIGH,
+                related_object_type="Transaction",
+                related_object_id=transaction.id,
+                action_url=f"/transactions/{transaction.id}",
+            )
 
 
 # ============================================================================
@@ -37,111 +45,37 @@ def notify_transaction_created(*, transaction):
 def notify_buyer_decision(*, transaction):
     decision_labels = {
         Transaction.BuyerDecision.READY_FOR_FINAL_PAYMENT:
-            "Tayari kwa malipo ya mwisho",
+            _("Tayari kwa malipo ya mwisho"),
         Transaction.BuyerDecision.NOT_AS_DESCRIBED:
-            "Bidhaa haifanani na maelezo",
+            _("Bidhaa haifanani na maelezo"),
         Transaction.BuyerDecision.REQUEST_NEGOTIATION:
-            "Anaomba mazungumzo zaidi",
+            _("Anaomba mazungumzo zaidi"),
         Transaction.BuyerDecision.CANCEL_TRANSACTION:
-            "Anataka kughairi Transaction",
+            _("Anataka kughairi Transaction"),
     }
 
-    decision_text = decision_labels.get(
-        transaction.buyer_decision,
-        transaction.buyer_decision,
-    )
+    recipient = transaction.seller
+    lang = user_lang(recipient)
+    with override(lang):
+        decision_text = decision_labels.get(
+            transaction.buyer_decision,
+            transaction.buyer_decision,
+        )
 
-    message = (
-        f"Mnunuzi ametoa uamuzi wa inspection kwenye "
-        f"Transaction #{transaction.id}: {decision_text}."
-    )
+        message = _(
+            "Mnunuzi ametoa uamuzi wa inspection kwenye "
+            "Transaction #{id}: {decision}."
+        ).format(id=transaction.id, decision=decision_text)
 
-    if transaction.buyer_decision_note:
-        message += f" Maelezo: {transaction.buyer_decision_note}"
+        if transaction.buyer_decision_note:
+            message += " " + _("Maelezo: {note}").format(
+                note=transaction.buyer_decision_note,
+            )
 
-    create_notification(
-        recipient=transaction.seller,
-        notification_type=Notification.NotificationType.BUYER_DECISION,
-        title="Uamuzi wa Mnunuzi",
-        message=message,
-        priority=Notification.Priority.URGENT,
-        related_object_type="Transaction",
-        related_object_id=transaction.id,
-        action_url=f"/transactions/{transaction.id}",
-    )
-
-
-# ============================================================================
-# PAYMENT PROOF UPLOADED
-# ============================================================================
-
-def notify_payment_proof_uploaded(*, transaction):
-    message = (
-        f"Mnunuzi amepakia ushahidi wa malipo ya mwisho "
-        f"kwa Transaction #{transaction.id}. "
-        f"Tafadhali hakikisha umepokea malipo kabla ya "
-        f"kuyathibitisha."
-    )
-
-    if transaction.final_payment_reference:
-        message += f" Reference: {transaction.final_payment_reference}."
-
-    create_notification(
-        recipient=transaction.seller,
-        notification_type=(
-            Notification.NotificationType.PAYMENT_PROOF_UPLOADED
-        ),
-        title="Ushahidi wa Malipo Umewekwa",
-        message=message,
-        priority=Notification.Priority.URGENT,
-        related_object_type="Transaction",
-        related_object_id=transaction.id,
-        action_url=f"/transactions/{transaction.id}",
-    )
-
-
-# ============================================================================
-# PAYMENT CONFIRMED
-# ============================================================================
-
-def notify_payment_confirmed(*, transaction):
-    message = (
-        f"Muuzaji amethibitisha kupokea malipo ya mwisho "
-        f"kwa Transaction #{transaction.id}."
-    )
-
-    create_notification(
-        recipient=transaction.buyer,
-        notification_type=(
-            Notification.NotificationType.PAYMENT_CONFIRMED
-        ),
-        title="Malipo Yamethibitishwa",
-        message=message,
-        priority=Notification.Priority.HIGH,
-        related_object_type="Transaction",
-        related_object_id=transaction.id,
-        action_url=f"/transactions/{transaction.id}",
-    )
-
-
-# ============================================================================
-# TRANSACTION COMPLETED
-# ============================================================================
-
-def notify_transaction_completed(*, transaction):
-    message = (
-        f"Transaction #{transaction.id} ya "
-        f"'{transaction.listing.title}' imekamilika. "
-        f"Tangazo sasa limewekwa SOLD."
-    )
-
-    for recipient in (transaction.buyer, transaction.seller):
         create_notification(
             recipient=recipient,
-            notification_type=(
-                Notification.NotificationType.TRANSACTION_COMPLETED
-            ),
-            title="Transaction Imekamilika",
+            notification_type=Notification.NotificationType.BUYER_DECISION,
+            title=_("Uamuzi wa Mnunuzi"),
             message=message,
             priority=Notification.Priority.URGENT,
             related_object_type="Transaction",
@@ -151,38 +85,134 @@ def notify_transaction_completed(*, transaction):
 
 
 # ============================================================================
+# PAYMENT PROOF UPLOADED
+# ============================================================================
+
+def notify_payment_proof_uploaded(*, transaction):
+    recipient = transaction.seller
+    lang = user_lang(recipient)
+    with override(lang):
+        message = _(
+            "Mnunuzi amepakia ushahidi wa malipo ya mwisho "
+            "kwa Transaction #{id}. Tafadhali hakikisha umepokea "
+            "malipo kabla ya kuyathibitisha."
+        ).format(id=transaction.id)
+
+        if transaction.final_payment_reference:
+            message += " " + _("Reference: {ref}.").format(
+                ref=transaction.final_payment_reference,
+            )
+
+        create_notification(
+            recipient=recipient,
+            notification_type=(
+                Notification.NotificationType.PAYMENT_PROOF_UPLOADED
+            ),
+            title=_("Ushahidi wa Malipo Umewekwa"),
+            message=message,
+            priority=Notification.Priority.URGENT,
+            related_object_type="Transaction",
+            related_object_id=transaction.id,
+            action_url=f"/transactions/{transaction.id}",
+        )
+
+
+# ============================================================================
+# PAYMENT CONFIRMED
+# ============================================================================
+
+def notify_payment_confirmed(*, transaction):
+    recipient = transaction.buyer
+    lang = user_lang(recipient)
+    with override(lang):
+        create_notification(
+            recipient=recipient,
+            notification_type=(
+                Notification.NotificationType.PAYMENT_CONFIRMED
+            ),
+            title=_("Malipo Yamethibitishwa"),
+            message=_(
+                "Muuzaji amethibitisha kupokea malipo ya mwisho "
+                "kwa Transaction #{id}."
+            ).format(id=transaction.id),
+            priority=Notification.Priority.HIGH,
+            related_object_type="Transaction",
+            related_object_id=transaction.id,
+            action_url=f"/transactions/{transaction.id}",
+        )
+
+
+# ============================================================================
+# TRANSACTION COMPLETED
+# ============================================================================
+
+def notify_transaction_completed(*, transaction):
+    for recipient in (transaction.buyer, transaction.seller):
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.TRANSACTION_COMPLETED
+                ),
+                title=_("Transaction Imekamilika"),
+                message=_(
+                    "Transaction #{id} ya '{title}' imekamilika. "
+                    "Tangazo sasa limewekwa SOLD."
+                ).format(
+                    id=transaction.id,
+                    title=transaction.listing.title,
+                ),
+                priority=Notification.Priority.URGENT,
+                related_object_type="Transaction",
+                related_object_id=transaction.id,
+                action_url=f"/transactions/{transaction.id}",
+            )
+
+
+# ============================================================================
 # TRANSACTION CANCELLED
 # ============================================================================
 
 def notify_transaction_cancelled(*, transaction, cancelled_by, reason):
     if cancelled_by.id == transaction.buyer_id:
         recipient = transaction.seller
-        cancelled_by_role = "Mnunuzi"
+        cancelled_by_role_key = "buyer"
     elif cancelled_by.id == transaction.seller_id:
         recipient = transaction.buyer
-        cancelled_by_role = "Muuzaji"
+        cancelled_by_role_key = "seller"
     else:
         return
 
-    message = (
-        f"{cancelled_by_role} ameghairi Transaction "
-        f"#{transaction.id} ya '{transaction.listing.title}'."
-    )
-    if reason:
-        message += f" Sababu: {reason}"
+    lang = user_lang(recipient)
+    with override(lang):
+        cancelled_by_role = (
+            _("Mnunuzi") if cancelled_by_role_key == "buyer"
+            else _("Muuzaji")
+        )
 
-    create_notification(
-        recipient=recipient,
-        notification_type=(
-            Notification.NotificationType.TRANSACTION_CANCELLED
-        ),
-        title="Transaction Imeghairiwa",
-        message=message,
-        priority=Notification.Priority.HIGH,
-        related_object_type="Transaction",
-        related_object_id=transaction.id,
-        action_url=f"/transactions/{transaction.id}",
-    )
+        message = _(
+            "{role} ameghairi Transaction #{id} ya '{title}'."
+        ).format(
+            role=cancelled_by_role,
+            id=transaction.id,
+            title=transaction.listing.title,
+        )
+        if reason:
+            message += " " + _("Sababu: {reason}").format(reason=reason)
+
+        create_notification(
+            recipient=recipient,
+            notification_type=(
+                Notification.NotificationType.TRANSACTION_CANCELLED
+            ),
+            title=_("Transaction Imeghairiwa"),
+            message=message,
+            priority=Notification.Priority.HIGH,
+            related_object_type="Transaction",
+            related_object_id=transaction.id,
+            action_url=f"/transactions/{transaction.id}",
+        )
 
 
 # ============================================================================
@@ -192,45 +222,48 @@ def notify_transaction_cancelled(*, transaction, cancelled_by, reason):
 def notify_reservation_created(*, reservation):
     transaction = reservation.transaction
 
-    message = (
-        f"Reservation imeanzishwa kwa Transaction "
-        f"#{transaction.id} ya '{transaction.listing.title}'. "
-        f"Deposit inayotakiwa ni TZS "
-        f"{reservation.deposit_amount:,.2f}. "
-        f"Tafadhali kamilisha malipo ya reservation."
-    )
+    # Buyer
+    lang = user_lang(transaction.buyer)
+    with override(lang):
+        create_notification(
+            recipient=transaction.buyer,
+            notification_type=(
+                Notification.NotificationType.RESERVATION_CREATED
+            ),
+            title=_("Reservation Imeanzishwa"),
+            message=_(
+                "Reservation imeanzishwa kwa Transaction #{id} ya "
+                "'{title}'. Deposit inayotakiwa ni TZS {deposit}. "
+                "Tafadhali kamilisha malipo ya reservation."
+            ).format(
+                id=transaction.id,
+                title=transaction.listing.title,
+                deposit=f"{reservation.deposit_amount:,.2f}",
+            ),
+            priority=Notification.Priority.HIGH,
+            related_object_type="Reservation",
+            related_object_id=reservation.id,
+            action_url=f"/transactions/{transaction.id}",
+        )
 
-    create_notification(
-        recipient=transaction.buyer,
-        notification_type=(
-            Notification.NotificationType.RESERVATION_CREATED
-        ),
-        title="Reservation Imeanzishwa",
-        message=message,
-        priority=Notification.Priority.HIGH,
-        related_object_type="Reservation",
-        related_object_id=reservation.id,
-        action_url=f"/transactions/{transaction.id}",
-    )
-
-    seller_message = (
-        f"Mnunuzi ameanzisha reservation kwa Transaction "
-        f"#{transaction.id} ya tangazo '{transaction.listing.title}'. "
-        f"Inasubiri malipo ya reservation."
-    )
-
-    create_notification(
-        recipient=transaction.seller,
-        notification_type=(
-            Notification.NotificationType.RESERVATION_CREATED
-        ),
-        title="Reservation Mpya",
-        message=seller_message,
-        priority=Notification.Priority.HIGH,
-        related_object_type="Reservation",
-        related_object_id=reservation.id,
-        action_url=f"/transactions/{transaction.id}",
-    )
+    # Seller
+    lang = user_lang(transaction.seller)
+    with override(lang):
+        create_notification(
+            recipient=transaction.seller,
+            notification_type=(
+                Notification.NotificationType.RESERVATION_CREATED
+            ),
+            title=_("Reservation Mpya"),
+            message=_(
+                "Mnunuzi ameanzisha reservation kwa Transaction #{id} "
+                "ya tangazo '{title}'. Inasubiri malipo ya reservation."
+            ).format(id=transaction.id, title=transaction.listing.title),
+            priority=Notification.Priority.HIGH,
+            related_object_type="Reservation",
+            related_object_id=reservation.id,
+            action_url=f"/transactions/{transaction.id}",
+        )
 
 
 # ============================================================================
@@ -240,26 +273,28 @@ def notify_reservation_created(*, reservation):
 def notify_reservation_paid(*, reservation):
     transaction = reservation.transaction
 
-    message = (
-        f"Malipo ya reservation ya Transaction "
-        f"#{transaction.id} yamethibitishwa. "
-        f"Reservation ni ya saa {reservation.duration_hours} "
-        f"na imeanza rasmi."
-    )
-
     for recipient in (transaction.buyer, transaction.seller):
-        create_notification(
-            recipient=recipient,
-            notification_type=(
-                Notification.NotificationType.RESERVATION_PAID
-            ),
-            title="Reservation Imelipwa",
-            message=message,
-            priority=Notification.Priority.URGENT,
-            related_object_type="Reservation",
-            related_object_id=reservation.id,
-            action_url=f"/transactions/{transaction.id}",
-        )
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.RESERVATION_PAID
+                ),
+                title=_("Reservation Imelipwa"),
+                message=_(
+                    "Malipo ya reservation ya Transaction #{id} "
+                    "yamethibitishwa. Reservation ni ya saa {hours} "
+                    "na imeanza rasmi."
+                ).format(
+                    id=transaction.id,
+                    hours=reservation.duration_hours,
+                ),
+                priority=Notification.Priority.URGENT,
+                related_object_type="Reservation",
+                related_object_id=reservation.id,
+                action_url=f"/transactions/{transaction.id}",
+            )
 
 
 # ============================================================================
@@ -269,26 +304,28 @@ def notify_reservation_paid(*, reservation):
 def notify_reservation_expired(*, reservation):
     transaction = reservation.transaction
 
-    message = (
-        f"Reservation ya Transaction #{transaction.id} "
-        f"ya '{transaction.listing.title}' imeisha muda. "
-        f"Transaction imefungwa na tangazo limerudishwa "
-        f"kwenye hali ya AVAILABLE."
-    )
-
     for recipient in (transaction.buyer, transaction.seller):
-        create_notification(
-            recipient=recipient,
-            notification_type=(
-                Notification.NotificationType.RESERVATION_EXPIRED
-            ),
-            title="Reservation Imeisha",
-            message=message,
-            priority=Notification.Priority.URGENT,
-            related_object_type="Reservation",
-            related_object_id=reservation.id,
-            action_url=f"/transactions/{transaction.id}",
-        )
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.RESERVATION_EXPIRED
+                ),
+                title=_("Reservation Imeisha"),
+                message=_(
+                    "Reservation ya Transaction #{id} ya '{title}' "
+                    "imeisha muda. Transaction imefungwa na tangazo "
+                    "limerudishwa kwenye hali ya AVAILABLE."
+                ).format(
+                    id=transaction.id,
+                    title=transaction.listing.title,
+                ),
+                priority=Notification.Priority.URGENT,
+                related_object_type="Reservation",
+                related_object_id=reservation.id,
+                action_url=f"/transactions/{transaction.id}",
+            )
 
 
 # ============================================================================
@@ -298,26 +335,28 @@ def notify_reservation_expired(*, reservation):
 def notify_inspection_started(*, inspection):
     transaction = inspection.transaction
 
-    message = (
-        f"Inspection ya Transaction #{transaction.id} "
-        f"imeanza. Muda wa inspection ni saa "
-        f"{inspection.duration_hours}. "
-        f"Tafadhali kamilisha ukaguzi kabla ya muda kuisha."
-    )
-
     for recipient in (transaction.buyer, transaction.seller):
-        create_notification(
-            recipient=recipient,
-            notification_type=(
-                Notification.NotificationType.INSPECTION_STARTED
-            ),
-            title="Inspection Imeanza",
-            message=message,
-            priority=Notification.Priority.HIGH,
-            related_object_type="InspectionPeriod",
-            related_object_id=inspection.id,
-            action_url=f"/transactions/{transaction.id}",
-        )
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.INSPECTION_STARTED
+                ),
+                title=_("Inspection Imeanza"),
+                message=_(
+                    "Inspection ya Transaction #{id} imeanza. "
+                    "Muda wa inspection ni saa {hours}. "
+                    "Tafadhali kamilisha ukaguzi kabla ya muda kuisha."
+                ).format(
+                    id=transaction.id,
+                    hours=inspection.duration_hours,
+                ),
+                priority=Notification.Priority.HIGH,
+                related_object_type="InspectionPeriod",
+                related_object_id=inspection.id,
+                action_url=f"/transactions/{transaction.id}",
+            )
 
 
 # ============================================================================
@@ -327,21 +366,27 @@ def notify_inspection_started(*, inspection):
 def notify_inspection_completed(*, inspection):
     transaction = inspection.transaction
 
-    message = f"Inspection ya Transaction #{transaction.id} imekamilika."
-
-    if transaction.buyer_decision == Transaction.BuyerDecision.PENDING:
-        message += " Mnunuzi bado hajatoa uamuzi wa inspection."
-
     for recipient in (transaction.buyer, transaction.seller):
-        create_notification(
-            recipient=recipient,
-            notification_type=(
-                Notification.NotificationType.INSPECTION_COMPLETED
-            ),
-            title="Inspection Imekamilika",
-            message=message,
-            priority=Notification.Priority.HIGH,
-            related_object_type="InspectionPeriod",
-            related_object_id=inspection.id,
-            action_url=f"/transactions/{transaction.id}",
-        )
+        lang = user_lang(recipient)
+        with override(lang):
+            message = _(
+                "Inspection ya Transaction #{id} imekamilika."
+            ).format(id=transaction.id)
+
+            if transaction.buyer_decision == Transaction.BuyerDecision.PENDING:
+                message += " " + _(
+                    "Mnunuzi bado hajatoa uamuzi wa inspection."
+                )
+
+            create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.INSPECTION_COMPLETED
+                ),
+                title=_("Inspection Imekamilika"),
+                message=message,
+                priority=Notification.Priority.HIGH,
+                related_object_type="InspectionPeriod",
+                related_object_id=inspection.id,
+                action_url=f"/transactions/{transaction.id}",
+            )

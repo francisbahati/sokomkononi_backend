@@ -1,78 +1,106 @@
+from django.utils.translation import gettext as _, override
+
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
+from ._lang import user_lang
+
 
 def notify_deal_room_created(*, deal_room):
-    create_notification(
-        recipient=deal_room.seller,
-        notification_type=Notification.NotificationType.GENERAL,
-        title="Deal Room Mpya",
-        message=(
-            f"{deal_room.buyer.name} ameanza Deal Room "
-            f"kwa tangazo lako '{deal_room.listing.title}'."
-        ),
-        priority=Notification.Priority.NORMAL,
-        related_object_type="DealRoom",
-        related_object_id=deal_room.id,
-        action_url=f"/deals/{deal_room.id}",
-    )
+    recipient = deal_room.seller
+    lang = user_lang(recipient)
+    with override(lang):
+        create_notification(
+            recipient=recipient,
+            notification_type=Notification.NotificationType.GENERAL,
+            title=_("Deal Room Mpya"),
+            message=_(
+                "{buyer} ameanza Deal Room kwa tangazo lako '{title}'."
+            ).format(
+                buyer=deal_room.buyer.name,
+                title=deal_room.listing.title,
+            ),
+            priority=Notification.Priority.NORMAL,
+            related_object_type="DealRoom",
+            related_object_id=deal_room.id,
+            action_url=f"/deals/{deal_room.id}",
+        )
 
 
 def notify_new_offer(*, deal_room, offer):
     if offer.offered_by_id == deal_room.buyer_id:
         recipient = deal_room.seller
-        sender_role = "Mnunuzi"
+        sender_role_key = "buyer"
         notification_type = Notification.NotificationType.NEW_OFFER
-        title = "Offer Mpya"
+        title_key = "new_offer"
     else:
         recipient = deal_room.buyer
-        sender_role = "Muuzaji"
+        sender_role_key = "seller"
         notification_type = Notification.NotificationType.OFFER_COUNTERED
-        title = "Counter-offer Mpya"
+        title_key = "counter_offer"
 
-    if offer.responded_to_id:
-        message = (
-            f"{sender_role} ametuma counter-offer ya "
-            f"TZS {offer.amount:,.2f} kwenye Deal Room ya "
-            f"'{deal_room.listing.title}'."
+    lang = user_lang(recipient)
+    with override(lang):
+        sender_role = (
+            _("Mnunuzi") if sender_role_key == "buyer" else _("Muuzaji")
         )
-    else:
-        message = (
-            f"{sender_role} ametuma offer ya "
-            f"TZS {offer.amount:,.2f} kwenye Deal Room ya "
-            f"'{deal_room.listing.title}'."
+        title = (
+            _("Offer Mpya") if title_key == "new_offer"
+            else _("Counter-offer Mpya")
         )
 
-    create_notification(
-        recipient=recipient,
-        notification_type=notification_type,
-        title=title,
-        message=message,
-        priority=Notification.Priority.HIGH,
-        related_object_type="DealRoom",
-        related_object_id=deal_room.id,
-        action_url=f"/deals/{deal_room.id}",
-    )
+        if offer.responded_to_id:
+            message = _(
+                "{role} ametuma counter-offer ya TZS {amount} kwenye "
+                "Deal Room ya '{title}'."
+            ).format(
+                role=sender_role,
+                amount=f"{offer.amount:,.2f}",
+                title=deal_room.listing.title,
+            )
+        else:
+            message = _(
+                "{role} ametuma offer ya TZS {amount} kwenye "
+                "Deal Room ya '{title}'."
+            ).format(
+                role=sender_role,
+                amount=f"{offer.amount:,.2f}",
+                title=deal_room.listing.title,
+            )
 
-
-def notify_offer_accepted(*, deal_room, offer):
-    accepted_message = (
-        f"Offer ya TZS {offer.amount:,.2f} imekubaliwa "
-        f"kwa tangazo '{deal_room.listing.title}'. "
-        f"Deal Room sasa iko tayari kuendelea kwenye transaction."
-    )
-
-    for recipient in (deal_room.buyer, deal_room.seller):
         create_notification(
             recipient=recipient,
-            notification_type=Notification.NotificationType.OFFER_ACCEPTED,
-            title="Offer Imekubaliwa",
-            message=accepted_message,
-            priority=Notification.Priority.URGENT,
+            notification_type=notification_type,
+            title=title,
+            message=message,
+            priority=Notification.Priority.HIGH,
             related_object_type="DealRoom",
             related_object_id=deal_room.id,
             action_url=f"/deals/{deal_room.id}",
         )
+
+
+def notify_offer_accepted(*, deal_room, offer):
+    for recipient in (deal_room.buyer, deal_room.seller):
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=Notification.NotificationType.OFFER_ACCEPTED,
+                title=_("Offer Imekubaliwa"),
+                message=_(
+                    "Offer ya TZS {amount} imekubaliwa kwa tangazo "
+                    "'{title}'. Deal Room sasa iko tayari kuendelea "
+                    "kwenye transaction."
+                ).format(
+                    amount=f"{offer.amount:,.2f}",
+                    title=deal_room.listing.title,
+                ),
+                priority=Notification.Priority.URGENT,
+                related_object_type="DealRoom",
+                related_object_id=deal_room.id,
+                action_url=f"/deals/{deal_room.id}",
+            )
 
 
 def notify_offer_rejected(*, deal_room, offer):
@@ -80,43 +108,58 @@ def notify_offer_rejected(*, deal_room, offer):
     Notify the offerer that their offer was rejected because
     another offer on the same Deal Room won.
     """
-    create_notification(
-        recipient=offer.offered_by,
-        notification_type=Notification.NotificationType.OFFER_COUNTERED,
-        title="Offer Yako Imekataliwa",
-        message=(
-            f"Offer yako ya TZS {offer.amount:,.2f} kwenye Deal Room "
-            f"ya '{deal_room.listing.title}' haikuchaguliwa."
-        ),
-        priority=Notification.Priority.HIGH,
-        related_object_type="DealRoom",
-        related_object_id=deal_room.id,
-        action_url=f"/deals/{deal_room.id}",
-    )
+    recipient = offer.offered_by
+    lang = user_lang(recipient)
+    with override(lang):
+        create_notification(
+            recipient=recipient,
+            notification_type=Notification.NotificationType.OFFER_COUNTERED,
+            title=_("Offer Yako Imekataliwa"),
+            message=_(
+                "Offer yako ya TZS {amount} kwenye Deal Room ya "
+                "'{title}' haikuchaguliwa."
+            ).format(
+                amount=f"{offer.amount:,.2f}",
+                title=deal_room.listing.title,
+            ),
+            priority=Notification.Priority.HIGH,
+            related_object_type="DealRoom",
+            related_object_id=deal_room.id,
+            action_url=f"/deals/{deal_room.id}",
+        )
 
 
 def notify_deal_room_cancelled(*, deal_room, cancelled_by, reason=""):
     if cancelled_by.id == deal_room.buyer_id:
         recipient = deal_room.seller
-        cancelled_by_role = "Mnunuzi"
+        cancelled_by_role_key = "buyer"
     else:
         recipient = deal_room.buyer
-        cancelled_by_role = "Muuzaji"
+        cancelled_by_role_key = "seller"
 
-    message = (
-        f"{cancelled_by_role} amefunga Deal Room ya "
-        f"'{deal_room.listing.title}'."
-    )
-    if reason:
-        message += f" Sababu: {reason}"
+    lang = user_lang(recipient)
+    with override(lang):
+        cancelled_by_role = (
+            _("Mnunuzi") if cancelled_by_role_key == "buyer"
+            else _("Muuzaji")
+        )
 
-    create_notification(
-        recipient=recipient,
-        notification_type=Notification.NotificationType.GENERAL,
-        title="Deal Room Imefungwa",
-        message=message,
-        priority=Notification.Priority.HIGH,
-        related_object_type="DealRoom",
-        related_object_id=deal_room.id,
-        action_url=f"/deals/{deal_room.id}",
-    )
+        message = _(
+            "{role} amefunga Deal Room ya '{title}'."
+        ).format(
+            role=cancelled_by_role,
+            title=deal_room.listing.title,
+        )
+        if reason:
+            message += " " + _("Sababu: {reason}").format(reason=reason)
+
+        create_notification(
+            recipient=recipient,
+            notification_type=Notification.NotificationType.GENERAL,
+            title=_("Deal Room Imefungwa"),
+            message=message,
+            priority=Notification.Priority.HIGH,
+            related_object_type="DealRoom",
+            related_object_id=deal_room.id,
+            action_url=f"/deals/{deal_room.id}",
+        )

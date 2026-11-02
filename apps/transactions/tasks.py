@@ -23,6 +23,7 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
@@ -33,6 +34,7 @@ from .services.reservation import (
     expire_inspection_period,
     expire_reservation,
 )
+from .services._lang import user_lang
 from .email_notifications import (
     send_reservation_expiring_email,
     send_waiting_list_reservation_email,
@@ -181,23 +183,28 @@ def warn_expiring_reservations():
             ),
         )
 
-        create_notification(
-            recipient=transaction.buyer,
-            notification_type=(
-                Notification.NotificationType.RESERVATION_EXPIRING
-            ),
-            title="Reservation inakaribia kuisha",
-            message=(
-                f"Reservation yako ya Transaction #{transaction.id} "
-                f"ya '{transaction.listing.title}' inaisha baada ya "
-                f"saa {hours_left}. Tafadhali kamilisha hatua "
-                f"zinazofuata."
-            ),
-            priority=Notification.Priority.HIGH,
-            related_object_type="Reservation",
-            related_object_id=reservation.id,
-            action_url=f"/transactions/{transaction.id}",
-        )
+        lang = user_lang(transaction.buyer)
+        with override(lang):
+            create_notification(
+                recipient=transaction.buyer,
+                notification_type=(
+                    Notification.NotificationType.RESERVATION_EXPIRING
+                ),
+                title=_("Reservation inakaribia kuisha"),
+                message=_(
+                    "Reservation yako ya Transaction #{id} ya '{title}' "
+                    "inaisha baada ya saa {hours}. Tafadhali kamilisha "
+                    "hatua zinazofuata."
+                ).format(
+                    id=transaction.id,
+                    title=transaction.listing.title,
+                    hours=hours_left,
+                ),
+                priority=Notification.Priority.HIGH,
+                related_object_type="Reservation",
+                related_object_id=reservation.id,
+                action_url=f"/transactions/{transaction.id}",
+            )
 
         warned += 1
 
@@ -334,23 +341,28 @@ def notify_expiring_in_5_minutes():
         )
 
         # In-app
-        create_notification(
-            recipient=transaction.buyer,
-            notification_type=(
-                Notification.NotificationType.RESERVATION_EXPIRING
-            ),
-            title="Reservation inaisha baada ya dakika 5",
-            message=(
-                f"Reservation yako ya Transaction #{transaction.id} "
-                f"ya '{transaction.listing.title}' inaisha baada ya "
-                f"dakika {minutes_left}. "
-                f"Tafadhali renew ili uendelee kureserve, au cancel."
-            ),
-            priority=Notification.Priority.URGENT,
-            related_object_type="Reservation",
-            related_object_id=reservation.id,
-            action_url="/dashboard/buyer/reservations",
-        )
+        lang = user_lang(transaction.buyer)
+        with override(lang):
+            create_notification(
+                recipient=transaction.buyer,
+                notification_type=(
+                    Notification.NotificationType.RESERVATION_EXPIRING
+                ),
+                title=_("Reservation inaisha baada ya dakika 5"),
+                message=_(
+                    "Reservation yako ya Transaction #{id} ya '{title}' "
+                    "inaisha baada ya dakika {minutes}. Tafadhali renew "
+                    "ili uendelee kureserve, au cancel."
+                ).format(
+                    id=transaction.id,
+                    title=transaction.listing.title,
+                    minutes=minutes_left,
+                ),
+                priority=Notification.Priority.URGENT,
+                related_object_type="Reservation",
+                related_object_id=reservation.id,
+                action_url="/dashboard/buyer/reservations",
+            )
 
         # Email
         try:
@@ -416,26 +428,29 @@ def notify_waiting_list_expiring():
 
         for entry in entries:
             try:
-                create_notification(
-                    recipient=entry.buyer,
-                    notification_type=(
-                        Notification.NotificationType.WAITING_LIST_AVAILABLE
-                    ),
-                    title=f"Nafasi inakaribia kufunguka: {listing.title}",
-                    message=(
-                        f"Mtu aliyekuwa ameshikilia mali "
-                        f"'{listing.title}' anakaribia kumaliza "
-                        f"muda wake wa reservation. "
-                        f"Bofya kuweka reservation yako mapema."
-                    ),
-                    priority=Notification.Priority.HIGH,
-                    related_object_type="Listing",
-                    related_object_id=listing.id,
-                    action_url=(
-                        f"/dashboard/buyer/deals"
-                        f"?listing={listing.id}&action=reserve"
-                    ),
-                )
+                lang = user_lang(entry.buyer)
+                with override(lang):
+                    create_notification(
+                        recipient=entry.buyer,
+                        notification_type=(
+                            Notification.NotificationType.WAITING_LIST_AVAILABLE
+                        ),
+                        title=_("Nafasi inakaribia kufunguka: {title}").format(
+                            title=listing.title,
+                        ),
+                        message=_(
+                            "Mtu aliyekuwa ameshikilia mali '{title}' "
+                            "anakaribia kumaliza muda wake wa reservation. "
+                            "Bofya kuweka reservation yako mapema."
+                        ).format(title=listing.title),
+                        priority=Notification.Priority.HIGH,
+                        related_object_type="Listing",
+                        related_object_id=listing.id,
+                        action_url=(
+                            f"/dashboard/buyer/deals"
+                            f"?listing={listing.id}&action=reserve"
+                        ),
+                    )
 
                 # Email kwa waiting list buyer
                 try:

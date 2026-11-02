@@ -672,3 +672,264 @@ msgstr ""
 #: .\apps\verifications\notify.py:149
 msgid "hakuna sababu"
 msgstr "no reason provided"
+
+# ══════════════════════════════════════════════════════════
+# TRANSACTIONS — ADDITIONAL (transaction.py, reservation.py, dispute.py, tasks.py)
+# ══════════════════════════════════════════════════════════
+msgid "Uthibitisho wa malipo haujapokelewa"
+msgstr "Payment proof not received"
+
+msgid "Muuzaji hajapokea malipo yako ya Transaction #{id}"
+msgstr "Seller has not received your payment for Transaction #{id}"
+
+msgid "Tafadhali pakia uthibitisho mpya."
+msgstr "Please upload a new proof."
+
+msgid "Reservation imeongezwa muda"
+msgstr "Reservation extended"
+
+msgid ""
+"Reservation ya Transaction #{id} imeongezwa saa {hours}. Inaisha: "
+"{expires_at}."
+msgstr ""
+"Reservation for Transaction #{id} has been extended by {hours} hours. "
+"Expires: {expires_at}."
+
+msgid "Refund inahitajika — Reservation imelipwa baada ya kuisha"
+msgstr "Refund required — Reservation paid after expiry"
+
+msgid ""
+"Reservation #{id} ililipwa na mteja lakini ilikuwa imeisha / imefungwa. "
+"Tafadhali fanya refund manually."
+msgstr ""
+"Reservation #{id} was paid by the customer but had already expired / "
+"closed. Please process the refund manually."
+
+msgid "Refund inahitajika — Extension imelipwa baada ya reservation kuisha"
+msgstr "Refund required — Extension paid after reservation expired"
+
+msgid ""
+"Extension #{ext_id} ya Reservation #{res_id} ililipwa lakini reservation "
+"haipo ACTIVE. Tafadhali fanya refund manually."
+msgstr ""
+"Extension #{ext_id} for Reservation #{res_id} was paid but the reservation "
+"is not ACTIVE. Please process the refund manually."
+
+msgid "Extension imerefundiwa — kagua muda wa reservation"
+msgstr "Extension refunded — review reservation duration"
+
+msgid ""
+"Extension #{ext_id} (+{hours}h) ya Reservation #{res_id} imerefundiwa, "
+"lakini muda ulioongezwa haukuondolewa. Kagua kama inahitajika."
+msgstr ""
+"Extension #{ext_id} (+{hours}h) for Reservation #{res_id} has been "
+"refunded, but the added time was not removed. Review if needed."
+
+msgid "Mgogoro umetatuliwa — Transaction imekamilika"
+msgstr "Dispute resolved — Transaction completed"
+
+msgid ""
+"Mgogoro wa Transaction #{id} umetatuliwa na msimamizi. Transaction "
+"imekamilika na tangazo limewekwa SOLD."
+msgstr ""
+"Dispute for Transaction #{id} has been resolved by an administrator. "
+"Transaction is completed and listing is marked SOLD."
+
+msgid "Mgogoro umetatuliwa — Transaction imeghairiwa"
+msgstr "Dispute resolved — Transaction cancelled"
+
+msgid ""
+"Mgogoro wa Transaction #{id} umetatuliwa na msimamizi. Transaction "
+"imeghairiwa na tangazo limerudishwa kwenye hali ya AVAILABLE."
+msgstr ""
+"Dispute for Transaction #{id} has been resolved by an administrator. "
+"Transaction is cancelled and listing is back to AVAILABLE."
+
+msgid "Reservation inakaribia kuisha"
+msgstr "Reservation expiring soon"
+
+msgid ""
+"Reservation yako ya Transaction #{id} ya '{title}' inaisha baada ya saa "
+"{hours}. Tafadhali kamilisha hatua zinazofuata."
+msgstr ""
+"Your reservation for Transaction #{id} for '{title}' expires in {hours} "
+"hours. Please complete the next steps."
+
+msgid "Reservation inaisha baada ya dakika 5"
+msgstr "Reservation expires in 5 minutes"
+
+msgid ""
+"Reservation yako ya Transaction #{id} ya '{title}' inaisha baada ya "
+"dakika {minutes}. Tafadhali renew ili uendelee kureserve, au cancel."
+msgstr ""
+"Your reservation for Transaction #{id} for '{title}' expires in {minutes} "
+"minutes. Please renew to keep reserving, or cancel."
+
+msgid "Nafasi inakaribia kufunguka: {title}"
+msgstr "Spot opening soon: {title}"
+
+msgid ""
+"Mtu aliyekuwa ameshikilia mali '{title}' anakaribia kumaliza muda wake "
+"wa reservation. Bofya kuweka reservation yako mapema."
+msgstr ""
+"The person holding '{title}' is about to end their reservation. Click to "
+"reserve yours early."
+
+msgid "SokoMkononi: Reservation yako inaisha baada ya dakika {minutes}"
+msgstr "SokoMkononi: Your reservation expires in {minutes} minutes"
+
+msgid "SokoMkononi: Nafasi inakaribia kufunguka — {title}"
+msgstr "SokoMkononi: Spot opening soon — {title}"
+
+msgid "Mteja"
+msgstr "Customer"
+# ══════════════════════════════════════════════════════════
+# EMAIL TEMPLATES — reservation expiring
+# ══════════════════════════════════════════════════════════
+msgid ""
+"Reservation yako ya mali \"%(title)s\" (Transaction #%(tx)s) inaisha "
+"baada ya dakika %(minutes)s."
+msgstr ""
+"Your reservation for \"%(title)s\" (Transaction #%(tx)s) expires in "
+"%(minutes)s minutes."
+
+msgid "Kama unataka kuendelea kureserve, unaweza ku-renew reservation yako."
+msgstr "If you want to keep reserving, you can renew your reservation."
+
+msgid "Kama hutaki kuendelea, unaweza ku-cancel."
+msgstr "If you don't want to continue, you can cancel."
+
+msgid "Bofya link hapa chini"
+msgstr "Click the link below"
+
+msgid ""
+"Mtu aliyekuwa ameshikilia mali \"%(title)s\" anakaribia kumaliza muda wake "
+"wa reservation."
+msgstr ""
+"The person holding \"%(title)s\" is about to end their reservation."
+
+msgid "Hii ni nafasi yako! Bofya kuweka reservation yako mapema"
+msgstr "This is your chance! Click to reserve early"
+
+msgid "Asante"
+msgstr "Thank you"
+
+# ══════════════════════════════════════════════════════════
+# DEALS
+# ══════════════════════════════════════════════════════════
+msgid "Deal Room Mpya"
+msgstr "New Deal Room"
+
+msgid "{buyer} ameanza Deal Room kwa tangazo lako '{title}'."
+msgstr "{buyer} has started a Deal Room for your listing '{title}'."
+
+msgid "Offer Mpya"
+msgstr "New Offer"
+
+msgid "Counter-offer Mpya"
+msgstr "New Counter-offer"
+
+msgid ""
+"{role} ametuma counter-offer ya TZS {amount} kwenye Deal Room ya "
+"'{title}'."
+msgstr ""
+"{role} has sent a counter-offer of TZS {amount} on the Deal Room for "
+"'{title}'."
+
+msgid "{role} ametuma offer ya TZS {amount} kwenye Deal Room ya '{title}'."
+msgstr "{role} has sent an offer of TZS {amount} on the Deal Room for '{title}'."
+
+msgid "Offer Imekubaliwa"
+msgstr "Offer Accepted"
+
+msgid ""
+"Offer ya TZS {amount} imekubaliwa kwa tangazo '{title}'. Deal Room "
+"sasa iko tayari kuendelea kwenye transaction."
+msgstr ""
+"The offer of TZS {amount} has been accepted for listing '{title}'. "
+"The Deal Room is now ready to proceed to a transaction."
+
+msgid "Offer Yako Imekataliwa"
+msgstr "Your Offer Was Rejected"
+
+msgid ""
+"Offer yako ya TZS {amount} kwenye Deal Room ya '{title}' "
+"haikuchaguliwa."
+msgstr ""
+"Your offer of TZS {amount} on the Deal Room for '{title}' was not "
+"selected."
+
+msgid "Deal Room Imefungwa"
+msgstr "Deal Room Closed"
+
+msgid "{role} amefunga Deal Room ya '{title}'."
+msgstr "{role} has closed the Deal Room for '{title}'."
+
+# ══════════════════════════════════════════════════════════
+# LISTINGS
+# ══════════════════════════════════════════════════════════
+msgid "Admin ameomba uhariri wa tangazo"
+msgstr "Admin requested listing edit"
+
+msgid "Admin ameomba uhariri wa \"{title}\". Sababu: {reason}"
+msgstr "Admin requested an edit for \"{title}\". Reason: {reason}"
+
+msgid "Tangazo limekataliwa"
+msgstr "Listing rejected"
+
+msgid "Tangazo lako \"{title}\" halikuidhinishwa. Sababu: {reason}"
+msgstr "Your listing \"{title}\" was not approved. Reason: {reason}"
+
+msgid "Tangazo lako liko hewani!"
+msgstr "Your listing is live!"
+
+msgid "Tangazo lako \"{title}\" limeidhinishwa bila malipo na sasa linaonekana kwa wanunuzi."
+msgstr "Your listing \"{title}\" has been approved for free and is now visible to buyers."
+
+msgid "Lipa ada ya kuchapisha tangazo"
+msgstr "Pay listing fee"
+
+msgid "Tangazo lako \"{title}\" limekaguliwa na ni zuri. Tafadhali lipa ada ya kuchapisha ili liidhinishwe."
+msgstr "Your listing \"{title}\" has been reviewed and looks good. Please pay the listing fee so it can be approved."
+
+msgid "Maelezo: {notes}"
+msgstr "Notes: {notes}"
+
+msgid "Tangazo lako \"{title}\" limeidhinishwa na sasa linaonekana kwa wanunuzi."
+msgstr "Your listing \"{title}\" has been approved and is now visible to buyers."
+
+msgid "Tangazo limeidhinishwa"
+msgstr "Listing approved"
+
+msgid "Tangazo lako \"{title}\" limeidhinishwa na sasa linapatikana."
+msgstr "Your listing \"{title}\" has been approved and is now live."
+
+msgid "Ada ya tangazo imelipwa"
+msgstr "Listing fee paid"
+
+msgid "\"{title}\" — tayari kwa idhini ya mwisho."
+msgstr "\"{title}\" — ready for final approval."
+
+msgid "Nafasi imefunguliwa!"
+msgstr "Spot opened!"
+
+msgid "Tangazo '{title}' sasa linapatikana. Una masaa {hours} kuanza reservation yako kabla ya nafasi kwenda kwa mtu mwingine."
+msgstr "Listing '{title}' is now available. You have {hours} hours to start your reservation before the spot goes to someone else."
+
+msgid "Mali Imemarkiwa kama Imepande"
+msgstr "Property Marked as Sold"
+
+msgid "{seller} amemarki tangazo \"{title}\" kama SOLD (imeshauzwa)."
+msgstr "{seller} marked listing \"{title}\" as SOLD (sold out)."
+
+msgid "Tangazo tayari kwa idhini (bure)"
+msgstr "Listing ready for approval (free)"
+
+msgid "\"{title}\" imewasilishwa bila ada."
+msgstr "\"{title}\" submitted without fee."
+
+msgid "Tangazo tayari kwa idhini ya mwisho (credits)"
+msgstr "Listing ready for final approval (credits)"
+
+msgid "\"{title}\" imelipwa kwa credits."
+msgstr "\"{title}\" paid with credits."

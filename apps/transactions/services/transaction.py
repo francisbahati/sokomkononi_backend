@@ -5,6 +5,9 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.deals.models import DealRoom
+from django.utils.translation import gettext as _, override
+
+from ._lang import user_lang
 from apps.listings.models import Listing
 from apps.waiting_list.services.notifications import notify_waiting_buyers
 
@@ -309,23 +312,27 @@ def reject_final_payment_proof(*, transaction, seller, reason=""):
     )
 
     # Notification kwa mnunuzi
+        # Notification kwa mnunuzi
     try:
         from apps.notifications.models import Notification
         from apps.notifications.services.notification import create_notification
-        create_notification(
-            recipient=transaction.buyer,
-            notification_type=Notification.NotificationType.GENERAL,
-            title="Uthibitisho wa malipo haujapokelewa",
-            message=(
-                f"Muuzaji hajapokea malipo yako ya Transaction #{transaction.pk}"
-                + (f". Sababu: {reason}" if reason else ".")
-                + " Tafadhali pakia uthibitisho mpya."
-            ),
-            priority=Notification.Priority.HIGH,
-            related_object_type="Transaction",
-            related_object_id=transaction.pk,
-            action_url=f"/transactions/{transaction.pk}",
-        )
+
+        lang = user_lang(transaction.buyer)
+        with override(lang):
+            create_notification(
+                recipient=transaction.buyer,
+                notification_type=Notification.NotificationType.GENERAL,
+                title=_("Uthibitisho wa malipo haujapokelewa"),
+                message=_(
+                    "Muuzaji hajapokea malipo yako ya Transaction #{id}"
+                ).format(id=transaction.pk)
+                + (f". " + _("Sababu: {reason}").format(reason=reason) if reason else ".")
+                + " " + _("Tafadhali pakia uthibitisho mpya."),
+                priority=Notification.Priority.HIGH,
+                related_object_type="Transaction",
+                related_object_id=transaction.pk,
+                action_url=f"/transactions/{transaction.pk}",
+            )
     except Exception:
         logger.exception("reject proof notification failed")
 

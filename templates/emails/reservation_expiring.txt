@@ -1,12 +1,12 @@
-Habari {{ buyer_name }},
+{% load i18n %}{% trans "Habari" %} {{ buyer_name }},
 
-Reservation yako ya mali "{{ listing_title }}" (Transaction #{{ transaction_id }}) inaisha baada ya dakika {{ minutes_left }}.
+{% blocktrans with title=listing_title tx=transaction_id minutes=minutes_left %}Reservation yako ya mali "{{ title }}" (Transaction #{{ tx }}) inaisha baada ya dakika {{ minutes }}.{% endblocktrans %}
 
-Kama unataka kuendelea kureserve, unaweza ku-renew reservation yako.
-Kama hutaki kuendelea, unaweza ku-cancel.
+{% trans "Kama unataka kuendelea kureserve, unaweza ku-renew reservation yako." %}
+{% trans "Kama hutaki kuendelea, unaweza ku-cancel." %}
 
-Bofya link hapa chini:
+{% trans "Bofya link hapa chini" %}:
 {{ site_url }}/dashboard/buyer/reservations
 
-Asante,
+{% trans "Asante" %},
 SokoMkononi

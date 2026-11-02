@@ -14,6 +14,7 @@ Only an admin can move a transaction out of DISPUTED:
 
 from django.db import transaction as db_transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 from rest_framework.exceptions import ValidationError
 
 from apps.deals.models import DealRoom
@@ -22,6 +23,7 @@ from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
 from ..models import InspectionPeriod, Reservation, Transaction
+from ._lang import user_lang
 
 
 RESOLUTION_COMPLETED = "COMPLETED"
@@ -141,24 +143,28 @@ def _resolve_as_completed(*, transaction, note, now, admin_user=None):
 
     recipients = [transaction.buyer, transaction.seller]
     for recipient in recipients:
-        db_transaction.on_commit(
-            lambda recipient=recipient: create_notification(
-                recipient=recipient,
-                notification_type=(
-                    Notification.NotificationType.TRANSACTION_COMPLETED
-                ),
-                title="Mgogoro umetatuliwa — Transaction imekamilika",
-            message=(
-                f"Mgogoro wa Transaction #{transaction.id} "
-                f"umetatuliwa na msimamizi. Transaction imekamilika "
-                f"na tangazo limewekwa SOLD."
-            ),
-            priority=Notification.Priority.URGENT,
-            related_object_type="Transaction",
-            related_object_id=transaction.id,
-                action_url=f"/transactions/{transaction.id}",
-            )
-        )
+        lang = user_lang(recipient)
+
+        def _send(recipient=recipient, lang=lang):
+            with override(lang):
+                create_notification(
+                    recipient=recipient,
+                    notification_type=(
+                        Notification.NotificationType.TRANSACTION_COMPLETED
+                    ),
+                    title=_("Mgogoro umetatuliwa — Transaction imekamilika"),
+                    message=_(
+                        "Mgogoro wa Transaction #{id} umetatuliwa na "
+                        "msimamizi. Transaction imekamilika na tangazo "
+                        "limewekwa SOLD."
+                    ).format(id=transaction.id),
+                    priority=Notification.Priority.URGENT,
+                    related_object_type="Transaction",
+                    related_object_id=transaction.id,
+                    action_url=f"/transactions/{transaction.id}",
+                )
+
+        db_transaction.on_commit(_send)
 
 
 def _resolve_as_cancelled(*, transaction, note, now, admin_user=None):
@@ -206,22 +212,24 @@ def _resolve_as_cancelled(*, transaction, note, now, admin_user=None):
         inspection.save(update_fields=["status", "updated_at"])
 
     for recipient in (transaction.buyer, transaction.seller):
-        create_notification(
-            recipient=recipient,
-            notification_type=(
-                Notification.NotificationType.TRANSACTION_CANCELLED
-            ),
-            title="Mgogoro umetatuliwa — Transaction imeghairiwa",
-            message=(
-                f"Mgogoro wa Transaction #{transaction.id} "
-                f"umetatuliwa na msimamizi. Transaction imeghairiwa "
-                f"na tangazo limerudishwa kwenye hali ya AVAILABLE."
-            ),
-            priority=Notification.Priority.URGENT,
-            related_object_type="Transaction",
-            related_object_id=transaction.id,
-            action_url=f"/transactions/{transaction.id}",
-        )
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.TRANSACTION_CANCELLED
+                ),
+                title=_("Mgogoro umetatuliwa — Transaction imeghairiwa"),
+                message=_(
+                    "Mgogoro wa Transaction #{id} umetatuliwa na "
+                    "msimamizi. Transaction imeghairiwa na tangazo "
+                    "limerudishwa kwenye hali ya AVAILABLE."
+                ).format(id=transaction.id),
+                priority=Notification.Priority.URGENT,
+                related_object_type="Transaction",
+                related_object_id=transaction.id,
+                action_url=f"/transactions/{transaction.id}",
+            )
 
     if listing_reopened:
         from apps.waiting_list.services.notifications import notify_waiting_buyers

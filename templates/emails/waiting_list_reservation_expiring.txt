@@ -1,10 +1,10 @@
-Habari {{ buyer_name }},
+{% load i18n %}{% trans "Habari" %} {{ buyer_name }},
 
-Mtu aliyekuwa ameshikilia mali "{{ listing_title }}" anakaribia kumaliza muda wake wa reservation.
+{% blocktrans with title=listing_title %}Mtu aliyekuwa ameshikilia mali "{{ title }}" anakaribia kumaliza muda wake wa reservation.{% endblocktrans %}
 
-Hii ni nafasi yako! Bofya kuweka reservation yako mapema:
+{% trans "Hii ni nafasi yako! Bofya kuweka reservation yako mapema" %}:
 
 {{ site_url }}/dashboard/buyer/deals?listing={{ listing_id }}&action=reserve
 
-Asante,
+{% trans "Asante" %},
 SokoMkononi

@@ -7,6 +7,8 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.listings.models import Listing
+from django.utils.translation import gettext as _, override
+from ._lang import user_lang
 from apps.waiting_list.services.notifications import notify_waiting_buyers
 
 from ..models import (
@@ -644,14 +646,19 @@ def mark_reservation_paid_from_webhook(*, ref_id, payment_reference):
             from apps.notifications.services.notification import (
                 create_notification_for_admins,
             )
+            # Admins wanaweza kuwa na lugha tofauti — tumia
+            # `create_notification_for_admins` bila `override` (default "sw")
+            # au tumia `_()` (itatafsiriwa kwa lugha ya request/thread).
+            # Kwa admin, lugha ya default ni "sw" — `_()` inatosha.
             create_notification_for_admins(
                 notification_type=Notification.NotificationType.GENERAL,
-                title="Refund inahitajika — Reservation imelipwa baada ya kuisha",
-                message=(
-                    f"Reservation #{reservation.pk} ililipwa na mteja "
-                    f"lakini ilikuwa imeisha / imefungwa. "
-                    f"Tafadhali fanya refund manually."
+                title=_(
+                    "Refund inahitajika — Reservation imelipwa baada ya kuisha"
                 ),
+                message=_(
+                    "Reservation #{id} ililipwa na mteja lakini ilikuwa "
+                    "imeisha / imefungwa. Tafadhali fanya refund manually."
+                ).format(id=reservation.pk),
                 priority=Notification.Priority.URGENT,
                 related_object_type="Reservation",
                 related_object_id=reservation.pk,
@@ -1064,12 +1071,15 @@ def _apply_extension(*, extension, reservation, transaction, payment_reference):
             )
             create_notification_for_admins(
                 notification_type=Notification.NotificationType.GENERAL,
-                title="Refund inahitajika — Extension imelipwa baada ya reservation kuisha",
-                message=(
-                    f"Extension #{extension.pk} ya Reservation "
-                    f"#{reservation.pk} ililipwa lakini reservation "
-                    f"haipo ACTIVE. Tafadhali fanya refund manually."
+                title=_(
+                    "Refund inahitajika — Extension imelipwa baada ya "
+                    "reservation kuisha"
                 ),
+                message=_(
+                    "Extension #{ext_id} ya Reservation #{res_id} ililipwa "
+                    "lakini reservation haipo ACTIVE. Tafadhali fanya "
+                    "refund manually."
+                ).format(ext_id=extension.pk, res_id=reservation.pk),
                 priority=Notification.Priority.URGENT,
                 related_object_type="Reservation",
                 related_object_id=reservation.pk,
@@ -1122,20 +1132,25 @@ def _apply_extension(*, extension, reservation, transaction, payment_reference):
                 create_notification,
             )
             for recipient in (transaction.buyer, transaction.seller):
-                create_notification(
-                    recipient=recipient,
-                    notification_type=Notification.NotificationType.GENERAL,
-                    title="Reservation imeongezwa muda",
-                    message=(
-                        f"Reservation ya Transaction #{transaction.id} "
-                        f"imeongezwa saa {hours}. "
-                        f"Inaisha: {reservation.expires_at}."
-                    ),
-                    priority=Notification.Priority.HIGH,
-                    related_object_type="Reservation",
-                    related_object_id=reservation.id,
-                    action_url=f"/transactions/{transaction.id}",
-                )
+                lang = user_lang(recipient)
+                with override(lang):
+                    create_notification(
+                        recipient=recipient,
+                        notification_type=Notification.NotificationType.GENERAL,
+                        title=_("Reservation imeongezwa muda"),
+                        message=_(
+                            "Reservation ya Transaction #{id} "
+                            "imeongezwa saa {hours}. Inaisha: {expires_at}."
+                        ).format(
+                            id=transaction.id,
+                            hours=hours,
+                            expires_at=reservation.expires_at,
+                        ),
+                        priority=Notification.Priority.HIGH,
+                        related_object_type="Reservation",
+                        related_object_id=reservation.id,
+                        action_url=f"/transactions/{transaction.id}",
+                    )
         except Exception:
             logger.exception("reservation extend notify failed")
 
@@ -1318,12 +1333,17 @@ def mark_extension_as_refunded(*, ref_id, reason=""):
             )
             create_notification_for_admins(
                 notification_type=Notification.NotificationType.GENERAL,
-                title="Extension imerefundiwa — kagua muda wa reservation",
-                message=(
-                    f"Extension #{extension.pk} (+{extension.additional_hours}h) "
-                    f"ya Reservation #{extension.reservation_id} "
-                    f"imerefundiwa, lakini muda ulioongezwa haukuondolewa. "
-                    f"Kagua kama inahitajika."
+                title=_(
+                    "Extension imerefundiwa — kagua muda wa reservation"
+                ),
+                message=_(
+                    "Extension #{ext_id} (+{hours}h) ya Reservation "
+                    "#{res_id} imerefundiwa, lakini muda ulioongezwa "
+                    "haukuondolewa. Kagua kama inahitajika."
+                ).format(
+                    ext_id=extension.pk,
+                    hours=extension.additional_hours,
+                    res_id=extension.reservation_id,
                 ),
                 priority=Notification.Priority.HIGH,
                 related_object_type="Reservation",

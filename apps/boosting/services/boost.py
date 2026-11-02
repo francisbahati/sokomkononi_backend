@@ -6,9 +6,12 @@ from django.conf import settings
 from django.db import models
 from django.db import transaction as db_transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 from rest_framework.exceptions import ValidationError
 
 from apps.listings.models import Listing
+
+from ._lang import user_lang
 
 
 try:
@@ -290,24 +293,30 @@ def activate_boost(*, boost):
     listing.save(update_fields=["is_boosted", "boosted_until", "updated_at"])
 
     seller = boost.seller
+    listing_id = listing.id
     listing_title = listing.title
     boost_expires = expires_at
+    lang = user_lang(seller)
 
-    db_transaction.on_commit(
-        lambda: create_notification(
-            recipient=seller,
-            notification_type="BOOST_ACTIVATED",
-            title="Boost imewashwa",
-            message=(
-                f'Boost ya tangazo "{listing_title}" imewashwa '
-                f'hadi {boost_expires.strftime("%Y-%m-%d %H:%M")}.'
-            ),
-            related_object_type="listing",
-            related_object_id=listing.id,
-            action_url=f"/listings/{listing.id}/",
-            priority="NORMAL",
-        )
-    )
+    def _notify():
+        with override(lang):
+            create_notification(
+                recipient=seller,
+                notification_type="BOOST_ACTIVATED",
+                title=_("Boost imewashwa"),
+                message=_(
+                    'Boost ya tangazo "{title}" imewashwa hadi {expires}.'
+                ).format(
+                    title=listing_title,
+                    expires=boost_expires.strftime("%Y-%m-%d %H:%M"),
+                ),
+                related_object_type="listing",
+                related_object_id=listing_id,
+                action_url=f"/listings/{listing_id}/",
+                priority="NORMAL",
+            )
+
+    db_transaction.on_commit(_notify)
 
     return boost
 

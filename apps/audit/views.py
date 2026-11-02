@@ -63,15 +63,19 @@ class AuditLogViewSet(viewsets.GenericViewSet):
     def list(self, request):
         qs = self.get_queryset()
         page = self.paginate_queryset(qs)
-        serializer = AuditLogSerializer(page if page is not None else qs, many=True)
+        serializer = AuditLogSerializer(
+            page if page is not None else qs,
+            many=True,
+            context={"request": request},
+        )
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
-
     def retrieve(self, request, pk=None):
         obj = self.get_object()
-        return Response(AuditLogSerializer(obj).data)
-
+        return Response(
+            AuditLogSerializer(obj, context={"request": request}).data,
+        )
     # ------------------------------------------------------------
     # DELETE — moja moja (superuser pekee)
     # ------------------------------------------------------------

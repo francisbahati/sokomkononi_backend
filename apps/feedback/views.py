@@ -1,6 +1,7 @@
 import logging
 
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,6 +12,7 @@ from .serializers import (
     FeedbackRespondSerializer,
     FeedbackSerializer,
 )
+from ._lang import user_lang
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,9 @@ class FeedbackViewSet(viewsets.GenericViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Feedback.objects.select_related("user", "listing", "replied_by")
+        qs = Feedback.objects.select_related(
+            "user", "user__preferences", "listing", "replied_by",
+        )
         if user.is_staff:
             return qs
         return qs.filter(user=user)
@@ -87,10 +91,10 @@ class FeedbackViewSet(viewsets.GenericViewSet):
             )
             create_notification_for_admins(
                 notification_type=Notification.NotificationType.GENERAL,
-                title="Maoni mapya kutoka kwa mtumiaji",
-                message=(
-                    f"{feedback.user_name or feedback.user_email}: "
-                    f"{feedback.subject}"
+                title=_("Maoni mapya kutoka kwa mtumiaji"),
+                message=_("{user}: {subject}").format(
+                    user=feedback.user_name or feedback.user_email,
+                    subject=feedback.subject,
                 ),
                 priority=Notification.Priority.NORMAL,
                 related_object_type="feedback.Feedback",
@@ -98,7 +102,9 @@ class FeedbackViewSet(viewsets.GenericViewSet):
                 action_url="/dashboard/admin/support?view=feedback",
             )
         except Exception:
-            logger.exception("Failed to notify admins about feedback %s", feedback.pk)
+            logger.exception(
+                "Failed to notify admins about feedback %s", feedback.pk,
+            )
 
         return Response(
             FeedbackSerializer(feedback).data,
@@ -141,18 +147,25 @@ class FeedbackViewSet(viewsets.GenericViewSet):
         try:
             from apps.notifications.models import Notification
             from apps.notifications.services.notification import create_notification
-            create_notification(
-                recipient=feedback.user,
-                notification_type=Notification.NotificationType.GENERAL,
-                title="Maoni yako yamejibiwa",
-                message=f"SokoMkononi: {feedback.admin_reply[:200]}",
-                priority=Notification.Priority.NORMAL,
-                related_object_type="feedback.Feedback",
-                related_object_id=feedback.id,
-                action_url="/dashboard/feedback",
-            )
+
+            lang = user_lang(feedback.user)
+            with override(lang):
+                create_notification(
+                    recipient=feedback.user,
+                    notification_type=Notification.NotificationType.GENERAL,
+                    title=_("Maoni yako yamejibiwa"),
+                    message=_("SokoMkononi: {reply}").format(
+                        reply=feedback.admin_reply[:200],
+                    ),
+                    priority=Notification.Priority.NORMAL,
+                    related_object_type="feedback.Feedback",
+                    related_object_id=feedback.id,
+                    action_url="/dashboard/feedback",
+                )
         except Exception:
-            logger.exception("Failed to notify feedback author %s", feedback.pk)
+            logger.exception(
+                "Failed to notify feedback author %s", feedback.pk,
+            )
 
         return Response(FeedbackSerializer(feedback).data)
 

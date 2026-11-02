@@ -13,13 +13,16 @@ class AuditLogSerializer(serializers.ModelSerializer):
     """
     # ✅ Field mpya kwa ajili ya UI ya lugha mbili
     details_bilingual = serializers.SerializerMethodField()
+    # ✅ Field mpya: string moja kulingana na Accept-Language
+    details_display = serializers.SerializerMethodField()
 
     class Meta:
         model = AuditLog
         fields = [
             "id", "action", "admin_user", "admin_name",
             "target", "target_id",
-            "details", "details_sw", "details_en", "details_bilingual",
+            "details", "details_sw", "details_en",
+            "details_bilingual", "details_display",
             "ip_address", "user_agent", "request_path", "request_method",
             "created_at",
         ]
@@ -31,3 +34,18 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "sw": obj.details_sw or obj.details or "",
             "en": obj.details_en or obj.details or "",
         }
+
+    def get_details_display(self, obj):
+        """
+        Rudisha string moja kulingana na lugha ya request
+        (Accept-Language). Fallback: details_sw → details_en → details.
+        """
+        request = self.context.get("request")
+        lang = "sw"
+        if request is not None:
+            raw = (request.headers.get("Accept-Language") or "sw").lower()
+            lang = "en" if raw.startswith("en") else "sw"
+
+        if lang == "en":
+            return obj.details_en or obj.details_sw or obj.details or ""
+        return obj.details_sw or obj.details_en or obj.details or ""

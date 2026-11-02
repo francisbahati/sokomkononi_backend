@@ -32,6 +32,27 @@ AUDIT_TEMPLATES = {
     # Verifications
     "verification.approved": ('Uthibitisho wa "{name}" umekubaliwa.', 'Verification for "{name}" was approved.'),
     "verification.rejected": ('Uthibitisho wa "{name}" umekataliwa. Sababu: {reason}', 'Verification for "{name}" was rejected. Reason: {reason}'),
+        # Verifications (mpya — params zinalingana)
+    "verification.created": (
+        'Ombi la uthibitisho "{type}" kwa "{subject}" limeundwa.',
+        'Verification request "{type}" for "{subject}" was created.',
+    ),
+    "verification.documents_requested": (
+        'Nyaraka zaidi zimeombwa kwa uthibitisho "{name}". Ujumbe: {message}',
+        'More documents requested for verification "{name}". Message: {message}',
+    ),
+    "verification.document_uploaded": (
+        'Nyaraka "{filename}" imepakiwa kwa ombi #{request_id}.',
+        'Document "{filename}" was uploaded for request #{request_id}.',
+    ),
+    "verification.document_streamed": (
+        'Nyaraka imefikiwa (hifadhi: {storage}).',
+        'Document accessed (storage: {storage}).',
+    ),
+    "verification.deleted": (
+        'Ombi la uthibitisho "{name}" limefutwa.',
+        'Verification request "{name}" was deleted.',
+    ),
     # Deals / disputes / refunds
     "dispute.resolved":  ('Mgogoro "{name}" umetatuliwa.', 'Dispute "{name}" was resolved.'),
     "deal.cancelled":    ('Muamala "{name}" umefutwa.', 'Deal "{name}" was cancelled.'),

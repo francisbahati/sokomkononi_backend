@@ -995,3 +995,27 @@ msgstr "Ticket {code} has been handled"
 
 msgid "Hali mpya: {status}"
 msgstr "New status: {status}"
+
+# ══════════════════════════════════════════════════════════
+# FEEDBACK
+# ══════════════════════════════════════════════════════════
+msgid "Maoni mapya kutoka kwa mtumiaji"
+msgstr "New feedback from user"
+
+msgid "{user}: {subject}"
+msgstr "{user}: {subject}"
+
+msgid "Maoni yako yamejibiwa"
+msgstr "Your feedback has been answered"
+
+msgid "SokoMkononi: {reply}"
+msgstr "SokoMkononi: {reply}"
+
+# ══════════════════════════════════════════════════════════
+# BOOSTING
+# ══════════════════════════════════════════════════════════
+msgid "Boost imewashwa"
+msgstr "Boost activated"
+
+msgid "Boost ya tangazo \"{title}\" imewashwa hadi {expires}."
+msgstr "Boost for listing \"{title}\" is active until {expires}."

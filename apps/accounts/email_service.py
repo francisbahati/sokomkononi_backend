@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
+from django.utils.translation import gettext as _, override
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +29,9 @@ def _redact(email):
 
 
 # ============================================================
-# URL HELPER — kinga ya mwisho kwa URL kamili
+# URL HELPER
 # ============================================================
 def _absolute_url(path, default_path="/dashboard/verification"):
-    """
-    Badilisha relative path kuwa URL kamili.
-    "/dashboard/verification" -> "https://sokomkononi.co.tz/dashboard/verification"
-    """
     path = path or default_path
     if path.startswith(("http://", "https://")):
         return path
@@ -42,21 +39,31 @@ def _absolute_url(path, default_path="/dashboard/verification"):
     return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
-def _send(*, to_email, subject, template_base, context):
+# ============================================================
+# SEND HELPER — inaunga mkono lugha
+# ============================================================
+def _send(*, to_email, subject, template_base, context, language="sw"):
     if not to_email:
         return EmailResult(False, "recipient empty")
 
-    try:
-        html_body = render_to_string(f"accounts/emails/{template_base}.html", context)
-    except Exception:
-        logger.exception("HTML render failed: %s", template_base)
-        html_body = None
+    lang = language or "sw"
 
-    try:
-        text_body = render_to_string(f"accounts/emails/{template_base}.txt", context)
-    except Exception:
-        logger.exception("TXT render failed: %s", template_base)
+    with override(lang):
+        html_body = None
+        try:
+            html_body = render_to_string(
+                f"accounts/emails/{template_base}.html", context,
+            )
+        except Exception:
+            logger.exception("HTML render failed: %s", template_base)
+
         text_body = None
+        try:
+            text_body = render_to_string(
+                f"accounts/emails/{template_base}.txt", context,
+            )
+        except Exception:
+            logger.exception("TXT render failed: %s", template_base)
 
     if not html_body and not text_body:
         return EmailResult(False, "both templates failed to render")
@@ -78,173 +85,172 @@ def _send(*, to_email, subject, template_base, context):
         logger.info("Email sent: %s -> %s", subject[:60], _redact(to_email))
         return EmailResult(True)
     except Exception as exc:
-        logger.exception("Email send failed: %s -> %s", subject[:60], _redact(to_email))
+        logger.exception(
+            "Email send failed: %s -> %s", subject[:60], _redact(to_email),
+        )
         return EmailResult(False, str(exc))
 
 
+# ============================================================
+# OTP + welcome + account
+# ============================================================
 def send_otp_email(*, user, otp, purpose="register"):
     to_email = getattr(user, "email", None) or user
-    name = getattr(user, "name", "") or "mteja"
+    name = getattr(user, "name", "") or _("mteja")
     if purpose == "register":
-        subject = "SokoMkononi — Nambari yako ya uthibitisho"
+        subject = _("SokoMkononi — Nambari yako ya uthibitisho")
         template = "otp_verification"
     else:
-        subject = "SokoMkononi — Kubadilisha nenosiri"
+        subject = _("SokoMkononi — Kubadilisha nenosiri")
         template = "password_reset"
     return _send(
-        to_email=to_email, subject=subject,
+        to_email=to_email, subject=str(subject),
         template_base=template, context={"otp": otp, "name": name},
     )
 
 
 def send_welcome_email(*, user):
-    """
-    Send the welcome email.
-
-    `user` can be a User instance, a dict with {email, name}, or a
-    plain email string. This lets tests and scripts call it easily.
-    """
     if isinstance(user, str):
         to_email = user
-        name = "mteja"
+        name = _("mteja")
     elif isinstance(user, dict):
         to_email = user.get("email") or user.get("EMAIL")
-        name = user.get("name") or user.get("NAME") or "mteja"
+        name = user.get("name") or user.get("NAME") or _("mteja")
     else:
         to_email = getattr(user, "email", None)
-        name = getattr(user, "name", "") or "mteja"
+        name = getattr(user, "name", "") or _("mteja")
 
     if not to_email:
         return EmailResult(False, "no email")
 
     return _send(
         to_email=to_email,
-        subject="Karibu SokoMkononi!",
+        subject=str(_("Karibu SokoMkononi!")),
         template_base="welcome",
         context={"name": name},
     )
 
 
 def send_account_deleted_email(*, to_email, name="mteja", reason=""):
-    """
-    Send account-deleted notification.
-    Called BEFORE the user record is hard-deleted, so the email
-    address is still valid at this point.
-    """
     if not to_email:
         return EmailResult(False, "no email")
 
     return _send(
         to_email=to_email,
-        subject="SokoMkononi — Akaunti yako imefutwa",
+        subject=str(_("SokoMkononi — Akaunti yako imefutwa")),
         template_base="account_deleted",
         context={
-            "name": name or "mteja",
+            "name": name or _("mteja"),
             "reason": reason or "—",
         },
     )
 
 
 def send_account_suspended_email(*, to_email, name="mteja", reason=""):
-    """Send account-suspended notification."""
     if not to_email:
         return EmailResult(False, "no email")
 
     return _send(
         to_email=to_email,
-        subject="SokoMkononi — Akaunti yako imesimamishwa",
+        subject=str(_("SokoMkononi — Akaunti yako imesimamishwa")),
         template_base="account_suspended",
         context={
-            "name": name or "mteja",
+            "name": name or _("mteja"),
             "reason": reason or "—",
         },
     )
 
 
+# ============================================================
+# VERIFICATION EMAILS — bilingual
+# ============================================================
 def send_verification_approved_email(
-    *, to_email, name="mteja", verification_type="", action_url=""
+    *, to_email, name="mteja", verification_type="", action_url="",
+    language="sw",
 ):
-    """
-    Send verification approved notification.
-
-    Called by apps/verifications/notify.py after admin approves.
-    """
     if not to_email:
         return EmailResult(False, "no email")
 
-    # ✅ Kinga ya mwisho — hakikisha URL ni kamili
+    lang = language or "sw"
     action_url = _absolute_url(action_url, "/dashboard/verification")
 
-    type_label = {
-        "SELLER": "Muuzaji",
-        "BUYER": "Mnunuzi",
-    }.get(verification_type, verification_type or "—")
+    with override(lang):
+        type_label = {
+            "SELLER": _("Muuzaji"),
+            "BUYER": _("Mnunuzi"),
+        }.get(verification_type, verification_type or "—")
+
+        subject = _("SokoMkononi — Uthibitisho wako umeidhinishwa")
 
     return _send(
         to_email=to_email,
-        subject="SokoMkononi — Uthibitisho wako umeidhinishwa",
+        subject=str(subject),
         template_base="verification_approved",
         context={
-            "name": name or "mteja",
+            "name": name or _("mteja"),
             "verification_type": type_label,
             "action_url": action_url,
+            "language": lang,
         },
+        language=lang,
     )
 
 
 def send_verification_rejected_email(
-    *, to_email, name="mteja", verification_type="", reason="", action_url=""
+    *, to_email, name="mteja", verification_type="", reason="",
+    action_url="", language="sw",
 ):
-    """
-    Send verification rejected notification.
-
-    Called by apps/verifications/notify.py after admin rejects.
-    """
     if not to_email:
         return EmailResult(False, "no email")
 
-    # ✅ Kinga ya mwisho — hakikisha URL ni kamili
+    lang = language or "sw"
     action_url = _absolute_url(action_url, "/dashboard/verification")
 
-    type_label = {
-        "SELLER": "Muuzaji",
-        "BUYER": "Mnunuzi",
-    }.get(verification_type, verification_type or "—")
+    with override(lang):
+        type_label = {
+            "SELLER": _("Muuzaji"),
+            "BUYER": _("Mnunuzi"),
+        }.get(verification_type, verification_type or "—")
+
+        subject = _("SokoMkononi — Uthibitisho umekataliwa")
 
     return _send(
         to_email=to_email,
-        subject="SokoMkononi — Uthibitisho umekataliwa",
+        subject=str(subject),
         template_base="verification_rejected",
         context={
-            "name": name or "mteja",
+            "name": name or _("mteja"),
             "verification_type": type_label,
             "reason": reason or "—",
             "action_url": action_url,
+            "language": lang,
         },
+        language=lang,
     )
 
 
 def send_documents_requested_email(
-    *, to_email, name="mteja", message="", action_url=""
+    *, to_email, name="mteja", message="", action_url="", language="sw",
 ):
-    """
-    Send email when admin requests more documents.
-
-    Called by apps/verifications/notify.py.
-    """
     if not to_email:
         return EmailResult(False, "no email")
 
-    # ✅ Kinga ya mwisho — hakikisha URL ni kamili
+    lang = language or "sw"
     action_url = _absolute_url(action_url, "/dashboard/verification")
+
+    with override(lang):
+        subject = _("SokoMkononi — Nyaraka zaidi zinahitajika")
+        body = message or _("Tafadhali pakia nyaraka zaidi.")
 
     return _send(
         to_email=to_email,
-        subject="SokoMkononi — Nyaraka zaidi zinahitajika",
+        subject=str(subject),
         template_base="verification_documents_requested",
         context={
-            "name": name or "mteja",
-            "message": message or "Tafadhali pakia nyaraka zaidi.",
+            "name": name or _("mteja"),
+            "message": body,
             "action_url": action_url,
+            "language": lang,
         },
+        language=lang,
     )

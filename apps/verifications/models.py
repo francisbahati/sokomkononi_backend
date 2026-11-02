@@ -129,14 +129,12 @@ class VerificationRequest(SoftDeleteModel):
         ]
 
         constraints = [
-            # Mtumiaji anaweza kuwa na ombi MOJA tu la PENDING
-            # kwa kila aina (SELLER au BUYER).
-            models.UniqueConstraint(
-                fields=["user", "type"],
-                condition=models.Q(status="PENDING"),
-                name="uniq_pending_verification_per_type",
-            ),
-        ]
+    models.UniqueConstraint(
+        fields=["user", "type"],
+        condition=models.Q(status="PENDING", is_deleted=False), 
+        name="uniq_pending_verification_per_type",
+    ),
+]
 
     def __str__(self):
         return f"{self.type} — {self.subject} ({self.status})"

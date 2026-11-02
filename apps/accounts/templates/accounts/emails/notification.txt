@@ -1,9 +1,9 @@
-{{ title }}
+{% load i18n %}{{ title }}
 
-Habari {{ name }},
+{% trans "Habari" %} {{ name }},
 
 {{ message }}
 
-{% if action_url %}Fungua: https://sokomkononi.co.tz{{ action_url }}{% endif %}
+{% if action_url %}{% trans "Fungua" %}: https://sokomkononi.co.tz{{ action_url }}{% endif %}
 
 -- SokoMkononi

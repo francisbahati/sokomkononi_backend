@@ -1,15 +1,15 @@
-Uthibitisho umekataliwa
+{% load i18n %}{% trans "Uthibitisho umekataliwa" %}
 
-Habari {{ name }},
+{% trans "Habari" %} {{ name }},
 
-Ombi lako la uthibitisho {{ verification_type }} halikuidhinishwa.
+{% blocktrans %}Ombi lako la uthibitisho {{ verification_type }} halikuidhinishwa.{% endblocktrans %}
 
-Sababu: {{ reason }}
+{% trans "Sababu" %}: {{ reason }}
 
-Unaweza kuwasilisha ombi jipya baada ya kurekebisha yale yaliyotajwa.
+{% trans "Unaweza kuwasilisha ombi jipya baada ya kurekebisha yale yaliyotajwa." %}
 
-Angalia hali ya ombi: {{ action_url }}
+{% trans "Angalia hali ya ombi" %}: {{ action_url }}
 
-Kama una maswali, wasiliana nasi: support@sokomkononi.co.tz
+{% trans "Kama una maswali, wasiliana nasi" %}: support@sokomkononi.co.tz
 
 — SokoMkononi

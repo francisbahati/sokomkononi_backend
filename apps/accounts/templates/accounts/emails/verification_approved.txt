@@ -1,14 +1,14 @@
-Uthibitisho wako umeidhinishwa!
+{% load i18n %}{% trans "Uthibitisho wako umeidhinishwa!" %}
 
-Habari {{ name }},
+{% trans "Habari" %} {{ name }},
 
-Hongera! Ombi lako la uthibitisho {{ verification_type }} limeidhinishwa na timu ya SokoMkononi.
+{% blocktrans %}Hongera! Ombi lako la uthibitisho {{ verification_type }} limeidhinishwa na timu ya SokoMkononi.{% endblocktrans %}
 
-Sasa unaweza kufanya biashara kwa uhuru kwenye jukwaa letu:
-- Weka matangazo yako
-- Wasiliana na wanunuzi
-- Fanya deals kwa usalama
+{% trans "Sasa unaweza kufanya biashara kwa uhuru kwenye jukwaa letu:" %}
+- {% trans "Weka matangazo yako" %}
+- {% trans "Wasiliana na wanunuzi" %}
+- {% trans "Fanya deals kwa usalama" %}
 
-Nenda kwenye Dashboard: {{ action_url }}
+{% trans "Nenda kwenye Dashboard" %}: {{ action_url }}
 
 — SokoMkononi

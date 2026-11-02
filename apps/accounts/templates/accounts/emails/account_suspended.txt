@@ -1,10 +1,10 @@
-Akaunti yako ya SokoMkononi imesimamishwa
+{% load i18n %}{% trans "Akaunti yako ya SokoMkononi imesimamishwa" %}
 
-Habari {{ name }},
+{% trans "Habari" %} {{ name }},
 
-Akaunti yako imesimamishwa kwa muda.
-Sababu: {{ reason }}
+{% trans "Akaunti yako imesimamishwa kwa muda." %}
+{% trans "Sababu" %}: {{ reason }}
 
-Kama unadhani hii ni kosa, wasiliana nasi: support@sokomkononi.co.tz
+{% trans "Kama unadhani hii ni kosa, wasiliana nasi" %}: support@sokomkononi.co.tz
 
 — SokoMkononi

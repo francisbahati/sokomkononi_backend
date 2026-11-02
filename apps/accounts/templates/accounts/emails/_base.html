@@ -1,5 +1,5 @@
-<!DOCTYPE html>
-<html lang="sw">
+{% load i18n %}<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:'sw' }}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -15,7 +15,7 @@
 <tr><td style="padding:28px;">{% block content %}{% endblock %}</td></tr>
 <tr><td style="padding:16px 28px 24px;border-top:1px solid #F0EDE4;">
 <p style="margin:0;font-size:11px;line-height:1.6;color:#6B7280;">
-SokoMkononi &middot; Mahali pa Kununua na Kuuza kwa Kujiamini<br />
+{% trans "SokoMkononi · Mahali pa Kununua na Kuuza kwa Kujiamini" %}<br />
 <a href="https://sokomkononi.co.tz" style="color:#6B7280;">sokomkononi.co.tz</a>
 </p>
 </td></tr>

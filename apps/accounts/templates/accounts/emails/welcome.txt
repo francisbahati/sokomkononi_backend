@@ -1,7 +1,7 @@
-Habari {{ name }},
+{% load i18n %}{% trans "Habari" %} {{ name }},
 
-Karibu SokoMkononi! Akaunti yako imethibitishwa.
+{% trans "Karibu SokoMkononi! Akaunti yako imethibitishwa." %}
 
-Ingia: https://sokomkononi.co.tz/dashboard
+{% trans "Ingia" %}: https://sokomkononi.co.tz/dashboard
 
 -- SokoMkononi

@@ -151,6 +151,7 @@ def mark_banner_paid_and_activate(*, banner, payment_reference):
 from apps.payments.order_ids import make_order_id
 from apps.payments.fimipay import (
     create_order as _fp_create_order,
+    is_paid,
     normalize_payment_method as _fp_normalize_method,
 )
 
@@ -179,7 +180,7 @@ def initiate_banner_payment(*, banner, user, payment_method='mobile', phone=''):
             sd = None
         if sd:
             ps = (sd.get("payment_status") or "").upper()
-            if ps == "SUCCESS":
+            if is_paid(ps):
                 mark_banner_paid_from_webhook(
                     ref_id=banner.pk,
                     payment_reference=sd.get("transid") or existing_ref,
@@ -206,6 +207,10 @@ def initiate_banner_payment(*, banner, user, payment_method='mobile', phone=''):
 def mark_banner_paid_from_webhook(*, ref_id, payment_reference):
     banner = BannerAd.objects.select_for_update().get(pk=ref_id)
     if banner.payment_status == "PAID":
+        return banner
+
+    # Replay ya webhook ya zamani ISIFUFUE malipo yaliyorudishwa.
+    if banner.payment_status == "REFUNDED":
         return banner
 
     ref = (payment_reference or "").strip()

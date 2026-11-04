@@ -184,6 +184,7 @@ def expire_stale_leading():
 from apps.payments.order_ids import make_order_id
 from apps.payments.fimipay import (
     create_order as _fp_create_order,
+    is_paid,
     normalize_payment_method as _fp_normalize_method,
 )
 
@@ -218,7 +219,7 @@ def initiate_leading_payment(*, leading, user, payment_method='mobile', phone=''
             sd = None
         if sd:
             ps = (sd.get("payment_status") or "").upper()
-            if ps == "SUCCESS":
+            if is_paid(ps):
                 mark_leading_paid_from_webhook(
                     ref_id=leading.pk,
                     payment_reference=sd.get("transid") or existing_ref,
@@ -250,6 +251,10 @@ def mark_leading_paid_from_webhook(*, ref_id, payment_reference):
         .get(pk=ref_id)
     )
     if leading.payment_status == ListingLeading.PaymentStatus.PAID:
+        return leading
+
+    # Replay ya webhook ya zamani ISIFUFUE malipo yaliyorudishwa.
+    if leading.payment_status == ListingLeading.PaymentStatus.REFUNDED:
         return leading
 
     ref = (payment_reference or "").strip()

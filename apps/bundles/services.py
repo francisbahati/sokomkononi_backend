@@ -107,6 +107,7 @@ def mark_purchase_paid(*, purchase, payment_reference=""):
 # ============================================================================
 from apps.payments.fimipay import (
     create_order as _fp_create_order,
+    is_paid,
     normalize_payment_method as _fp_normalize_method,
 )
 from apps.payments.order_ids import make_order_id
@@ -130,7 +131,7 @@ def initiate_purchase_payment(*, purchase, user, payment_method='mobile', phone=
             sd = None
         if sd:
             ps = (sd.get("payment_status") or "").upper()
-            if ps == "SUCCESS":
+            if is_paid(ps):
                 # Tayari imelipwa FimiPay: itumie sasa (webhook inaweza kuwa
                 # imekosa). Errors zinapita juu kwa makusudi — usiunde order
                 # ya pili kwa malipo yaliyokwisha kufanyika.
@@ -167,6 +168,10 @@ def mark_purchase_paid_from_webhook(*, ref_id, payment_reference):
         .get(pk=ref_id)
     )
     if purchase.status == BundlePurchase.Status.PAID:
+        return purchase
+
+    # Replay ya webhook ya zamani ISIFUFUE malipo yaliyorudishwa.
+    if purchase.status == BundlePurchase.Status.REFUNDED:
         return purchase
 
     ref = (payment_reference or "").strip()

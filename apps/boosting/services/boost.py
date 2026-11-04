@@ -447,6 +447,7 @@ def pay_boost_with_credits(*, boost, user):
 from apps.payments.order_ids import make_order_id
 from apps.payments.fimipay import (
     create_order as _fp_create_order,
+    is_paid,
     normalize_payment_method as _fp_normalize_method,
 )
 
@@ -532,7 +533,7 @@ def initiate_boost_payment(*, boost, user, payment_method='mobile', phone=''):
             sd = None
         if sd:
             ps = (sd.get("payment_status") or "").upper()
-            if ps == "SUCCESS":
+            if is_paid(ps):
                 mark_boost_as_paid_from_webhook(
                     ref_id=_snapshot["pk"],
                     payment_reference=sd.get("transid") or existing_ref,
@@ -581,23 +582,44 @@ def mark_boost_as_paid_from_webhook(*, ref_id, payment_reference):
         .select_related("listing", "seller", "package")
         .get(pk=ref_id)
     )
-    if boost.payment_status == ListingBoost.PaymentStatus.PAID:
+
+    # Replay ya webhook ya zamani ISIFUFUE malipo yaliyorudishwa.
+    if boost.payment_status == ListingBoost.PaymentStatus.REFUNDED:
         return boost
+
+    # Replay: tayari imelipwa. Kama haijawashwa bado, jaribu tena.
+    if boost.payment_status == ListingBoost.PaymentStatus.PAID:
+        if boost.status == ListingBoost.BoostStatus.PENDING:
+            try:
+                boost = activate_boost(boost=boost)
+            except ValidationError:
+                logger.exception(
+                    "Boost %s: replay haikuweza kuwasha", boost.pk,
+                )
+        return boost
+
     ref = str(payment_reference or "").strip()
     if ref and ListingBoost.objects.filter(payment_reference=ref).exclude(pk=boost.pk).exists():
         raise ValidationError("Payment reference hii tayari imetumika.")
+
+    # Pesa imeingia hata kama tuli-cancel locally: fufua (EXPIRED haifufuliwi)
+    revived = boost.status == ListingBoost.BoostStatus.CANCELLED
+    if revived:
+        boost.status = ListingBoost.BoostStatus.PENDING
+
     boost.payment_status = ListingBoost.PaymentStatus.PAID
     boost.payment_reference = payment_reference
     boost.paid_at = timezone.now()
     boost.save(update_fields=[
-        "payment_status", "payment_reference", "paid_at", "updated_at",
+        "status", "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
 
     try:
         boost = activate_boost(boost=boost)
     except ValidationError:
-        logger.exception(
-            "Boost %s paid via webhook but could not be activated", boost.pk,
+        logger.error(
+            "ACTION NEEDED: boost %s imelipwa (revived=%s) lakini haikuwashwa",
+            boost.pk, revived, exc_info=True,
         )
 
     return boost

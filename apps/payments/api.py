@@ -208,9 +208,7 @@ def _apply_status(payout, data):
         "success":    Payout.Status.COMPLETED,
         "failed":     Payout.Status.FAILED,
         "rejected":   Payout.Status.REJECTED,
-        # "cancelled" itaongezwa Hatua 4 baada ya migration ya
-        # Payout.Status.CANCELLED. Kwa sasa, payout iliyofutwa
-        # itabaki PENDING na `fimi_status = "cancelled"` itarekodiwa.
+        "cancelled":  Payout.Status.CANCELLED,
     }
     payout.status = mapping.get(raw, payout.status)
     payout.fimi_status = raw

@@ -296,6 +296,16 @@ def mark_refund_completed_from_webhook(ref_id, payment_reference=""):
     if refund.status == Refund.Status.COMPLETED:
         return refund
 
+    # Refund iliyowekwa FAILED kwa makusudi na admin isifufuliwe na webhook
+    # ya zamani. Admin anaweza kuifanya manually akitaka.
+    if refund.status == Refund.Status.FAILED:
+        logger.warning(
+            "mark_refund_completed_from_webhook: Refund #%s ni FAILED — "
+            "webhook imepuuzwa. Admin aamue.",
+            refund.pk,
+        )
+        return refund
+
     return mark_refund_completed(
         refund,
         method=Refund.Method.FIMIPAY,

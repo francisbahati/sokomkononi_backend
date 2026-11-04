@@ -21,6 +21,7 @@ from rest_framework.exceptions import ValidationError
 from apps.payments.order_ids import make_order_id
 from apps.payments.fimipay import (
     create_order,
+    is_paid,
     normalize_payment_method as _fp_normalize_method,
 )
 
@@ -104,7 +105,7 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
             ps = (status_data.get("payment_status") or "").upper()
             if ps in ("PENDING", "INPROGRESS"):
                 return status_data
-            if ps == "SUCCESS":
+            if is_paid(ps):
                 # Tayari imelipwa FimiPay — itumie sasa, usirudishe SUCCESS
                 # bila kuiwezesha listing (webhook inaweza kuwa imekosa).
                 mark_listing_fee_as_paid_from_webhook(
@@ -151,6 +152,10 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
         return None
 
     if listing_fee.payment_status == ListingFee.PaymentStatus.PAID:
+        return listing_fee
+
+    # Replay ya webhook ya zamani ISIFUFUE malipo yaliyorudishwa.
+    if listing_fee.payment_status == ListingFee.PaymentStatus.REFUNDED:
         return listing_fee
 
     ref = (payment_reference or listing_fee.payment_reference or "").strip()

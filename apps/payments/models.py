@@ -21,6 +21,7 @@ class Payout(models.Model):
         COMPLETED = "COMPLETED", "Completed"
         FAILED = "FAILED", "Failed"
         REJECTED = "REJECTED", "Rejected"
+        CANCELLED = "CANCELLED", "Cancelled"
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

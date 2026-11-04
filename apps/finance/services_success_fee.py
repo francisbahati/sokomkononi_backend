@@ -25,6 +25,7 @@ from rest_framework.exceptions import ValidationError
 from apps.payments.fimipay import (
     create_order,
     get_order_status,
+    is_paid,
     normalize_payment_method,
 )
 from apps.payments.order_ids import make_order_id
@@ -98,6 +99,10 @@ def mark_success_fee_paid(*, payment_id, payment_reference):
     if payment.payment_status == SuccessFeePayment.PaymentStatus.PAID:
         return payment
 
+    # Replay ya webhook ya zamani ISIFUFUE malipo yaliyorudishwa.
+    if payment.payment_status == SuccessFeePayment.PaymentStatus.REFUNDED:
+        return payment
+
     # ✅ payment_reference inabaki kama ilivyo (order_id yetu: SFE-...)
     # transid inaachwa kama metadata tu (haijahifadhiwa kwenye DB)
     payment.payment_status = SuccessFeePayment.PaymentStatus.PAID
@@ -147,7 +152,7 @@ def has_valid_success_fee_payment(user):
             data = get_order_status(payment.payment_reference)
         except ValidationError:
             continue
-        if str(data.get("payment_status") or "").upper() == "SUCCESS":
+        if is_paid(data.get("payment_status")):
             mark_success_fee_paid(
                 payment_id=payment.pk,
                 payment_reference=data.get("transid") or payment.payment_reference,

@@ -569,6 +569,7 @@ def initiate_reservation_payment(*, reservation, user, payment_method="mobile", 
     """Start a FimiPay order for the reservation fee."""
     from apps.payments.fimipay import (
         create_order,
+        is_paid,
         normalize_payment_method,
     )
     from apps.payments.order_ids import make_order_id
@@ -621,6 +622,9 @@ def mark_reservation_paid_from_webhook(*, ref_id, payment_reference):
     )
 
     if reservation.payment_status == Reservation.PaymentStatus.PAID:
+        return reservation
+    
+    if reservation.payment_status == Reservation.PaymentStatus.REFUNDED:
         return reservation
 
     if reservation.status != Reservation.Status.PENDING_PAYMENT:
@@ -1245,6 +1249,7 @@ def initiate_extension_payment(*, extension, user, payment_method="mobile", phon
     """Anzisha FimiPay order ya ada ya extension (prefix "RSX")."""
     from apps.payments.fimipay import (
         create_order,
+        is_paid,
         normalize_payment_method,
     )
     from apps.payments.order_ids import make_order_id
@@ -1287,7 +1292,13 @@ def mark_extension_paid_from_webhook(*, ref_id, payment_reference):
         .select_for_update(of=("self",))
         .get(pk=ref_id)
     )
-    if extension.status == ReservationExtension.Status.PAID:
+
+    # Replay ya webhook ya zamani ISIFUFUE malipo yaliyorudishwa.
+    # (Pia ni idempotent kwa PAID iliyosha-activate — tunarudi mapema.)
+    if extension.status in (
+        ReservationExtension.Status.PAID,
+        ReservationExtension.Status.REFUNDED,
+    ):
         return extension.reservation
 
     reservation, transaction = _lock_reservation(extension.reservation)

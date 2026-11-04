@@ -59,17 +59,81 @@ def _log(request, action, target="", target_id=None, details="", params=None):
         logger.exception("Failed to write audit log: %s", action)
 
 
+# ============================================================
+# NOTIFICATION HELPERS
+# ============================================================
+def _notify_admins_of_new_ticket(ticket):
+    """
+    Mjulishe admins wote ticket mpya imetumwa.
+    """
+    try:
+        from apps.notifications.services.notification import (
+            create_notification_for_admins,
+        )
+        from apps.notifications.models import Notification
+
+        create_notification_for_admins(
+            notification_type=Notification.NotificationType.GENERAL,
+            title=f"Ticket Mpya: {ticket.code}",
+            message=(
+                f"Kutoka kwa {ticket.user_name or ticket.user_email}: "
+                f"{ticket.subject}"
+            ),
+            priority=Notification.Priority.HIGH,
+            related_object_type="ticket",
+            related_object_id=ticket.id,
+            action_url=f"/smk-control-9x7k/support?ticket={ticket.id}",
+        )
+    except Exception:
+        logger.exception(
+            "Failed to notify admins about ticket %s", ticket.id,
+        )
+
+
+def _notify_user_of_reply(ticket, reply_text):
+    """
+    Mjulishe mtumiaji kuwa admin amejibu ticket yake.
+    """
+    try:
+        from apps.notifications.services.notification import create_notification
+        from apps.notifications.models import Notification
+
+        lang = user_lang(ticket.user)
+        # Preview ndogo ya ujumbe
+        preview = (reply_text or "").strip()
+        if len(preview) > 120:
+            preview = preview[:117] + "..."
+
+        with override(lang):
+            create_notification(
+                recipient=ticket.user,
+                notification_type=Notification.NotificationType.GENERAL,
+                title=_("Jibu jipya kwenye Ticket {code}").format(
+                    code=ticket.code,
+                ),
+                message=preview or _("Admin amejibu ticket yako."),
+                priority=Notification.Priority.HIGH,
+                related_object_type="ticket",
+                related_object_id=ticket.id,
+                action_url=f"/dashboard/safety?ticket={ticket.id}",
+            )
+    except Exception:
+        logger.exception(
+            "Failed to notify user of ticket reply %s", ticket.id,
+        )
+
+
 class TicketViewSet(viewsets.GenericViewSet):
     """
-        GET     /api/tickets/                      admin: all, user: own
-        GET     /api/tickets/{id}/
-        POST    /api/tickets/                      create (multipart OK)
-        POST    /api/tickets/{id}/messages/        add message (+ files)
-        POST    /api/tickets/{id}/attachments/     upload files to ticket
-        POST    /api/tickets/{id}/status/          admin only
-        POST    /api/tickets/{id}/priority/        admin only
-        POST    /api/tickets/{id}/assign/          admin only
-        DELETE  /api/tickets/{id}/                 admin or owner
+    GET     /api/tickets/
+    GET     /api/tickets/{id}/
+    POST    /api/tickets/
+    POST    /api/tickets/{id}/messages/
+    POST    /api/tickets/{id}/attachments/
+    POST    /api/tickets/{id}/status/
+    POST    /api/tickets/{id}/priority/
+    POST    /api/tickets/{id}/assign/
+    DELETE  /api/tickets/{id}/
     """
 
     serializer_class = TicketSerializer
@@ -130,6 +194,13 @@ class TicketViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # ✅ Deal Report fields (optional)
+        deal_room_id = data.get("deal_room")
+        reported_user_id = data.get("reported_user")
+        reported_user_name = data.get("reported_user_name", "")
+        reporter_role = data.get("reporter_role", "")
+        report_reason = data.get("report_reason", "")
+
         def _make_ticket(ticket_code):
             return Ticket.objects.create(
                 code=ticket_code,
@@ -141,6 +212,12 @@ class TicketViewSet(viewsets.GenericViewSet):
                 user_name=request.user.name,
                 user_email=request.user.email or "",
                 sla_deadline=timezone.now() + timedelta(hours=24),
+                # ✅ Deal Report context (null kama haipo)
+                deal_room_id=deal_room_id or None,
+                reported_user_id=reported_user_id or None,
+                reported_user_name=reported_user_name or "",
+                reporter_role=reporter_role or "",
+                report_reason=report_reason or "",
             )
 
         try:
@@ -156,7 +233,10 @@ class TicketViewSet(viewsets.GenericViewSet):
                 text=data["description"],
             )
 
-            files = request.FILES.getlist("attachments") or request.FILES.getlist("files")
+            files = (
+                request.FILES.getlist("attachments")
+                or request.FILES.getlist("files")
+            )
             for f in files:
                 TicketAttachment.objects.create(
                     ticket=ticket,
@@ -167,7 +247,6 @@ class TicketViewSet(viewsets.GenericViewSet):
                     uploaded_by_name=request.user.name,
                 )
 
-        # ✅ Tumia params
         _log(
             request,
             action="ticket.created",
@@ -175,6 +254,9 @@ class TicketViewSet(viewsets.GenericViewSet):
             target_id=ticket.id,
             params={"code": ticket.code, "name": ticket.subject},
         )
+
+        # ✅ Arifa kwa admin
+        _notify_admins_of_new_ticket(ticket)
 
         return Response(
             TicketSerializer(ticket, context={"request": request}).data,
@@ -199,12 +281,20 @@ class TicketViewSet(viewsets.GenericViewSet):
 
         serializer = TicketMessageCreateSerializer(
             data=request.data,
-            context={"files": request.FILES.getlist("attachments") or request.FILES.getlist("files")},
+            context={
+                "files": (
+                    request.FILES.getlist("attachments")
+                    or request.FILES.getlist("files")
+                )
+            },
         )
         serializer.is_valid(raise_exception=True)
 
         text = serializer.validated_data["text"]
-        files = request.FILES.getlist("attachments") or request.FILES.getlist("files")
+        files = (
+            request.FILES.getlist("attachments")
+            or request.FILES.getlist("files")
+        )
 
         sender = (
             TicketMessage.Sender.ADMIN
@@ -230,12 +320,8 @@ class TicketViewSet(viewsets.GenericViewSet):
             )
             created_attachments.append(att)
 
-        if request.user.is_staff:
-            ticket.save(update_fields=["updated_at"])
-        else:
-            ticket.save(update_fields=["updated_at"])
+        ticket.save(update_fields=["updated_at"])
 
-        # ✅ Tumia params
         _log(
             request,
             action="ticket.message_added",
@@ -247,6 +333,10 @@ class TicketViewSet(viewsets.GenericViewSet):
                 "count": len(created_attachments),
             },
         )
+
+        # ✅ Arifa kwa mtumiaji kama admin amejibu
+        if request.user.is_staff:
+            _notify_user_of_reply(ticket, text)
 
         return Response(
             TicketMessageSerializer(
@@ -270,7 +360,10 @@ class TicketViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        files = request.FILES.getlist("attachments") or request.FILES.getlist("files")
+        files = (
+            request.FILES.getlist("attachments")
+            or request.FILES.getlist("files")
+        )
         if not files:
             return Response(
                 {"detail": "Hakuna faili lililopokelewa."},
@@ -288,7 +381,6 @@ class TicketViewSet(viewsets.GenericViewSet):
             )
             created.append(att)
 
-        # ✅ Tumia params
         _log(
             request,
             action="ticket.attachments_uploaded",
@@ -341,7 +433,6 @@ class TicketViewSet(viewsets.GenericViewSet):
             ticket.resolved_at = timezone.now()
         ticket.save(update_fields=["status", "resolved_at", "updated_at"])
 
-        # ✅ Tumia params
         _log(
             request,
             action="ticket.status_changed",
@@ -372,7 +463,7 @@ class TicketViewSet(viewsets.GenericViewSet):
                     priority=Notification.Priority.HIGH,
                     related_object_type="ticket",
                     related_object_id=ticket.id,
-                    action_url=f"/dashboard/support/{ticket.id}",
+                    action_url=f"/dashboard/safety?ticket={ticket.id}",
                 )
         except Exception:
             logger.exception("ticket notify failed")
@@ -400,7 +491,6 @@ class TicketViewSet(viewsets.GenericViewSet):
         ticket.priority = serializer.validated_data["priority"]
         ticket.save(update_fields=["priority", "updated_at"])
 
-        # ✅ Tumia params
         _log(
             request,
             action="ticket.priority_changed",
@@ -442,7 +532,6 @@ class TicketViewSet(viewsets.GenericViewSet):
             "assigned_to", "assigned_to_name", "updated_at",
         ])
 
-        # ✅ Tumia params
         _log(
             request,
             action="ticket.assigned",
@@ -472,7 +561,6 @@ class TicketViewSet(viewsets.GenericViewSet):
         code = obj.code
         obj.delete(by=request.user, reason="Ticket deleted by owner/admin")
 
-        # ✅ Tumia params
         _log(
             request,
             action="ticket.deleted",

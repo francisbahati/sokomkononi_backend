@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from django.db import models   
+from django.db import models
 
 from .models import Ticket, TicketAttachment, TicketMessage
 
@@ -52,6 +52,9 @@ class TicketSerializer(serializers.ModelSerializer):
     deal_room_id = serializers.IntegerField(source="deal_room.id", read_only=True)
     reported_user_id = serializers.IntegerField(source="reported_user.id", read_only=True)
 
+    # ✅ MPYA: action_url — inatumika kwenye notification na frontend
+    action_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Ticket
         fields = [
@@ -65,6 +68,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "deal_room_id", "reported_user_id", "reported_user_name",
             "reporter_role", "report_reason",
             "messages", "attachments",
+            "action_url",  # ✅ MPYA
             "created_at", "updated_at",
         ]
         read_only_fields = [
@@ -73,17 +77,24 @@ class TicketSerializer(serializers.ModelSerializer):
             "sla_deadline", "sla_reminded_at", "sla_overdue",
             "deal_room_id", "reported_user_id", "reported_user_name",
             "reporter_role", "report_reason",
-            "messages", "attachments", "created_at", "updated_at",
+            "messages", "attachments", "action_url",
+            "created_at", "updated_at",
         ]
 
     def get_sla_overdue(self, obj):
-        """True kama SLA imepita na ticket haijatatuliwa."""
         from django.utils import timezone
         if not obj.sla_deadline:
             return False
         if obj.status in (Ticket.Status.RESOLVED, Ticket.Status.CLOSED):
             return False
         return timezone.now() > obj.sla_deadline
+
+    def get_action_url(self, obj):
+        """
+        Frontend URL ya ticket. Mtumiaji akibofya notification,
+        anapelekwa kwenye Safety & Support na ticket hii inafunguka.
+        """
+        return f"/dashboard/safety?ticket={obj.id}"
 
 
 class TicketCreateSerializer(serializers.Serializer):
@@ -96,6 +107,20 @@ class TicketCreateSerializer(serializers.Serializer):
     priority = serializers.ChoiceField(
         choices=Ticket.Priority.choices,
         default=Ticket.Priority.MEDIUM,
+    )
+
+    # ✅ MPYA: fields za Deal Report (optional)
+    deal_room = serializers.IntegerField(required=False, allow_null=True)
+    reported_user = serializers.IntegerField(required=False, allow_null=True)
+    reported_user_name = serializers.CharField(
+        required=False, allow_blank=True, max_length=150,
+    )
+    reporter_role = serializers.ChoiceField(
+        choices=[("buyer", "Buyer"), ("seller", "Seller")],
+        required=False, allow_blank=True,
+    )
+    report_reason = serializers.CharField(
+        required=False, allow_blank=True, max_length=30,
     )
 
     def validate_subject(self, value):
@@ -144,10 +169,6 @@ class DealReportReason(models.TextChoices):
 
 
 class DealReportSerializer(serializers.Serializer):
-    """
-    Inatumika kwenye DealRoomViewSet.report — inaunda Ticket ya
-    category=DEAL_REPORT.
-    """
     reported_user_id = serializers.IntegerField(required=True)
     reason = serializers.ChoiceField(choices=DealReportReason.choices)
     details = serializers.CharField(
@@ -190,7 +211,6 @@ class DealReportSerializer(serializers.Serializer):
                 ),
             })
 
-        # Zuia ripoti ya pili kwenye deal moja kwa mtumiaji huyo huyo
         existing = Ticket.objects.filter(
             category=Ticket.Category.DEAL_REPORT,
             deal_room=deal_room,

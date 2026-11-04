@@ -263,14 +263,61 @@ class ReportsView(APIView):
         )
 
         # ── REVENUE ─────────────────────────────────────────
+        from apps.banners.models import BannerAd
+        from apps.boosting.models import ListingBoost
+        from apps.bundles.models import BundlePurchase
+        from apps.leading_fees.models import ListingLeading
+        from apps.listings.models import ListingFee
+        from apps.transactions.models import Reservation
+        from .models import SuccessFeePayment
+        from django.db.models import Sum, DecimalField
+        from django.db.models.functions import Coalesce
+
+        # 1. Hesabu kwa mkono (Defensive Fallback) - Inahakikisha vyanzo vinajulikana
+        revenue_by_stream = {}
+        
         try:
-            from .services.revenue import calculate_financial_dashboard
-            fees_data = calculate_financial_dashboard("all")
-            revenue_by_stream = fees_data.get("by_type", {})
-            total_revenue = float(fees_data.get("total_revenue", 0))
-        except Exception:
-            revenue_by_stream = {}
-            total_revenue = 0.0
+            # Listing Fee
+            ls_sum = ListingFee.objects.filter(payment_status="PAID").aggregate(s=Sum("amount"))["s"] or 0
+            if ls_sum > 0: revenue_by_stream["listing"] = float(ls_sum)
+
+            # Boost
+            boost_sum = ListingBoost.objects.filter(payment_status="PAID").aggregate(s=Sum("amount"))["s"] or 0
+            if boost_sum > 0: revenue_by_stream["boost"] = float(boost_sum)
+
+            # Leading
+            leading_sum = ListingLeading.objects.filter(payment_status=ListingLeading.PaymentStatus.PAID).aggregate(s=Sum("price"))["s"] or 0
+            if leading_sum > 0: revenue_by_stream["leading"] = float(leading_sum)
+
+            # Reservation
+            res_sum = Reservation.objects.filter(payment_status="PAID").aggregate(s=Sum("deposit_amount"))["s"] or 0
+            if res_sum > 0: revenue_by_stream["reservation"] = float(res_sum)
+
+            # Banner
+            banner_sum = BannerAd.objects.filter(payment_status="PAID").aggregate(s=Sum("amount"))["s"] or 0
+            if banner_sum > 0: revenue_by_stream["advertise"] = float(banner_sum)
+
+            # Bundle
+            bundle_sum = BundlePurchase.objects.filter(status=BundlePurchase.Status.PAID).aggregate(s=Sum("amount"))["s"] or 0
+            if bundle_sum > 0: revenue_by_stream["bundle"] = float(bundle_sum)
+
+            # Success Fee
+            success_sum = SuccessFeePayment.objects.filter(payment_status="PAID").aggregate(s=Sum("amount"))["s"] or 0
+            if success_sum > 0: revenue_by_stream["success"] = float(success_sum)
+            
+            # Jumla
+            total_revenue = sum(revenue_by_stream.values())
+
+        except Exception as e:
+            # Kama kuna kosa la database, jaribu calculate_financial_dashboard kama mbadala wa mwisho
+            try:
+                from .services.revenue import calculate_financial_dashboard
+                fees_data = calculate_financial_dashboard("all")
+                revenue_by_stream = fees_data.get("by_type", {})
+                total_revenue = float(fees_data.get("total_revenue", 0))
+            except Exception:
+                revenue_by_stream = {}
+                total_revenue = 0.0
 
         # ✅ REVENUE BY MONTH
         revenue_by_month = []

@@ -71,6 +71,7 @@ from .services.listing_moderation import (
     request_edit_listing,
     request_payment_listing,
     finalize_approval_listing,
+    notify_admins_listing_submitted,
 )
 
 from .views_helpers import require_int_listing_id
@@ -216,10 +217,16 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         return ListingWriteSerializer
 
     def get_permissions(self):
+        # `permission_classes` za @action hazitumiki ukirudisha orodha hapa,
+        # kwa hiyo kila action nyeti inawekwa wazi.
         if self.action in ["list", "retrieve", "similar"]:
             permission_classes = [permissions.AllowAny]
         elif self.action == "create":
             permission_classes = [IsVerifiedUser]
+        elif self.action == "disapprove":
+            permission_classes = [permissions.IsAdminUser]
+        elif self.action == "publish":
+            permission_classes = [IsVerifiedUser, IsOwnerOrAdmin]
         else:
             permission_classes = [IsOwnerOrAdmin]
 
@@ -278,35 +285,31 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 listing.pk, exc,
             )
 
+    # Mabadiliko ya maudhui haya kwenye tangazo LIVE/PAUSED yanarudisha tangazo
+    # kwa admin kukaguliwa tena.
+    REVIEW_FIELDS = ("title", "description", "price", "category", "attributes")
+
     def perform_update(self, serializer):
-        instance = self.get_object()
+        instance = serializer.instance
 
         if self.request.user.is_staff:
             serializer.save()
             return
 
-        new_status = None
-        if hasattr(self.request, "data") and isinstance(self.request.data, dict):
-            new_status = self.request.data.get("status")
+        old_status = instance.status
+        changed = any(
+            k in self.REVIEW_FIELDS and getattr(instance, k, None) != v
+            for k, v in serializer.validated_data.items()
+        )
+        obj = serializer.save(seller=instance.seller)
 
-        if new_status and new_status != instance.status:
-            allowed = {
-                ("LIVE", "PAUSED"): True,
-                ("PAUSED", "LIVE"): True,
-                ("LIVE", "SOLD"): True,
-                ("RESERVED", "SOLD"): True,
-                ("PAUSED", "SOLD"): True,
-            }
-            if not allowed.get((instance.status, new_status)):
-                from rest_framework.exceptions import ValidationError
-                raise ValidationError({
-                    "status": (
-                        f"Haiwezi kubadilika kutoka {instance.status} "
-                        f"kwenda {new_status}."
-                    )
-                })
-
-        serializer.save(seller=instance.seller)
+        if changed and old_status in (
+            Listing.Status.LIVE,
+            Listing.Status.PAUSED,
+        ):
+            obj.status = Listing.Status.PENDING_APPROVAL
+            obj.save(update_fields=["status", "updated_at"])
+            notify_admins_listing_submitted(obj)
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -417,63 +420,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
-    # ═══════════════════════════════════════════════════════════════════
-    # CHECK DUPLICATE
-    # ═══════════════════════════════════════════════════════════════════
-    @extend_schema(
-        request=None,
-        responses={200: None},
-    )
-    @action(
-        detail=False, methods=["post"], url_path="check-duplicate",
-        permission_classes=[permissions.IsAuthenticated],
-    )
-    def check_duplicate(self, request):
-        title = (request.data.get("title") or "").strip()
-        location = (request.data.get("location") or "").strip()
-        category = request.data.get("category") or request.data.get("category_id")
-        try:
-            window_days = int(request.data.get("window_days", 30))
-        except (TypeError, ValueError):
-            window_days = 30
-
-        if not title:
-            return Response(
-                {"detail": "title inahitajika."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        since = timezone.now() - __import__("datetime").timedelta(days=window_days)
-        qs = (
-            Listing.objects
-            .filter(
-                seller=request.user,
-                title__iexact=title,
-                created_at__gte=since,
-                is_deleted=False,
-            )
-        )
-        if location:
-            qs = qs.filter(location__icontains=location)
-        if category:
-            qs = qs.filter(category_id=category)
-
-        existing = qs.order_by("-created_at").first()
-        if not existing:
-            return Response({"is_duplicate": False, "existing": None})
-
-        return Response({
-            "is_duplicate": True,
-            "existing": {
-                "id": existing.id,
-                "title": existing.title,
-                "status": existing.status,
-                "price": str(existing.price),
-                "location": existing.location,
-                "created_at": existing.created_at,
-            },
-        })
-
     
    # ═══════════════════════════════════════════════════════════════════
    # PUBLISH
@@ -488,6 +434,25 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         listing = self.get_object()
         self.check_object_permissions(request, listing)
 
+        already_submitted = (
+            Listing.Status.PENDING_APPROVAL,
+            Listing.Status.PAID_PENDING_APPROVAL,
+        )
+
+        def _already(l):
+            return Response(
+                {
+                    "detail": _("Tangazo tayari limewasilishwa kwa admin."),
+                    "code": "ALREADY_SUBMITTED",
+                    "listing_id": l.id,
+                    "status": l.status,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if listing.status in already_submitted:
+            return _already(listing)
+
         if listing.status not in (
             Listing.Status.DRAFT,
             Listing.Status.PENDING_PAYMENT,
@@ -495,36 +460,32 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             Listing.Status.NEEDS_EDIT,
         ):
             return Response(
-                {"detail": f"Tangazo haliwezi kuwasilishwa. Hali: {listing.status}."},
+                {
+                    "detail": _("Tangazo haliwezi kuwasilishwa katika hali hii."),
+                    "code": "INVALID_STATUS",
+                    "status": listing.status,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        fee = getattr(listing, "listing_fee", None)
-
-        if (
-            fee is not None
-            and fee.payment_status == ListingFee.PaymentStatus.PAID
-        ):
-            listing.status = Listing.Status.PENDING_APPROVAL
-            listing.save(update_fields=["status", "updated_at"])
-            return Response(
-                ListingDetailSerializer(
-                    listing, context={"request": request},
-                ).data,
-                status=status.HTTP_200_OK,
-            )
-
-        listing.status = Listing.Status.PENDING_APPROVAL
-        listing.save(update_fields=["status", "updated_at"])
+        with transaction.atomic():
+            locked = Listing.objects.select_for_update().get(pk=listing.pk)
+            if locked.status in already_submitted:  # double-click / mbio
+                return _already(locked)
+            locked.status = Listing.Status.PENDING_APPROVAL
+            locked.rejection_reason = ""
+            locked.save(update_fields=["status", "rejection_reason", "updated_at"])
+            notify_admins_listing_submitted(locked)
 
         return Response(
             {
-                "detail": (
+                "detail": _(
                     "Tangazo limewasilishwa kwa admin kukagua. "
                     "Utapata taarifa kuhusu malipo baada ya kukaguliwa."
                 ),
-                "listing_id": listing.id,
-                "status": listing.status,
+                "code": "SUBMITTED",
+                "listing_id": locked.id,
+                "status": locked.status,
             },
             status=status.HTTP_200_OK,
         )
@@ -822,16 +783,6 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 except ImportError:
                     logger.warning(
                         "[listings] deals app not available, skipping"
-                    )
-
-                # 4b. Mazungumzo ya wanunuzi (apps.messaging)
-                try:
-                    from apps.messaging.models import Conversation
-
-                    Conversation._base_manager.filter(listing=listing).delete()
-                except ImportError:
-                    logger.warning(
-                        "[listings] messaging app not available, skipping"
                     )
 
                 # 5. Related models
@@ -1995,108 +1946,6 @@ class AdminFinalizeApprovalView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
-
-# ============================================================================
-# CHECK DUPLICATE LISTING (function view)
-# ============================================================================
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def check_duplicate_listing(request):
-    user = request.user
-    title = (request.data.get("title") or "").strip()
-    price = request.data.get("price")
-    location = (request.data.get("location") or "").strip()
-
-    if not title:
-        return Response(
-            {"detail": "title inahitajika."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    qs = Listing.objects.filter(
-        seller=user,
-        title__iexact=title,
-    )
-
-    if price is not None:
-        try:
-            price_val = float(price)
-            if price_val > 0:
-                qs = qs.filter(price=price_val)
-        except (TypeError, ValueError):
-            pass
-
-    if location:
-        qs = qs.filter(location__icontains=location)
-
-    existing = qs.first()
-
-    return Response(
-        {
-            "is_duplicate": existing is not None,
-            "existing": (
-                {
-                    "id": existing.id,
-                    "title": existing.title,
-                    "price": str(existing.price),
-                    "location": existing.location,
-                    "status": existing.status,
-                }
-                if existing
-                else None
-            ),
-        },
-        status=status.HTTP_200_OK,
-    )
-
-
-# ============================================================================
-# PUBLISH LISTING (function view — legacy)
-# ============================================================================
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def publish_listing(request, pk):
-    try:
-        listing = Listing.objects.get(pk=pk)
-    except Listing.DoesNotExist:
-        return Response(
-            {"detail": "Tangazo halijapatikana."},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    if not request.user.is_staff and listing.seller_id != request.user.id:
-        return Response(
-            {"detail": "Huna ruhusa ya kuchapisha tangazo hili."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    if listing.status not in (
-        Listing.Status.DRAFT,
-        Listing.Status.REJECTED,
-        Listing.Status.NEEDS_EDIT,
-    ):
-        return Response(
-            {"detail": f"Tangazo haliwezi kuwasilishwa. Hali: {listing.status}."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    listing.status = Listing.Status.PENDING_APPROVAL
-    listing.save(update_fields=["status", "updated_at"])
-
-    return Response(
-        {
-            "detail": (
-                "Tangazo limewasilishwa kwa admin. "
-                "Litaonekana baada ya kuidhinishwa."
-            ),
-            "listing_id": listing.id,
-            "status": listing.status,
-        },
-        status=status.HTTP_200_OK,
-    )
 
 
 # ============================================================================

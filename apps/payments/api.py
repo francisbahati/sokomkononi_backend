@@ -26,6 +26,7 @@ from rest_framework.views import APIView
 from .fimipay import (
     create_order,
     get_order_status,
+    is_paid,
     list_transactions as fp_list_transactions,
     create_payout as fp_create_payout,
     get_payout_status as fp_get_payout_status,
@@ -51,14 +52,17 @@ class PaymentPollThrottle(UserRateThrottle):
     """
     scope = "payment_poll"
 
-RECONCILE_ON_POLL_PREFIXES = {"LSF", "BST", "LDS", "BND", "ADV", "SFE", "RSV"}
+RECONCILE_ON_POLL_PREFIXES = {"LSF", "BST", "LDS", "BND", "ADV", "SFE", "RSV", "RSX"}
 
 
 def _reconcile_if_paid(prefix, order_id, data):
     """
-    Kama FimiPay inasema SUCCESS lakini webhook haikutumia malipo,
-    yatumie sasa. Kama kutumia kumeshindikana, rudisha PENDING ili
+    Kama FimiPay inasema malipo yamekamilika lakini webhook haikutumia
+    malipo, yatumie sasa. Kama kutumia kumeshindikana, rudisha PENDING ili
     frontend iendelee kujaribu (badala ya kuonyesha mafanikio ya uongo).
+
+    Kumbuka: `get_order_status` tayari imenormalize COMPLETED → SUCCESS,
+    lakini tunatumia `is_paid()` pia kwa usalama wa payload za zamani.
     """
     if not getattr(settings, "PAYMENTS_RECONCILE_ON_POLL", True):
         return data
@@ -70,10 +74,10 @@ def _reconcile_if_paid(prefix, order_id, data):
     ):
         return data
 
-    status_str = str(
+    status_str = (
         data.get("payment_status") or data.get("status") or ""
-    ).upper()
-    if status_str != "SUCCESS":
+    )
+    if not is_paid(status_str):
         return data
 
     from .views import OK, apply_success_from_status
@@ -121,6 +125,11 @@ def _user_owns_order(user, prefix, ref_id):
             from apps.transactions.models import Reservation
             return Reservation.objects.filter(
                 pk=ref_id, transaction__buyer=user,
+            ).exists()
+        if prefix == "RSX":
+            from apps.transactions.models import ReservationExtension
+            return ReservationExtension.objects.filter(
+                pk=ref_id, reservation__transaction__buyer=user,
             ).exists()
     except Exception:
         return False
@@ -199,6 +208,9 @@ def _apply_status(payout, data):
         "success":    Payout.Status.COMPLETED,
         "failed":     Payout.Status.FAILED,
         "rejected":   Payout.Status.REJECTED,
+        # "cancelled" itaongezwa Hatua 4 baada ya migration ya
+        # Payout.Status.CANCELLED. Kwa sasa, payout iliyofutwa
+        # itabaki PENDING na `fimi_status = "cancelled"` itarekodiwa.
     }
     payout.status = mapping.get(raw, payout.status)
     payout.fimi_status = raw

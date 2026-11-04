@@ -71,9 +71,12 @@ def initiate_listing_fee_payment(*, listing, user, payment_method='mobile', phon
     # Chaguo B: seller anaweza kulipa kama:
     #   • DRAFT / PENDING_PAYMENT — anaunda na analipa papo (legacy)
     #   • APPROVED_PENDING_PAYMENT — admin ameomba malipo
-    #   • REJECTED — retry baada ya kukataliwa (kama ameamua kubadilisha)
+    #   • PAID_PENDING_APPROVAL — fee haijasasishwa (webhook ilikosa)
     # Seller analipa TU baada ya admin kukagua na kuomba malipo.
-    allowed_states = (Listing.Status.APPROVED_PENDING_PAYMENT,)
+    allowed_states = (
+        Listing.Status.APPROVED_PENDING_PAYMENT,
+        Listing.Status.PAID_PENDING_APPROVAL,  # 🛠️ FIX: Ongeza hii
+    )
     if listing.status not in allowed_states:
         raise ValidationError(
             "Admin bado hajakagua tangazo hili. "
@@ -164,35 +167,67 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
         "payment_status", "payment_reference", "paid_at", "updated_at",
     ])
 
+    listing_for_notification = Listing.objects.get(pk=ref_id)
+
     # Advance the listing to PAID_PENDING_APPROVAL (Chaguo B)
     # — admin bado anahitaji kuidhinisha mwisho.
-    Listing.objects.filter(pk=ref_id).update(
+    # Usifufue tangazo lililokataliwa/kufutwa wakati malipo yalikuwa yanasubiri
+    updated = Listing.objects.filter(
+        pk=ref_id, status=Listing.Status.APPROVED_PENDING_PAYMENT,
+    ).update(
         status=Listing.Status.PAID_PENDING_APPROVAL,
         updated_at=timezone.now(),
     )
 
-    # Notify admins — fee imelipwa, listing inasubiri idhini ya mwisho
-    try:
-        from apps.notifications.models import Notification
-        from apps.notifications.services.notification import (
-            create_notification_for_admins,
-        )
-        listing = Listing.objects.get(pk=ref_id)
-        create_notification_for_admins(
-            notification_type=Notification.NotificationType.LISTING_FEE_PAID,
-            title=_("Ada ya tangazo imelipwa"),
-            message=_(
-                '"{title}" — tayari kwa idhini ya mwisho.'
-            ).format(title=listing.title),
-            related_object_type="listings.Listing",
-            related_object_id=ref_id,
-            action_url="/smk-control-9x7k/moderation",
-        )
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception(
-            "Failed to notify admins about paid listing fee"
-        )
+    # 🛠️ FIX: Arifu admin kama malipo yamefika kwenye listing isiyo APPROVED_PENDING_PAYMENT
+    if not updated:
+        try:
+            from apps.notifications.models import Notification
+            from apps.notifications.services.notification import (
+                create_notification_for_admins,
+            )
+            create_notification_for_admins(
+                notification_type=Notification.NotificationType.LISTING_FEE_PAID,
+                title=_("Malipo yamefika kwenye tangazo lisilo sahihi"),
+                message=_(
+                    '"{title}" — malipo yamefika lakini tangazo '
+                    "lilikuwa {status}. Amua kama kurudisha refund."
+                ).format(
+                    title=listing_for_notification.title,
+                    status=listing_for_notification.status,
+                ),
+                related_object_type="listings.Listing",
+                related_object_id=ref_id,
+                action_url="/smk-control-9x7k/refunds",
+                priority=Notification.Priority.URGENT,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to notify admins about payment on rejected listing"
+            )
+    else:
+        # Notify admins — fee imelipwa, listing inasubiri idhini ya mwisho
+        try:
+            from apps.notifications.models import Notification
+            from apps.notifications.services.notification import (
+                create_notification_for_admins,
+            )
+            create_notification_for_admins(
+                notification_type=Notification.NotificationType.LISTING_FEE_PAID,
+                title=_("Ada ya tangazo imelipwa"),
+                message=_(
+                    '"{title}" — tayari kwa idhini ya mwisho.'
+                ).format(title=listing_for_notification.title),
+                related_object_type="listings.Listing",
+                related_object_id=ref_id,
+                action_url="/smk-control-9x7k/moderation",
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to notify admins about paid listing fee"
+            )
 
     return listing_fee
 
@@ -200,11 +235,27 @@ def mark_listing_fee_as_paid_from_webhook(*, ref_id, payment_reference):
 @transaction.atomic
 def mark_listing_fee_as_refunded(*, ref_id, reason=""):
     try:
-        fee = ListingFee.objects.select_for_update().get(listing_id=ref_id)
+        fee = (
+            ListingFee.objects
+            .select_for_update()
+            .select_related("listing")
+            .get(listing_id=ref_id)
+        )
     except ListingFee.DoesNotExist:
         return None
     if fee.payment_status == ListingFee.PaymentStatus.REFUNDED:
         return fee
     fee.payment_status = ListingFee.PaymentStatus.REFUNDED
     fee.save(update_fields=["payment_status", "updated_at"])
+
+    # 🛠️ FIX: Rudisha listing kwa DRAFT kama ilikuwa PAID_PENDING_APPROVAL au LIVE
+    listing = fee.listing
+    if listing.status in (
+        Listing.Status.PAID_PENDING_APPROVAL,
+        Listing.Status.LIVE,
+    ):
+        listing.status = Listing.Status.DRAFT
+        listing.rejection_reason = reason or ""
+        listing.save(update_fields=["status", "rejection_reason", "updated_at"])
+
     return fee

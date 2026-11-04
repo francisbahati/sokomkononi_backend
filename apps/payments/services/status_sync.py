@@ -2,7 +2,7 @@ import importlib, logging
 from datetime import timedelta
 from django.db import connection
 from django.utils import timezone
-from apps.payments.fimipay import get_order_status
+from apps.payments.fimipay import get_order_status, is_paid
 
 logger = logging.getLogger(__name__)
 SYNC_SOURCES = [
@@ -47,7 +47,7 @@ def _fimipay_success(ref):
     if not ref: return False
     try: d = get_order_status(ref)
     except Exception as e: logger.warning("get_order_status %s: %s", ref, e); return False
-    return str(d.get("payment_status") or "").upper() == "SUCCESS"
+    return is_paid(d.get("payment_status"))
 
 def _sync_source(src, user=None, since_hours=48, dry_run=False, no_time_filter=False):
     M = _get_model(src["model"])

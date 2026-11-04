@@ -18,7 +18,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.exceptions import ValidationError
 
-from .fimipay import verify_webhook_signature
+from .fimipay import verify_webhook_signature, is_paid
 from .order_ids import parse_order_id
 
 logger = logging.getLogger(__name__)
@@ -338,7 +338,7 @@ def fimipay_webhook(request):
             return JsonResponse({"detail": "Retry"}, status=500)
         return JsonResponse({"received": True}, status=200)
 
-    success = event == "payment.success" or payment_status == "SUCCESS"
+    success = event == "payment.success" or is_paid(payment_status)
     if success and order_id:
         result = _route_success(order_id, {
             "amount": payload.get("amount"),

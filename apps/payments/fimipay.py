@@ -15,6 +15,16 @@ from rest_framework.exceptions import ValidationError
 logger = logging.getLogger(__name__)
 
 
+# FimiPay sasa inarudisha "COMPLETED" kwa malipo yaliyofanikiwa.
+# "SUCCESS" inabaki kwa orders za zamani / test mode za zamani.
+PAID_STATUSES = {"COMPLETED", "SUCCESS"}
+
+
+def is_paid(status) -> bool:
+    """True kama status ya malipo inamaanisha pesa imeingia."""
+    return str(status or "").strip().upper() in PAID_STATUSES
+
+
 def _resolve_test_outcome():
     """
     Read the SOKO_FIMIPAY_TEST_OUTCOME env var (default empty).
@@ -23,6 +33,8 @@ def _resolve_test_outcome():
     """
     import os
     return os.environ.get("SOKO_FIMIPAY_TEST_OUTCOME", "").strip() or None
+
+
 # (connect, read) — lazima ziwe chini ya gunicorn --timeout (chaguo-msingi 30s),
 # vinginevyo FimiPay ikichelewa worker inauawa na browser inaona 502/"CORS".
 REQUEST_TIMEOUT = (5, 15)
@@ -37,6 +49,23 @@ def _headers():
         "Accept": "application/json",
         "User-Agent": "SokoMkononi-SDK/1.0",
     }
+
+
+def _extract_error_message(data, status_code):
+    """
+    FimiPay sasa inarudisha `reason: {code, message}` kwa makosa ya
+    create_order (mfano insufficient_balance). Tumia hiyo kama ipo,
+    vinginevyo message/error ya kawaida.
+    """
+    if isinstance(data, dict):
+        reason = data.get("reason")
+        if isinstance(reason, dict) and reason.get("message"):
+            return reason["message"]
+        if data.get("message"):
+            return data["message"]
+        if data.get("error"):
+            return data["error"]
+    return f"FimiPay error ({status_code})"
 
 
 def _post(path, payload):
@@ -54,8 +83,15 @@ def _post(path, payload):
     except ValueError:
         raise ValidationError("Jibu la FimiPay si sahihi (si JSON).")
 
+    # Rate limit: onyesha ujumbe rafiki, si "rate_limited" mbichi.
+    if response.status_code == 429:
+        logger.warning("FimiPay rate limited on %s", path)
+        raise ValidationError(
+            "Majaribio mengi sana. Jaribu tena baadaye au tumia malipo ya simu."
+        )
+
     if not response.ok:
-        message = data.get("message") or data.get("error") or f"FimiPay error ({response.status_code})"
+        message = _extract_error_message(data, response.status_code)
         logger.warning("FimiPay error %s: %s", response.status_code, message)
         raise ValidationError(message)
     return data
@@ -74,8 +110,14 @@ def _get(path):
     except ValueError:
         raise ValidationError("Jibu la FimiPay si sahihi.")
 
+    if response.status_code == 429:
+        logger.warning("FimiPay rate limited on GET %s", path)
+        raise ValidationError(
+            "Majaribio mengi sana. Jaribu tena baadaye."
+        )
+
     if not response.ok:
-        raise ValidationError(data.get("message") or "FimiPay error.")
+        raise ValidationError(_extract_error_message(data, response.status_code))
     return data
 
 
@@ -150,8 +192,25 @@ def create_order(*, order_id, amount, buyer_phone, buyer_email="", buyer_name=""
 
 
 def get_order_status(order_id):
+    """
+    Poll an order's status.
+
+    FimiPay sasa inarudisha `payment_status: "COMPLETED"` kwa malipo
+    yaliyofanikiwa. Tunabadilisha kuwa "SUCCESS" kabla ya kurudisha,
+    ili code yote ya zamani inayotegemea "SUCCESS" iendelee kufanya
+    kazi. Status halisi ya FimiPay inahifadhiwa kwenye
+    `raw_payment_status` kwa ukaguzi/receipt.
+    """
     response = _post("/payment/order_status", {"order_id": str(order_id)})
-    return response.get("data") or {}
+    data = response.get("data") or {}
+
+    if isinstance(data, dict):
+        raw = data.get("payment_status")
+        if is_paid(raw) and str(raw).strip().upper() != "SUCCESS":
+            data["raw_payment_status"] = raw
+            data["payment_status"] = "SUCCESS"
+
+    return data
 
 
 def list_transactions():

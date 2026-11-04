@@ -66,7 +66,7 @@ def validate_boost_request(*, listing, user, package):
 
     if listing.status != Listing.Status.LIVE:
         raise ValidationError(
-            "Tangazo lazima liwe AVAILABLE kabla ya ku-boost."
+            "Tangazo lazima liwe LIVE kabla ya ku-boost."
         )
 
     fee_enabled = is_boost_fee_enabled()
@@ -77,13 +77,23 @@ def validate_boost_request(*, listing, user, package):
             raise ValidationError("Boost package hii haipo active.")
 
     now = timezone.now()
-    if ListingBoost.objects.filter(listing=listing).filter(
-        models.Q(status=ListingBoost.BoostStatus.ACTIVE, expires_at__gt=now)
-        | models.Q(payment_status=ListingBoost.PaymentStatus.PENDING)
+    existing = ListingBoost.objects.filter(listing=listing)
+    # `code` inamwezesha frontend kuonyesha ujumbe sahihi kwa lugha ya app
+    # (badala ya maandishi ya seva), na kutofautisha active na pending.
+    if existing.filter(
+        status=ListingBoost.BoostStatus.ACTIVE, expires_at__gt=now,
     ).exists():
-        raise ValidationError(
-            "Tangazo hili tayari lina boost active au inayosubiri malipo."
-        )
+        raise ValidationError({
+            "detail": _("Tangazo hili tayari lina boost inayofanya kazi."),
+            "code": "BOOST_ACTIVE",
+        })
+    if existing.filter(
+        payment_status=ListingBoost.PaymentStatus.PENDING,
+    ).exists():
+        raise ValidationError({
+            "detail": _("Tangazo hili lina boost inayosubiri malipo."),
+            "code": "BOOST_PENDING",
+        })
 
 
 @db_transaction.atomic

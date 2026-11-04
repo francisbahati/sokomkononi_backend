@@ -175,13 +175,22 @@ def request_payment_listing(listing_id, admin_user, reason=""):
 
     # ✅ Angalia kama fee imezimwa (amount == 0) au haina fee rule
     from django.core.exceptions import ValidationError as DjangoValidationError
-    from .listing_fee import create_listing_fee
+    from .listing_fee import create_listing_fee, ListingFeeNotConfigured
 
     is_free = False
     try:
         fee = create_listing_fee(listing)
         if fee.amount == 0:
             is_free = True
+    except ListingFeeNotConfigured:
+        # Category haina rule ya ada: usiipeleke LIVE bure kimya kimya.
+        raise ValidationError({
+            "detail": _(
+                "Kundi hili halina kanuni ya ada. Weka ada kwenye mipangilio "
+                "kabla ya kuendelea."
+            ),
+            "code": "FEE_NOT_CONFIGURED",
+        })
     except DjangoValidationError:
         # Kama hakuna fee rule kabisa, mfumo unaruhusu LIVE
         is_free = True
@@ -341,3 +350,41 @@ def approve_listing(listing_id, admin_user):
         )
 
     return listing
+
+
+# ============================================================
+# NOTIFY ADMINS — tangazo jipya limewasilishwa (publish / edit ya LIVE)
+# ============================================================
+def notify_admins_listing_submitted(listing):
+    """Tuma notification kwa admins wote tangazo linapoingia kwenye foleni."""
+    from apps.notifications.services.notification import (
+        create_notification_for_admins,
+    )
+
+    seller = listing.seller
+    seller_label = (
+        getattr(seller, "name", "") or getattr(seller, "phone", "") or "—"
+    )
+    title_text = listing.title
+    listing_id_value = listing.id
+
+    def _send():
+        try:
+            create_notification_for_admins(
+                notification_type=Notification.NotificationType.LISTING_CREATED,
+                title=_("Tangazo jipya linasubiri ukaguzi"),
+                message=_('"{title}" imewasilishwa na {seller}.').format(
+                    title=title_text, seller=seller_label
+                ),
+                related_object_type="listings.Listing",
+                related_object_id=listing_id_value,
+                action_url="/smk-control-9x7k/moderation",
+                priority=Notification.Priority.HIGH,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "admin notification for submitted listing failed"
+            )
+
+    transaction.on_commit(_send)

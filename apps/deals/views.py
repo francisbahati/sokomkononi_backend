@@ -351,130 +351,131 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     # ============================================================
     # REPORT — inaunda Ticket ya category=DEAL_REPORT
     # ============================================================
-   @extend_schema(
-    request=DealReportSerializer,
-    responses={201: None},
-)
-@action(
-    detail=True, methods=["post"],
-    url_path="report", url_name="report",
-)
-@transaction.atomic
-def report(self, request, pk=None):
-    deal_room = self.get_object()
-
-    serializer = DealReportSerializer(
-        data=request.data,
-        context={"request": request, "deal_room": deal_room},
+    @extend_schema(
+        request=DealReportSerializer,
+        responses={201: None},
     )
-    serializer.is_valid(raise_exception=True)
-
-    reported_user_id = serializer.validated_data["reported_user_id"]
-    reason = serializer.validated_data["reason"]
-    details = serializer.validated_data["details"]
-
-    # Amua nafasi ya aliyeripoti
-    if request.user.id == deal_room.buyer_id:
-        reporter_role = "buyer"
-        reported_user = deal_room.seller
-    else:
-        reporter_role = "seller"
-        reported_user = deal_room.buyer
-
-    subject = (
-        f"Ripoti ya {reporter_role.upper()} dhidi ya "
-        f"{reported_user.name} — Deal #{deal_room.id}"
+    @action(
+        detail=True, methods=["post"],
+        url_path="report", url_name="report",
     )
-    description = (
-        f"**Deal Room:** #{deal_room.id} — {deal_room.listing.title}\n"
-        f"**Aliyeripoti:** {request.user.name} "
-        f"(ID {request.user.id}, {reporter_role})\n"
-        f"**Aliripotiwa:** {reported_user.name} "
-        f"(ID {reported_user.id})\n"
-        f"**Sababu:** {reason}\n\n"
-        f"**Maelezo:**\n{details}"
-    )
+    @transaction.atomic
+    def report(self, request, pk=None):
+        deal_room = self.get_object()
 
-    ticket = Ticket.objects.create(
-        code=_generate_ticket_code(),
-        subject=subject[:255],
-        description=description,
-        category=Ticket.Category.DEAL_REPORT,
-        priority=Ticket.Priority.HIGH,
-        user=request.user,
-        user_name=request.user.name,
-        user_email=request.user.email or "",
-        sla_deadline=timezone.now() + timedelta(hours=24),
-        deal_room=deal_room,
-        reported_user=reported_user,
-        reported_user_name=reported_user.name,
-        reporter_role=reporter_role,
-        report_reason=reason,
-    )
-
-    TicketMessage.objects.create(
-        ticket=ticket,
-        sender=TicketMessage.Sender.USER,
-        sender_name=request.user.name,
-        text=description,
-    )
-
-    # ✅ Tumia details={"sw","en"} kwa sababu ina data nyingi za kiufundi
-    _log(
-        request,
-        action="deal.reported",
-        target="Ticket",
-        target_id=ticket.id,
-        details={
-            "sw": (
-                f"Mtumiaji {request.user.id} ({reporter_role}) amemripoti "
-                f"mtumiaji {reported_user.id} kwenye deal #{deal_room.id} — "
-                f"sababu={reason}"
-            ),
-            "en": (
-                f"User {request.user.id} ({reporter_role}) reported "
-                f"user {reported_user.id} in deal #{deal_room.id} — "
-                f"reason={reason}"
-            ),
-        },
-    )
-
-    # ✅ MPYA: Arifa kwa admins kuhusu ripoti mpya ya deal
-    try:
-        from apps.notifications.services.notification import (
-            create_notification_for_admins,
+        serializer = DealReportSerializer(
+            data=request.data,
+            context={"request": request, "deal_room": deal_room},
         )
-        from apps.notifications.models import Notification
+        serializer.is_valid(raise_exception=True)
 
-        create_notification_for_admins(
-            notification_type=Notification.NotificationType.GENERAL,
-            title=f"Ripoti Mpya ya Deal: {ticket.code}",
-            message=(
-                f"{request.user.name} ({reporter_role}) amemripoti "
-                f"{reported_user.name} — sababu: {reason}"
-            ),
-            priority=Notification.Priority.URGENT,
-            related_object_type="ticket",
-            related_object_id=ticket.id,
-            action_url=f"/smk-control-9x7k/support?ticket={ticket.id}",
+        reported_user_id = serializer.validated_data["reported_user_id"]
+        reason = serializer.validated_data["reason"]
+        details = serializer.validated_data["details"]
+
+        # Amua nafasi ya aliyeripoti
+        if request.user.id == deal_room.buyer_id:
+            reporter_role = "buyer"
+            reported_user = deal_room.seller
+        else:
+            reporter_role = "seller"
+            reported_user = deal_room.buyer
+
+        subject = (
+            f"Ripoti ya {reporter_role.upper()} dhidi ya "
+            f"{reported_user.name} — Deal #{deal_room.id}"
         )
-    except Exception:
-        logger.exception(
-            "Failed to notify admins of deal report %s", ticket.id,
+        description = (
+            f"**Deal Room:** #{deal_room.id} — {deal_room.listing.title}\n"
+            f"**Aliyeripoti:** {request.user.name} "
+            f"(ID {request.user.id}, {reporter_role})\n"
+            f"**Aliripotiwa:** {reported_user.name} "
+            f"(ID {reported_user.id})\n"
+            f"**Sababu:** {reason}\n\n"
+            f"**Maelezo:**\n{details}"
         )
 
-    return Response(
-        {
-            "ok": True,
-            "ticket_id": ticket.id,
-            "ticket_code": ticket.code,
-            "message": (
-                "Ripoti yako imetumwa. Timu yetu itachukua hatua "
-                "ndani ya saa 24."
-            ),
-        },
-        status=status.HTTP_201_CREATED,
-    )
+        ticket = Ticket.objects.create(
+            code=_generate_ticket_code(),
+            subject=subject[:255],
+            description=description,
+            category=Ticket.Category.DEAL_REPORT,
+            priority=Ticket.Priority.HIGH,
+            user=request.user,
+            user_name=request.user.name,
+            user_email=request.user.email or "",
+            sla_deadline=timezone.now() + timedelta(hours=24),
+            deal_room=deal_room,
+            reported_user=reported_user,
+            reported_user_name=reported_user.name,
+            reporter_role=reporter_role,
+            report_reason=reason,
+        )
+
+        TicketMessage.objects.create(
+            ticket=ticket,
+            sender=TicketMessage.Sender.USER,
+            sender_name=request.user.name,
+            text=description,
+        )
+
+        # ✅ Tumia details={"sw","en"} kwa sababu ina data nyingi za kiufundi
+        _log(
+            request,
+            action="deal.reported",
+            target="Ticket",
+            target_id=ticket.id,
+            details={
+                "sw": (
+                    f"Mtumiaji {request.user.id} ({reporter_role}) amemripoti "
+                    f"mtumiaji {reported_user.id} kwenye deal #{deal_room.id} — "
+                    f"sababu={reason}"
+                ),
+                "en": (
+                    f"User {request.user.id} ({reporter_role}) reported "
+                    f"user {reported_user.id} in deal #{deal_room.id} — "
+                    f"reason={reason}"
+                ),
+            },
+        )
+
+        # ✅ MPYA: Arifa kwa admins kuhusu ripoti mpya ya deal
+        try:
+            from apps.notifications.services.notification import (
+                create_notification_for_admins,
+            )
+            from apps.notifications.models import Notification
+
+            create_notification_for_admins(
+                notification_type=Notification.NotificationType.GENERAL,
+                title=f"Ripoti Mpya ya Deal: {ticket.code}",
+                message=(
+                    f"{request.user.name} ({reporter_role}) amemripoti "
+                    f"{reported_user.name} — sababu: {reason}"
+                ),
+                priority=Notification.Priority.URGENT,
+                related_object_type="ticket",
+                related_object_id=ticket.id,
+                action_url=f"/smk-control-9x7k/support?ticket={ticket.id}",
+            )
+        except Exception:
+            logger.exception(
+                "Failed to notify admins of deal report %s", ticket.id,
+            )
+
+        return Response(
+            {
+                "ok": True,
+                "ticket_id": ticket.id,
+                "ticket_code": ticket.code,
+                "message": (
+                    "Ripoti yako imetumwa. Timu yetu itachukua hatua "
+                    "ndani ya saa 24."
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
     # ============================================================
     # OFFER
     # ============================================================

@@ -181,7 +181,6 @@ class ReportsView(APIView):
         # ── USER STATS ──────────────────────────────────────
         user_stats = calculate_user_stats()
 
-        # Breakdown ya Watumiaji (Kwa ajili ya UI na Ripoti)
         users_breakdown = {
             "sellers": user_stats["sellersOnly"],
             "buyers": user_stats["buyersOnly"],
@@ -232,27 +231,12 @@ class ReportsView(APIView):
 
         total_listings = visible_qs_in_range.count()
         
-        # Breakdown ya Mali kwa Status
-        raw_listings_status = dict(
+        # ✅ Breakdown ya Mali: Inachukua KILA status iliyopo kwenye DB
+        listings_breakdown = dict(
             visible_qs_in_range.values_list("status")
             .annotate(c=Count("id"))
             .values_list("status", "c")
         )
-        listings_breakdown = {
-            "live": raw_listings_status.get("LIVE", 0),
-            "reserved": raw_listings_status.get("RESERVED", 0),
-            "sold": raw_listings_status.get("SOLD", 0),
-            "draft": raw_listings_status.get("DRAFT", 0),
-            "pending_payment": raw_listings_status.get("PENDING_PAYMENT", 0),
-            "approved_pending_payment": raw_listings_status.get("APPROVED_PENDING_PAYMENT", 0),
-            "pending_approval": raw_listings_status.get("PENDING_APPROVAL", 0),
-            "paid_pending_approval": raw_listings_status.get("PAID_PENDING_APPROVAL", 0),
-            "in_review": raw_listings_status.get("IN_REVIEW", 0),
-            "needs_edit": raw_listings_status.get("NEEDS_EDIT", 0),
-            "rejected": raw_listings_status.get("REJECTED", 0),
-            "paused": raw_listings_status.get("PAUSED", 0),
-            "expired": raw_listings_status.get("EXPIRED", 0),
-        }
 
         listings_growth = []
         for i in range(29, -1, -1):
@@ -271,21 +255,12 @@ class ReportsView(APIView):
 
         total_deals = deals_qs.count()
         
-        raw_deals_status = dict(
+        # ✅ Breakdown ya Deals: Inachukua KILA status iliyopo kwenye DB
+        deals_breakdown = dict(
             deals_qs.values_list("status")
             .annotate(c=Count("id"))
             .values_list("status", "c")
         )
-        deals_breakdown = {
-            "negotiating": raw_deals_status.get("NEGOTIATING", 0),
-            "accepted": raw_deals_status.get("ACCEPTED", 0),
-            "reserved": raw_deals_status.get("RESERVED", 0),
-            "completed": raw_deals_status.get("COMPLETED", 0),
-            "cancelled": raw_deals_status.get("CANCELLED", 0),
-            "disputed": raw_deals_status.get("DISPUTED", 0),
-            "awaiting_final_payment": raw_deals_status.get("AWAITING_FINAL_PAYMENT", 0),
-            "payment_proof_submitted": raw_deals_status.get("PAYMENT_PROOF_SUBMITTED", 0),
-        }
 
         # ── REVENUE ─────────────────────────────────────────
         try:
@@ -520,50 +495,63 @@ class ReportsExportView(APIView):
         # MALI
         lb = data.get("listingsBreakdown", {})
         status_labels = {
-            "live": "Hai", "reserved": "Zimehifadhiwa", "sold": "Zimeuzwa",
-            "draft": "Rasimu", "pending_payment": "Inasubiri Malipo",
-            "approved_pending_payment": "Imeidhinishwa (Inasubiri Malipo)",
-            "pending_approval": "Inasubiri Admin", "paid_pending_approval": "Imelipwa (Inasubiri Admin)",
-            "in_review": "Inakaguliwa", "needs_edit": "Inahitaji Uhariri",
-            "rejected": "Imekataliwa", "paused": "Imesimamishwa", "expired": "Imeisha Muda"
+            "LIVE": "Hai", "RESERVED": "Zimehifadhiwa", "SOLD": "Zimeuzwa",
+            "DRAFT": "Rasimu", "PENDING_PAYMENT": "Inasubiri Malipo",
+            "APPROVED_PENDING_PAYMENT": "Imeidhinishwa (Inasubiri Malipo)",
+            "PENDING_APPROVAL": "Inasubiri Admin", "PAID_PENDING_APPROVAL": "Imelipwa (Inasubiri Admin)",
+            "IN_REVIEW": "Inakaguliwa", "NEEDS_EDIT": "Inahitaji Uhariri",
+            "REJECTED": "Imekataliwa", "PAUSED": "Imesimamishwa", "EXPIRED": "Imeisha Muda"
         }
         writer.writerow(["=== MALI ==="])
         writer.writerow(["Jumla ya Mali", data.get("totalListings", 0)])
         for status, count in lb.items():
             if count > 0:
-                label = status_labels.get(status, status.replace("_", " ").title())
+                label = status_labels.get(status.upper(), status.replace("_", " ").title())
                 writer.writerow([f"  - {label}", count])
         writer.writerow([])
 
         # DEALS
         db = data.get("dealsBreakdown", {})
         deal_labels = {
-            "negotiating": "Inajadiliwa", "accepted": "Imekubaliwa",
-            "reserved": "Imehifadhiwa", "completed": "Imekamilika",
-            "cancelled": "Imeghairiwa", "disputed": "Mgogoro",
-            "awaiting_final_payment": "Malipo ya Mwisho", "payment_proof_submitted": "Uthibitisho wa Malipo"
+            "NEGOTIATING": "Inajadiliwa", "ACCEPTED": "Imekubaliwa",
+            "RESERVED": "Imehifadhiwa", "COMPLETED": "Imekamilika",
+            "CANCELLED": "Imeghairiwa", "DISPUTED": "Mgogoro",
+            "AWAITING_FINAL_PAYMENT": "Malipo ya Mwisho", "PAYMENT_PROOF_SUBMITTED": "Uthibitisho wa Malipo",
+            "OPEN": "Wazi (Open)", "OFFER_SENT": "Ofa Imetumwa"
         }
         writer.writerow(["=== DEALS ==="])
         writer.writerow(["Jumla ya Deals", data.get("totalDeals", 0)])
         for status, count in db.items():
             if count > 0:
-                label = deal_labels.get(status, status.replace("_", " ").title())
+                label = deal_labels.get(status.upper(), status.replace("_", " ").title())
                 writer.writerow([f"  - {label}", count])
         writer.writerow([])
 
         # MAPATO
         rev_streams = data.get("revenueByStream", {})
+        if not rev_streams:
+            try:
+                from .services.revenue import calculate_financial_dashboard
+                fees_data = calculate_financial_dashboard("all")
+                rev_streams = fees_data.get("by_type", {})
+            except Exception:
+                pass
+                
         stream_labels = {
             "listing": "Listing Fee", "reservation": "Reservation Fee",
             "boost": "Boost", "leading": "Leading", "advertise": "Advertisement",
-            "success": "Success Fee", "bundle": "Bundle"
+            "success": "Success Fee", "bundle": "Bundle", "listing_fee": "Listing Fee"
         }
         writer.writerow(["=== MAPATO ==="])
         writer.writerow(["Jumla ya Mapato", f"TZS {float(data.get('totalRevenue', 0)):,.0f}"])
         for key, amount in rev_streams.items():
             if amount > 0:
-                label = stream_labels.get(key, key.replace("_", " ").title())
+                label = stream_labels.get(key.lower(), key.replace("_", " ").title())
                 writer.writerow([f"  - {label}", f"TZS {float(amount):,.0f}"])
+        
+        if not rev_streams:
+            writer.writerow(["(Hakuna vyanzo vya mapato vilivyorekodiwa)", "-"])
+            
         writer.writerow([])
 
         # ORODHA ZA JUU
@@ -678,20 +666,18 @@ class ReportsExportView(APIView):
         elements.append(Paragraph("<b>2. Mali kwa Hali</b>", styles["Heading2"]))
         lb = data.get("listingsBreakdown", {})
         status_labels = {
-            "live": "Hai", "reserved": "Zimehifadhiwa", "sold": "Zimeuzwa",
-            "draft": "Rasimu", "pending_payment": "Inasubiri Malipo",
-            "approved_pending_payment": "Imeidhinishwa (Inasubiri Malipo)",
-            "pending_approval": "Inasubiri Admin", "paid_pending_approval": "Imelipwa (Inasubiri Admin)",
-            "in_review": "Inakaguliwa", "needs_edit": "Inahitaji Uhariri",
-            "rejected": "Imekataliwa", "paused": "Imesimamishwa", "expired": "Imeisha Muda"
+            "LIVE": "Hai", "RESERVED": "Zimehifadhiwa", "SOLD": "Zimeuzwa",
+            "DRAFT": "Rasimu", "PENDING_PAYMENT": "Inasubiri Malipo",
+            "APPROVED_PENDING_PAYMENT": "Imeidhinishwa (Inasubiri Malipo)",
+            "PENDING_APPROVAL": "Inasubiri Admin", "PAID_PENDING_APPROVAL": "Imelipwa (Inasubiri Admin)",
+            "IN_REVIEW": "Inakaguliwa", "NEEDS_EDIT": "Inahitaji Uhariri",
+            "REJECTED": "Imekataliwa", "PAUSED": "Imesimamishwa", "EXPIRED": "Imeisha Muda"
         }
-        
         listing_rows = [["Jumla ya Mali", str(data.get("totalListings", 0))]]
         for status, count in lb.items():
             if count > 0:
-                label = status_labels.get(status, status.replace("_", " ").title())
+                label = status_labels.get(status.upper(), status.replace("_", " ").title())
                 listing_rows.append([f"  - {label}", str(count)])
-
         elements.append(make_table(listing_rows, ["Kipimo", "Thamani"]))
         elements.append(Spacer(1, 0.5 * cm))
 
@@ -699,35 +685,45 @@ class ReportsExportView(APIView):
         elements.append(Paragraph("<b>3. Deals kwa Hali</b>", styles["Heading2"]))
         db = data.get("dealsBreakdown", {})
         deal_labels = {
-            "negotiating": "Inajadiliwa", "accepted": "Imekubaliwa",
-            "reserved": "Imehifadhiwa", "completed": "Imekamilika",
-            "cancelled": "Imeghairiwa", "disputed": "Mgogoro",
-            "awaiting_final_payment": "Malipo ya Mwisho", "payment_proof_submitted": "Uthibitisho wa Malipo"
+            "NEGOTIATING": "Inajadiliwa", "ACCEPTED": "Imekubaliwa",
+            "RESERVED": "Imehifadhiwa", "COMPLETED": "Imekamilika",
+            "CANCELLED": "Imeghairiwa", "DISPUTED": "Mgogoro",
+            "AWAITING_FINAL_PAYMENT": "Malipo ya Mwisho", "PAYMENT_PROOF_SUBMITTED": "Uthibitisho wa Malipo",
+            "OPEN": "Wazi (Open)", "OFFER_SENT": "Ofa Imetumwa"
         }
-        
         deals_rows = [["Jumla ya Deals", str(data.get("totalDeals", 0))]]
         for status, count in db.items():
             if count > 0:
-                label = deal_labels.get(status, status.replace("_", " ").title())
+                label = deal_labels.get(status.upper(), status.replace("_", " ").title())
                 deals_rows.append([f"  - {label}", str(count)])
-
         elements.append(make_table(deals_rows, ["Kipimo", "Thamani"]))
         elements.append(Spacer(1, 0.5 * cm))
 
         # 4. MAPATO
         elements.append(Paragraph("<b>4. Mapato kwa Njia</b>", styles["Heading2"]))
         rev_streams = data.get("revenueByStream", {})
+        
+        if not rev_streams:
+            try:
+                from .services.revenue import calculate_financial_dashboard
+                fees_data = calculate_financial_dashboard("all")
+                rev_streams = fees_data.get("by_type", {})
+            except Exception:
+                pass
+
         stream_labels = {
             "listing": "Listing Fee", "reservation": "Reservation Fee",
             "boost": "Boost", "leading": "Leading", "advertise": "Advertisement",
-            "success": "Success Fee", "bundle": "Bundle"
+            "success": "Success Fee", "bundle": "Bundle", "listing_fee": "Listing Fee"
         }
-        
         rev_rows = [["Jumla ya Mapato", f"TZS {float(data.get('totalRevenue', 0)):,.0f}"]]
         for key, amount in rev_streams.items():
             if amount > 0:
-                label = stream_labels.get(key, key.replace("_", " ").title())
+                label = stream_labels.get(key.lower(), key.replace("_", " ").title())
                 rev_rows.append([f"  - {label}", f"TZS {float(amount):,.0f}"])
+
+        if len(rev_rows) == 1:
+            rev_rows.append(["(Hakuna vyanzo vya mapato vilivyorekodiwa)", "-"])
 
         elements.append(make_table(rev_rows, ["Kipimo", "Thamani"]))
 
@@ -784,47 +780,60 @@ class ReportsExportView(APIView):
         # 2. MALI
         lb = data.get("listingsBreakdown", {})
         status_labels = {
-            "live": "Hai", "reserved": "Zimehifadhiwa", "sold": "Zimeuzwa",
-            "draft": "Rasimu", "pending_payment": "Inasubiri Malipo",
-            "approved_pending_payment": "Imeidhinishwa (Inasubiri Malipo)",
-            "pending_approval": "Inasubiri Admin", "paid_pending_approval": "Imelipwa (Inasubiri Admin)",
-            "in_review": "Inakaguliwa", "needs_edit": "Inahitaji Uhariri",
-            "rejected": "Imekataliwa", "paused": "Imesimamishwa", "expired": "Imeisha Muda"
+            "LIVE": "Hai", "RESERVED": "Zimehifadhiwa", "SOLD": "Zimeuzwa",
+            "DRAFT": "Rasimu", "PENDING_PAYMENT": "Inasubiri Malipo",
+            "APPROVED_PENDING_PAYMENT": "Imeidhinishwa (Inasubiri Malipo)",
+            "PENDING_APPROVAL": "Inasubiri Admin", "PAID_PENDING_APPROVAL": "Imelipwa (Inasubiri Admin)",
+            "IN_REVIEW": "Inakaguliwa", "NEEDS_EDIT": "Inahitaji Uhariri",
+            "REJECTED": "Imekataliwa", "PAUSED": "Imesimamishwa", "EXPIRED": "Imeisha Muda"
         }
         listing_rows = [["Jumla ya Mali", data.get("totalListings", 0)]]
         for status, count in lb.items():
             if count > 0:
-                label = status_labels.get(status, status.replace("_", " ").title())
+                label = status_labels.get(status.upper(), status.replace("_", " ").title())
                 listing_rows.append([f"  - {label}", count])
         add_section("2. Mali kwa Hali", listing_rows, ["Kipimo", "Thamani"])
 
         # 3. DEALS
         db = data.get("dealsBreakdown", {})
         deal_labels = {
-            "negotiating": "Inajadiliwa", "accepted": "Imekubaliwa",
-            "reserved": "Imehifadhiwa", "completed": "Imekamilika",
-            "cancelled": "Imeghairiwa", "disputed": "Mgogoro",
-            "awaiting_final_payment": "Malipo ya Mwisho", "payment_proof_submitted": "Uthibitisho wa Malipo"
+            "NEGOTIATING": "Inajadiliwa", "ACCEPTED": "Imekubaliwa",
+            "RESERVED": "Imehifadhiwa", "COMPLETED": "Imekamilika",
+            "CANCELLED": "Imeghairiwa", "DISPUTED": "Mgogoro",
+            "AWAITING_FINAL_PAYMENT": "Malipo ya Mwisho", "PAYMENT_PROOF_SUBMITTED": "Uthibitisho wa Malipo",
+            "OPEN": "Wazi (Open)", "OFFER_SENT": "Ofa Imetumwa"
         }
         deals_rows = [["Jumla ya Deals", data.get("totalDeals", 0)]]
         for status, count in db.items():
             if count > 0:
-                label = deal_labels.get(status, status.replace("_", " ").title())
+                label = deal_labels.get(status.upper(), status.replace("_", " ").title())
                 deals_rows.append([f"  - {label}", count])
         add_section("3. Deals kwa Hali", deals_rows, ["Kipimo", "Thamani"])
 
         # 4. MAPATO
         rev_streams = data.get("revenueByStream", {})
+        if not rev_streams:
+            try:
+                from .services.revenue import calculate_financial_dashboard
+                fees_data = calculate_financial_dashboard("all")
+                rev_streams = fees_data.get("by_type", {})
+            except Exception:
+                pass
+                
         stream_labels = {
             "listing": "Listing Fee", "reservation": "Reservation Fee",
             "boost": "Boost", "leading": "Leading", "advertise": "Advertisement",
-            "success": "Success Fee", "bundle": "Bundle"
+            "success": "Success Fee", "bundle": "Bundle", "listing_fee": "Listing Fee"
         }
         rev_rows = [["Jumla ya Mapato", f"TZS {float(data.get('totalRevenue', 0)):,.0f}"]]
         for key, amount in rev_streams.items():
             if amount > 0:
-                label = stream_labels.get(key, key.replace("_", " ").title())
+                label = stream_labels.get(key.lower(), key.replace("_", " ").title())
                 rev_rows.append([f"  - {label}", f"TZS {float(amount):,.0f}"])
+
+        if len(rev_rows) == 1:
+            rev_rows.append(["(Hakuna vyanzo vya mapato vilivyorekodiwa)", "-"])
+
         add_section("4. Mapato kwa Njia", rev_rows, ["Kipimo", "Thamani"])
 
         buffer = BytesIO()

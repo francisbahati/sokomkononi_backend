@@ -344,7 +344,12 @@ CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(
 ))
 
 # ---------------- DRF ----------------
+# Cloudflare Turnstile (login/register). Tupu = captcha imezimwa.
+TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
+
 REST_FRAMEWORK = {
+    # Idadi ya proxies mbele ya app (Traefik = 1; Cloudflare + Traefik = 2).
+    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "1")),
     "URL_FORMAT_OVERRIDE": None,
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.accounts.authentication.FlexibleJWTAuthentication",

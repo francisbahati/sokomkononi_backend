@@ -1,3 +1,4 @@
+# apps/system_settings/models.py
 from django.db import models
 
 
@@ -80,6 +81,14 @@ class ContactInfo(models.Model):
     phone = models.CharField(max_length=20, default="+255743895038")
     whatsapp = models.CharField(max_length=20, default="255743895038")
     address = models.CharField(max_length=255, default="Dar es Salaam, Tanzania")
+    
+    # ✅ Mitandao ya kijamii
+    facebook = models.URLField(blank=True, default="")
+    instagram = models.URLField(blank=True, default="")
+    x = models.URLField(blank=True, default="")
+    linkedin = models.URLField(blank=True, default="")
+    youtube = models.URLField(blank=True, default="")
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

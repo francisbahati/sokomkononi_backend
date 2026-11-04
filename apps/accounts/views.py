@@ -7,9 +7,10 @@ import logging
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
 from rest_framework import permissions, status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import Throttled, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 
 from rest_framework_simplejwt.exceptions import TokenError
@@ -49,6 +50,14 @@ from .tokens import (
     decode_password_reset_token,
 )
 
+from .captcha import verify_captcha
+from .login_guard import (
+    WINDOW as LOGIN_LOCK_WINDOW,
+    clear_failures,
+    is_locked,
+    register_failure,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +79,11 @@ class RegisterView(APIView):
         },
     )
     def post(self, request):
+        verify_captcha(
+            (request.data or {}).get("captcha_token"),
+            BaseThrottle().get_ident(request),
+        )
+
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -161,17 +175,34 @@ class LoginView(APIView):
         responses={200: OpenApiResponse(description="Login imefanikiwa.")},
     )
     def post(self, request):
+        data = request.data if hasattr(request.data, "get") else {}
+        identifier = str(data.get("identifier", "")).strip()
+        ip = BaseThrottle().get_ident(request)
+
         logger.info(
-            "[login] attempt identifier=%r has_cookie=%s has_auth_header=%s",
-            (request.data or {}).get("identifier", ""),
+            "[login] attempt ip=%s has_cookie=%s has_auth_header=%s",
+            ip,
             "access_token" in request.COOKIES,
             "HTTP_AUTHORIZATION" in request.META,
         )
 
+        # 1) Akaunti/IP imezuiwa kwa kushindwa mara nyingi
+        if is_locked(identifier, ip):
+            raise Throttled(wait=LOGIN_LOCK_WINDOW)
+
+        # 2) Captcha (inapita tu kama TURNSTILE_SECRET_KEY haijawekwa)
+        verify_captcha(data.get("captcha_token"), ip)
+
+        # 3) Uthibitisho wa password; hesabu kushindwa
         serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError:
+            register_failure(identifier, ip)
+            raise
 
         user = serializer.validated_data["user"]
+        clear_failures(identifier, ip)
 
         # 2FA: password ni sahihi lakini hatutoi token kamili bado
         # (admin/staff hawatumii 2FA)

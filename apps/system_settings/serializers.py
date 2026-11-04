@@ -1,3 +1,4 @@
+# apps/system_settings/serializers.py
 from rest_framework import serializers
 
 from .models import AppStoreLinks, PlatformPolicy, Webhook, ContactInfo
@@ -27,5 +28,9 @@ class PlatformPolicySerializer(serializers.ModelSerializer):
 class ContactInfoSerializer(serializers.ModelSerializer):
     class Meta:
         model = ContactInfo
-        fields = ["email", "phone", "whatsapp", "address", "updated_at"]
+        fields = [
+            "email", "phone", "whatsapp", "address", 
+            "facebook", "instagram", "x", "linkedin", "youtube", # ✅ Socials mpya
+            "updated_at"
+        ]
         read_only_fields = ["updated_at"]

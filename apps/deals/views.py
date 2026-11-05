@@ -88,7 +88,6 @@ def _notify_reopened(deal_room, reopened_by, note=""):
     try:
         from .services.notifications import notify_deal_room_reopened
     except ImportError:
-        # Bado haijaongezwa kwenye services/notifications.py
         return
     try:
         notify_deal_room_reopened(
@@ -113,6 +112,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         DealRoom.objects
         .select_related(
             "listing", "listing__category", "buyer", "seller",
+            "locked_by",
             "transaction", "transaction__reservation",
         )
         .prefetch_related("offers", "offers__offered_by")
@@ -166,7 +166,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         if user.is_staff:
             return qs
 
-        # ── MPYA: Filter kwa role (buyer / seller) ──
         role = self.request.query_params.get("role", "").strip().lower()
 
         if role == "buyer":
@@ -174,7 +173,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         if role == "seller":
             return qs.filter(seller=user)
 
-        # Fallback: zote (kwa backward compatibility)
         return qs.filter(Q(buyer=user) | Q(seller=user))
 
     def update(self, request, *args, **kwargs):
@@ -296,6 +294,14 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def messages_create(self, request, pk=None):
         deal_room = self.get_object()
 
+        # ── MPYA: room iliyosimamishwa haipokei ujumbe ──
+        if deal_room.admin_locked:
+            return _deal_error(
+                "DEAL_LOCKED",
+                "Deal Room hii imesimamishwa na admin — huwezi kutuma "
+                "ujumbe kwa sasa.",
+            )
+
         serializer = DealMessageCreateSerializer(
             data=request.data,
             context={"request": request, "deal_room": deal_room},
@@ -306,6 +312,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             deal_room=deal_room,
             sender=request.user,
             text=serializer.validated_data["text"],
+            kind=DealMessage.Kind.USER,
         )
         DealRoom.objects.filter(pk=deal_room.pk).update(
             updated_at=timezone.now()
@@ -373,7 +380,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         reason = serializer.validated_data["reason"]
         details = serializer.validated_data["details"]
 
-        # Amua nafasi ya aliyeripoti
         if request.user.id == deal_room.buyer_id:
             reporter_role = "buyer"
             reported_user = deal_room.seller
@@ -419,7 +425,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             text=description,
         )
 
-        # ✅ Tumia details={"sw","en"} kwa sababu ina data nyingi za kiufundi
         _log(
             request,
             action="deal.reported",
@@ -439,7 +444,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             },
         )
 
-        # ✅ MPYA: Arifa kwa admins kuhusu ripoti mpya ya deal
         try:
             from apps.notifications.services.notification import (
                 create_notification_for_admins,
@@ -487,6 +491,14 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def offer(self, request, pk=None):
         deal_room = self.get_object()
+
+        # ── MPYA: room iliyosimamishwa haipokei offers ──
+        if deal_room.admin_locked:
+            return _deal_error(
+                "DEAL_LOCKED",
+                "Deal Room hii imesimamishwa na admin — haiwezi kupokea "
+                "offers mpya kwa sasa.",
+            )
 
         if deal_room.status not in [
             DealRoom.Status.OPEN, DealRoom.Status.NEGOTIATING,
@@ -586,6 +598,14 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             pk=pk,
         )
         self.check_object_permissions(request, deal_room)
+
+        # ── MPYA: room iliyosimamishwa haikubali offers ──
+        if deal_room.admin_locked:
+            return _deal_error(
+                "DEAL_LOCKED",
+                "Deal Room hii imesimamishwa na admin — haiwezi kukubali "
+                "offer kwa sasa.",
+            )
 
         if deal_room.status not in [
             DealRoom.Status.OPEN, DealRoom.Status.NEGOTIATING,
@@ -723,10 +743,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     )
     @transaction.atomic
     def decline_offer(self, request, pk=None):
-        """
-        Upande uliopokea ofa unaikataa. Ofa inakuwa REJECTED na
-        Deal Room inabaki NEGOTIATING ili pande zote ziendelee kutuma ofa.
-        """
         deal_room = get_object_or_404(
             DealRoom.objects.select_for_update(of=("self",)),
             pk=pk,
@@ -798,7 +814,15 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         cancellation_reason = serializer.validated_data.get("reason", "")
 
         deal_room.status = DealRoom.Status.CANCELLED
-        deal_room.save(update_fields=["status", "updated_at"])
+
+        # ── MPYA: admin akighairi, weka cancelled_by_admin ili kuzuia reopen ──
+        if request.user.is_staff:
+            deal_room.cancelled_by_admin = True
+            deal_room.save(update_fields=[
+                "status", "cancelled_by_admin", "updated_at",
+            ])
+        else:
+            deal_room.save(update_fields=["status", "updated_at"])
 
         NegotiationOffer.objects.filter(
             deal_room=deal_room,
@@ -809,7 +833,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
 
         if request.user.is_staff:
-            # ✅ Tumia details={"sw","en"}
             _log(
                 request,
                 action="deal.cancelled_by_admin",
@@ -846,7 +869,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
 
     # ============================================================
-    # REOPEN — fufua Deal Room iliyoghairiwa (mazungumzo yanabaki)
+    # REOPEN — fufua Deal Room iliyoghairiwa
     # ============================================================
     @extend_schema(
         request=DealRoomReopenSerializer,
@@ -859,15 +882,9 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         Mnunuzi au muuzaji wa Deal Room iliyoghairiwa (CANCELLED) anaifufua.
 
         - Ujumbe na historia ya offers vinabaki; hali inarudi NEGOTIATING.
-        - Reservation/transaction ya zamani haifufuliwi: deal yenye transaction
-          inakataliwa (DEAL_HAS_TRANSACTION) ipitiwe na support.
-        - Tangazo lazima liwe LIVE (LISTING_UNAVAILABLE vinginevyo).
+        - Deal iliyoghairiwa na admin (`cancelled_by_admin=True`)
+          HAIWEZI kufufuliwa — inahitaji support.
         - Kikomo: settings.DEAL_REOPEN_MAX (default 3) kwa kila Deal Room.
-        - Deal ambayo tayari iko OPEN/NEGOTIATING inarudishwa kama ilivyo (200),
-          ili pande mbili zikibonyeza kwa pamoja hakuna kosa.
-
-        Makosa yanarudisha {"detail", "code"}; `code` inalingana na
-        CODE_MESSAGES kwenye frontend (src/api/apiErrors.js).
         """
         deal_room = get_object_or_404(
             DealRoom.objects
@@ -877,7 +894,15 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         self.check_object_permissions(request, deal_room)
 
-        # Admin anaweza kuona deal, lakini kufufua ni kwa mnunuzi/muuzaji tu.
+        # ── MPYA: admin alighairi — haifufuliwi na mtumiaji ──
+        if deal_room.cancelled_by_admin:
+            return _deal_error(
+                "CANCELLED_BY_ADMIN",
+                "Deal hii ilighairiwa na msimamizi — haiwezi kufufuliwa "
+                "na mimi/mwenzako. Wasiliana na support@sokomkononi.co.tz.",
+                status.HTTP_403_FORBIDDEN,
+            )
+
         if request.user.id not in (deal_room.buyer_id, deal_room.seller_id):
             return _deal_error(
                 "NOT_DEAL_PARTICIPANT",
@@ -894,7 +919,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
         detail_context = {"request": request, "deal_room": deal_room}
 
-        # Tayari iko wazi (mwenzake amefufua kwanza) — hakuna cha kufanya.
         if deal_room.status in (
             DealRoom.Status.OPEN, DealRoom.Status.NEGOTIATING,
         ):
@@ -964,14 +988,11 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                     "reopened_at", "reopened_count", "updated_at",
                 ])
         except IntegrityError:
-            # Constraint ya unique_active_deal_room_listing_buyer
             return _deal_error(
                 "ACTIVE_DEAL_EXISTS",
                 "Kuna Deal Room nyingine iliyo wazi kwa tangazo hili.",
             )
 
-        # Alama ndani ya mazungumzo (DealMessage haina "system sender",
-        # kwa hiyo inatumwa kwa jina la aliyefufua).
         who = getattr(request.user, "name", "") or ""
         DealMessage.objects.create(
             deal_room=deal_room,
@@ -980,10 +1001,12 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 f"Mazungumzo yamefufuliwa{f' na {who}' if who else ''}. / "
                 f"Conversation reopened{f' by {who}' if who else ''}."
             ),
+            kind=DealMessage.Kind.USER,
         )
         if note:
             DealMessage.objects.create(
                 deal_room=deal_room, sender=request.user, text=note,
+                kind=DealMessage.Kind.USER,
             )
 
         _log(

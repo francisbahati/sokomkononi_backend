@@ -82,11 +82,6 @@ class DealUserSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def _is_participant(self):
-        """
-        Mawasiliano ni huru: mnunuzi na muuzaji wa Deal Room hii wanaweza
-        kuonana (phone/email) bila kusubiri Reservation Fee.
-        Privacy settings (show_phone / show_email) bado zinaheshimiwa.
-        """
         request = self.context.get("request")
         deal_room = self.context.get("deal_room")
         if not request or not request.user.is_authenticated:
@@ -188,7 +183,6 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
         request = self.context.get("request")
         if not deal_room or not request or not request.user.is_authenticated:
             return value
-        # Mawasiliano ni huru — hakuna tena kuzuia namba/email kwenye offer.
         return value
 
     def validate(self, attrs):
@@ -199,6 +193,12 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
         if not request or not request.user.is_authenticated:
             raise serializers.ValidationError(
                 "Ni lazima uwe umeingia kwenye akaunti."
+            )
+        # ── MPYA: room iliyosimamishwa haipokei offers ──
+        if deal_room.admin_locked:
+            raise serializers.ValidationError(
+                "Deal Room hii imesimamishwa na admin — haiwezi kupokea "
+                "offers mpya kwa sasa."
             )
         if deal_room.status not in [
             DealRoom.Status.OPEN, DealRoom.Status.NEGOTIATING,
@@ -235,14 +235,27 @@ class NegotiationOfferCreateSerializer(serializers.Serializer):
         return attrs
 
 
+# ============================================================
+# MESSAGES
+# ============================================================
 class DealMessageSerializer(serializers.ModelSerializer):
-    """Ujumbe wa chat ndani ya Deal Room (hauhusiani na Messaging app)."""
+    """
+    Ujumbe wa chat ndani ya Deal Room (hauhusiani na Messaging app).
+
+    `kind` inarudishwa ili frontend ijue kama ni ujumbe wa mtumiaji
+    au wa admin. Ujumbe uliofichwa (`is_hidden`) hauruhusiwi kuonekana
+    kwa watumiaji — hiyo ni Awamu 2.
+    """
     sender_id = serializers.IntegerField(read_only=True)
     sender_name = serializers.SerializerMethodField()
+    kind = serializers.CharField(read_only=True)
 
     class Meta:
         model = DealMessage
-        fields = ["id", "sender_id", "sender_name", "text", "created_at"]
+        fields = [
+            "id", "sender_id", "sender_name", "text",
+            "kind", "created_at",
+        ]
         read_only_fields = fields
 
     def get_sender_name(self, obj):
@@ -270,11 +283,16 @@ class DealMessageCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Ni lazima uwe umeingia kwenye akaunti."
             )
+        # ── MPYA: room iliyosimamishwa haipokei ujumbe ──
+        if deal_room.admin_locked:
+            raise serializers.ValidationError(
+                "Deal Room hii imesimamishwa na admin — huwezi kutuma "
+                "ujumbe kwa sasa."
+            )
         if request.user.id not in [deal_room.buyer_id, deal_room.seller_id]:
             raise serializers.ValidationError(
                 "Huruhusiwi kutuma ujumbe kwenye Deal Room hii."
             )
-        # Mawasiliano ni huru — hakuna tena kuzuia namba/email kwenye chat.
         return attrs
 
 
@@ -294,21 +312,28 @@ class DealRoomListSerializer(serializers.ModelSerializer):
     location = serializers.SerializerMethodField()
     latest_offer = serializers.SerializerMethodField()
 
-    # ── MPYA: transaction_id ──
     transaction_id = serializers.SerializerMethodField()
 
-    # ── MPYA: reservation fields ──
     reservation_fee = serializers.SerializerMethodField()
     reservation_hours = serializers.SerializerMethodField()
     reservation_method = serializers.SerializerMethodField()
     reservation_paid_at = serializers.SerializerMethodField()
     reservation_expires_at = serializers.SerializerMethodField()
 
-    # ── MPYA: contact + inspection ──
     can_see_contact = serializers.SerializerMethodField()
     inspection_started_at = serializers.SerializerMethodField()
     inspection_expires_at = serializers.SerializerMethodField()
     inspection_status = serializers.SerializerMethodField()
+
+    # ── MPYA: admin moderation (read-only kwa mtumiaji) ──
+    admin_locked = serializers.BooleanField(read_only=True)
+    locked_reason = serializers.CharField(read_only=True)
+    cancelled_by_admin = serializers.BooleanField(read_only=True)
+    adminLocked = serializers.BooleanField(source="admin_locked", read_only=True)
+    lockedReason = serializers.CharField(source="locked_reason", read_only=True)
+    cancelledByAdmin = serializers.BooleanField(
+        source="cancelled_by_admin", read_only=True,
+    )
 
     class Meta:
         model = DealRoom
@@ -318,7 +343,6 @@ class DealRoomListSerializer(serializers.ModelSerializer):
             "buyer", "seller",
             "status", "agreed_price", "agreed_at", "latest_offer",
             "reopened_at", "reopened_count",
-            # ── MPYA ──
             "transaction_id",
             "reservation_fee", "reservation_hours",
             "reservation_method", "reservation_paid_at",
@@ -326,6 +350,9 @@ class DealRoomListSerializer(serializers.ModelSerializer):
             "can_see_contact",
             "inspection_started_at", "inspection_expires_at",
             "inspection_status",
+            # ── MPYA ──
+            "admin_locked", "locked_reason", "cancelled_by_admin",
+            "adminLocked", "lockedReason", "cancelledByAdmin",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
@@ -373,7 +400,6 @@ class DealRoomListSerializer(serializers.ModelSerializer):
             return None
 
     def get_can_see_contact(self, obj):
-        # Washiriki wa Deal Room wanaweza kuonana wakati wowote.
         return True
 
     def get_inspection_started_at(self, obj):
@@ -421,6 +447,7 @@ class DealRoomListSerializer(serializers.ModelSerializer):
             offers[0], context={**self.context, "deal_room": obj},
         ).data
 
+
 # ============================================================
 # DEAL ROOM DETAIL
 # ============================================================
@@ -442,11 +469,20 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     category = serializers.SerializerMethodField()
     location = serializers.SerializerMethodField()
 
-    # ── MPYA ──
     can_see_contact = serializers.SerializerMethodField()
     inspection_started_at = serializers.SerializerMethodField()
     inspection_expires_at = serializers.SerializerMethodField()
     inspection_status = serializers.SerializerMethodField()
+
+    # ── MPYA: admin moderation (read-only kwa mtumiaji) ──
+    admin_locked = serializers.BooleanField(read_only=True)
+    locked_reason = serializers.CharField(read_only=True)
+    cancelled_by_admin = serializers.BooleanField(read_only=True)
+    adminLocked = serializers.BooleanField(source="admin_locked", read_only=True)
+    lockedReason = serializers.CharField(source="locked_reason", read_only=True)
+    cancelledByAdmin = serializers.BooleanField(
+        source="cancelled_by_admin", read_only=True,
+    )
 
     class Meta:
         model = DealRoom
@@ -460,10 +496,12 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             "transaction_id", "payment_proof",
             "reservation_fee", "reservation_hours",
             "reservation_method", "reservation_expires_at",
-            # ── MPYA ──
             "can_see_contact",
             "inspection_started_at", "inspection_expires_at",
             "inspection_status",
+            # ── MPYA ──
+            "admin_locked", "locked_reason", "cancelled_by_admin",
+            "adminLocked", "lockedReason", "cancelledByAdmin",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
@@ -537,15 +575,9 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
         r = self._reservation(obj)
         return getattr(r, "expires_at", None) if r else None
 
-    # ── MPYA: can_see_contact ──
     def get_can_see_contact(self, obj):
-        """
-        True kama reservation imelipwa — buyer/seller wanaweza kuonana
-        (phone/email) na kuwasiliana wakati wa inspection.
-        """
         return True
 
-    # ── MPYA: inspection fields ──
     def get_inspection_started_at(self, obj):
         i = self._inspection(obj)
         return getattr(i, "starts_at", None) if i else None
@@ -559,7 +591,16 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
         return getattr(i, "status", None) if i else None
 
     def get_messages(self, obj):
-        qs = obj.messages.select_related("sender").order_by("created_at")
+        """
+        Mtumiaji anaona ujumbe wake + wa mwenzake + wa admin.
+        Ujumbe uliofichwa (is_hidden=True) haufichwi kwa mtumiaji
+        kwa sasa — hiyo ni Awamu 2.
+        """
+        qs = (
+            obj.messages
+            .select_related("sender")
+            .order_by("created_at")
+        )
         return DealMessageSerializer(qs, many=True).data
 
     def get_offer_count(self, obj):
@@ -655,6 +696,15 @@ class DealRoomReopenSerializer(serializers.Serializer):
     def validate_note(self, value):
         return value.strip()
 
+    def validate(self, attrs):
+        deal_room = self.context.get("deal_room")
+        if deal_room and deal_room.cancelled_by_admin:
+            raise serializers.ValidationError(
+                "Deal hii ilighairiwa na admin — haiwezi kufufuliwa na "
+                "watumiaji. Wasiliana na support."
+            )
+        return attrs
+
 
 # ============================================================
 # ACCEPT OFFER
@@ -666,6 +716,12 @@ class DealRoomAcceptOfferSerializer(serializers.Serializer):
         deal_room = self.context.get("deal_room")
         if not deal_room:
             raise serializers.ValidationError("Deal Room haijapatikana.")
+        # ── MPYA: room iliyosimamishwa haikubali offers ──
+        if deal_room.admin_locked:
+            raise serializers.ValidationError(
+                "Deal Room hii imesimamishwa na admin — haiwezi kukubali "
+                "offer kwa sasa."
+            )
         try:
             offer = NegotiationOffer.objects.get(pk=value, deal_room=deal_room)
         except NegotiationOffer.DoesNotExist:

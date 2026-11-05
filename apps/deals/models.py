@@ -86,6 +86,46 @@ class DealRoom(models.Model):
         verbose_name="Idadi ya kufufuliwa",
     )
 
+    # ── Admin moderation ──
+    admin_locked = models.BooleanField(
+        default=False,
+        verbose_name="Imesimamishwa na admin",
+        help_text=(
+            "Room iliyosimamishwa inakataa ujumbe, ofa na kukubali ofa "
+            "hadi admin aifungue."
+        ),
+    )
+
+    locked_reason = models.TextField(
+        blank=True,
+        verbose_name="Sababu ya kusimamisha",
+    )
+
+    locked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Muda wa kusimamisha",
+    )
+
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locked_deal_rooms",
+        verbose_name="Alisimamisha",
+    )
+
+    # ── Kuzuia reopen baada ya admin kughairi ──
+    cancelled_by_admin = models.BooleanField(
+        default=False,
+        verbose_name="Imeghairiwa na admin",
+        help_text=(
+            "Deal iliyoghairiwa na admin haiwezi kufufuliwa na "
+            "mnunuzi/muuzaji — inahitaji support."
+        ),
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name="Imeundwa",
@@ -124,6 +164,10 @@ class DealRoom(models.Model):
             models.Index(
                 fields=["status", "updated_at"],
                 name="deal_status_updated_idx",
+            ),
+            models.Index(
+                fields=["admin_locked"],
+                name="deal_admin_locked_idx",
             ),
         ]
 
@@ -221,7 +265,15 @@ class DealMessage(models.Model):
     """
     Chat ndani ya Deal Room. Imejitegemea — haihusiani na
     Conversation/Message za apps.messaging (Direct Messages).
+
+    `kind` inatofautisha ujumbe wa mtumiaji (USER) na ujumbe wa
+    msimamizi (ADMIN). Ujumbe wa admin unaonekana kwa pande zote
+    mbili kwenye room — ni njia ya admin kuwasiliana wazi.
     """
+
+    class Kind(models.TextChoices):
+        USER = "USER", "User"
+        ADMIN = "ADMIN", "Admin"
 
     deal_room = models.ForeignKey(
         DealRoom,
@@ -236,6 +288,24 @@ class DealMessage(models.Model):
         verbose_name="Mtumaji",
     )
     text = models.TextField(verbose_name="Ujumbe")
+
+    kind = models.CharField(
+        max_length=10,
+        choices=Kind.choices,
+        default=Kind.USER,
+        verbose_name="Aina ya ujumbe",
+        help_text="USER = mtumiaji, ADMIN = msimamizi.",
+    )
+
+    is_hidden = models.BooleanField(
+        default=False,
+        verbose_name="Umefichwa",
+        help_text=(
+            "Ujumbe uliofichwa hauonekani kwa watumiaji, "
+            "lakini unabaki kama ushahidi kwa admin."
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -246,7 +316,11 @@ class DealMessage(models.Model):
                 fields=["deal_room", "created_at"],
                 name="dealmsg_room_created_idx",
             ),
+            models.Index(
+                fields=["deal_room", "kind"],
+                name="dealmsg_room_kind_idx",
+            ),
         ]
 
     def __str__(self):
-        return f"DealMsg #{self.pk} — room {self.deal_room_id}"
+        return f"DealMsg #{self.pk} — room {self.deal_room_id} ({self.kind})"

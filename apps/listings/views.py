@@ -273,9 +273,17 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         )
 
         try:
-            from .services.listing_fee import create_listing_fee
+            from .services.listing_fee import (
+                create_listing_fee,
+                create_unconfigured_fee_placeholder,
+                ListingFeeNotConfigured,
+            )
 
-            create_listing_fee(listing)
+            try:
+                create_listing_fee(listing)
+            except ListingFeeNotConfigured:
+                # Seller aendelee; admin anakumbushwa kuweka ada ya kundi.
+                create_unconfigured_fee_placeholder(listing)
             listing.status = Listing.Status.PENDING_PAYMENT
             listing.save(update_fields=["status", "updated_at"])
 
@@ -1375,8 +1383,15 @@ class ListingFeeView(APIView):
             listing_fee = ListingFee.objects.get(listing=listing)
         except ListingFee.DoesNotExist:
             try:
-                from .services.listing_fee import create_listing_fee
-                listing_fee = create_listing_fee(listing)
+                from .services.listing_fee import (
+                    create_listing_fee,
+                    create_unconfigured_fee_placeholder,
+                    ListingFeeNotConfigured,
+                )
+                try:
+                    listing_fee = create_listing_fee(listing)
+                except ListingFeeNotConfigured:
+                    listing_fee = create_unconfigured_fee_placeholder(listing)
             except Exception as exc:
                 logger.exception(
                     "Could not compute fee for listing %s: %s",
@@ -1464,8 +1479,15 @@ class ListingFeePaymentView(APIView):
 
         if existing_fee is None:
             try:
-                from .services.listing_fee import create_listing_fee
-                existing_fee = create_listing_fee(listing)
+                from .services.listing_fee import (
+                    create_listing_fee,
+                    create_unconfigured_fee_placeholder,
+                    ListingFeeNotConfigured,
+                )
+                try:
+                    existing_fee = create_listing_fee(listing)
+                except ListingFeeNotConfigured:
+                    existing_fee = create_unconfigured_fee_placeholder(listing)
             except Exception as exc:
                 logger.exception(
                     "Could not create fee for listing %s: %s",
@@ -1497,14 +1519,21 @@ class ListingFeePaymentView(APIView):
                 )
 
             from django.db import transaction as db_tx
+            from .services.listing_fee import is_listing_fee_enabled
+            # Ada imewashwa lakini kundi halina kanuni (rule=None): usiiweke
+            # PAID — admin akumbushwe kuweka ada kabla ya kuidhinisha.
+            fee_unconfigured = (
+                existing_fee.rule_id is None and is_listing_fee_enabled()
+            )
             with db_tx.atomic():
-                existing_fee.payment_status = ListingFee.PaymentStatus.PAID
-                existing_fee.payment_reference = f"free-{listing.id}"
-                existing_fee.paid_at = timezone.now()
-                existing_fee.save(update_fields=[
-                    "payment_status", "payment_reference", "paid_at",
-                    "updated_at",
-                ])
+                if not fee_unconfigured:
+                    existing_fee.payment_status = ListingFee.PaymentStatus.PAID
+                    existing_fee.payment_reference = f"free-{listing.id}"
+                    existing_fee.paid_at = timezone.now()
+                    existing_fee.save(update_fields=[
+                        "payment_status", "payment_reference", "paid_at",
+                        "updated_at",
+                    ])
 
                 listing.status = (
                     Listing.Status.PAID_PENDING_APPROVAL

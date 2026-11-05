@@ -30,6 +30,38 @@ def _require_admin(admin_user):
         )
 
 
+def _resolve_fee_is_free(listing, allow_unconfigured=False):
+    """
+    Amua kama listing ni BURE au inahitaji malipo.
+
+      • Ada IMEZIMWA (toggle)            → True  (bure, hakuna rule inayohitajika)
+      • Ada IMEWASHWA + rule ipo, amount 0 → True
+      • Ada IMEWASHWA + rule ipo, amount>0 → False (omba malipo)
+      • Ada IMEWASHWA + hakuna rule         → raise FEE_NOT_CONFIGURED
+        (usiipeleke LIVE bure kimya kimya), ISIPOKUWA admin ameidhinisha
+        bure kwa makusudi (allow_unconfigured=True) → True
+    """
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from .listing_fee import create_listing_fee, ListingFeeNotConfigured
+
+    try:
+        fee = create_listing_fee(listing)
+    except ListingFeeNotConfigured:
+        if allow_unconfigured:
+            return True
+        raise ValidationError({
+            "detail": _(
+                "Kundi hili halina kanuni ya ada. Nenda Revenue > Listing Fee "
+                "uweke ada yake, kisha jaribu tena."
+            ),
+            "code": "FEE_NOT_CONFIGURED",
+        })
+    except DjangoValidationError:
+        # Mfano bei sifuri: hakuna ada ya kukokotoa
+        return True
+    return fee.amount == 0
+
+
 def _get_locked_listing(listing_id):
     return (
         Listing.objects
@@ -173,27 +205,8 @@ def request_payment_listing(listing_id, admin_user, reason=""):
             "Tangazo hili halipo kwenye hali ya kusubiri idhini."
         )
 
-    # ✅ Angalia kama fee imezimwa (amount == 0) au haina fee rule
-    from django.core.exceptions import ValidationError as DjangoValidationError
-    from .listing_fee import create_listing_fee, ListingFeeNotConfigured
-
-    is_free = False
-    try:
-        fee = create_listing_fee(listing)
-        if fee.amount == 0:
-            is_free = True
-    except ListingFeeNotConfigured:
-        # Category haina rule ya ada: usiipeleke LIVE bure kimya kimya.
-        raise ValidationError({
-            "detail": _(
-                "Kundi hili halina kanuni ya ada. Weka ada kwenye mipangilio "
-                "kabla ya kuendelea."
-            ),
-            "code": "FEE_NOT_CONFIGURED",
-        })
-    except DjangoValidationError:
-        # Kama hakuna fee rule kabisa, mfumo unaruhusu LIVE
-        is_free = True
+    # Ada imezimwa / amount 0 → bure. Hakuna rule (ada imewashwa) → error.
+    is_free = _resolve_fee_is_free(listing)
 
     if is_free:
         # ✅ Bypass malipo: Mpeleke LIVE moja kwa moja
@@ -316,13 +329,18 @@ def approve_listing(listing_id, admin_user):
         listing_fee is not None
         and listing_fee.payment_status == ListingFee.PaymentStatus.PAID
     )
-    fee_is_free = listing_fee is None or listing_fee.amount == 0
-
-    if not fee_is_paid and not fee_is_free:
-        raise ValidationError(
-            "Tangazo hili linahitaji malipo. Tumia 'Omba Malipo' "
-            "kwanza, kisha 'Idhinisha Mwisho' baada ya seller kulipa."
-        )
+    # Admin anaweza kuidhinisha BURE hata kundi lisilo na kanuni ya ada.
+    # Kundi lenye ada (>0) bado linahitaji malipo.
+    if not fee_is_paid and not _resolve_fee_is_free(
+        listing, allow_unconfigured=True
+    ):
+        raise ValidationError({
+            "detail": _(
+                "Tangazo hili linahitaji malipo. Tumia 'Omba Malipo' "
+                "kwanza, kisha 'Idhinisha Mwisho' baada ya seller kulipa."
+            ),
+            "code": "PAYMENT_REQUIRED",
+        })
     # ─────────────────────────────────────────────────────────
 
     listing.status = Listing.Status.LIVE

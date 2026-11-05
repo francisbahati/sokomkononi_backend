@@ -13,7 +13,9 @@ Key rules:
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.utils.translation import gettext as _
 
 from ..models import ListingFee, ListingFeeRule
 
@@ -38,6 +40,22 @@ class ListingFeeNotConfigured(ValidationError):
 
 def _fallback_allowed():
     return getattr(settings, "LISTING_FEE_ALLOW_FALLBACK", False)
+
+
+def is_listing_fee_enabled():
+    """
+    Global toggle (Revenue > Listing Fee). Ikizimwa, mali zote ni BURE:
+    hakuna kanuni ya ada inayohitajika na admin anaidhinisha moja kwa moja.
+    Hitilafu ya DB/toggle haipo → fail safe: ada IMEWASHWA.
+    """
+    try:
+        from apps.finance.models import SystemFeatureToggle
+        toggle = SystemFeatureToggle.objects.filter(key="listing_fee").first()
+        if toggle is not None and not toggle.is_enabled:
+            return False
+    except Exception:
+        pass
+    return True
 
 
 # ============================================================
@@ -160,6 +178,16 @@ def calculate_listing_fee(price, category_slug=None, category=None):
             "Bei ya tangazo lazima iwe kubwa kuliko sifuri."
         )
 
+    # Ada ikizimwa: mali ni BURE. Usitafute kanuni ya ada (kundi
+    # lisilo na kanuni lisizuie idhini).
+    if not is_listing_fee_enabled():
+        return {
+            "rule": None,
+            "price": price,
+            "percentage": Decimal("0"),
+            "fee_amount": Decimal("0.00"),
+        }
+
     rule = get_listing_fee_rule(
         category_slug=category_slug,
         price=price,
@@ -172,22 +200,6 @@ def calculate_listing_fee(price, category_slug=None, category=None):
         fee_amount = (
             price * Decimal(str(rule.percentage or 0)) / Decimal("100")
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    # Respect the global listing_fee toggle. When off, the fee is
-    # zero and the "free" pay path is reachable from the frontend.
-    try:
-        from apps.finance.models import SystemFeatureToggle
-        toggle = SystemFeatureToggle.objects.filter(key="listing_fee").first()
-        if toggle is not None and not toggle.is_enabled:
-            return {
-                "rule": rule,
-                "price": price,
-                "percentage": Decimal("0"),
-                "fee_amount": Decimal("0.00"),
-            }
-    except Exception:
-        # Toggle table missing or DB error: fail safe — keep the computed fee.
-        pass
 
     return {
         "rule": rule,
@@ -213,6 +225,11 @@ def create_listing_fee(listing, *, force_recompute=False):
     """
     category_obj = listing.category if listing.category_id else None
     category_slug = getattr(category_obj, "slug", None)
+
+    # Ada ikizimwa baada ya quote kugandishwa, PENDING fee lazima irudishwe
+    # kuwa 0 (vinginevyo mali ingebaki inadai malipo).
+    if not is_listing_fee_enabled():
+        force_recompute = True
 
     result = calculate_listing_fee(
         listing.price,
@@ -249,3 +266,62 @@ def create_listing_fee(listing, *, force_recompute=False):
         "seller", "amount", "rule", "percentage", "updated_at",
     ])
     return existing
+
+
+# ============================================================
+# KUNDI HALINA KANUNI YA ADA — seller aendelee, admin akumbushwe
+# ============================================================
+
+def notify_admins_fee_not_configured(category):
+    """
+    Ukumbusho kwa admins: kundi lina listings lakini halina kanuni ya ada.
+    Hutumwa mara moja kila saa 6 kwa kila kundi (hakuna spam).
+    """
+    try:
+        key = f"fee_not_configured_reminder:{getattr(category, 'pk', 'none')}"
+        if not cache.add(key, 1, 60 * 60 * 6):
+            return
+        from apps.notifications.models import Notification
+        from apps.notifications.services.notification import (
+            create_notification_for_admins,
+        )
+        name = getattr(category, "name", None) or getattr(category, "slug", "—")
+        create_notification_for_admins(
+            notification_type=Notification.NotificationType.LISTING_CREATED,
+            title=_("Kundi halina kanuni ya ada"),
+            message=_(
+                'Kundi "{category}" lina tangazo jipya lakini halina kanuni '
+                "ya ada. Nenda Revenue > Listing Fee uongeze ada yake."
+            ).format(category=name),
+            related_object_type="categories.Category",
+            related_object_id=getattr(category, "pk", None),
+            action_url="/smk-control-9x7k/revenue",
+            priority=Notification.Priority.HIGH,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "fee-not-configured admin reminder failed"
+        )
+
+
+def create_unconfigured_fee_placeholder(listing):
+    """
+    Kundi halina kanuni ya ada (na ada imewashwa): usimzuie seller.
+    Tengeneza ada ya muda (amount 0, rule=None, PENDING) ili aendelee
+    kuwasilisha tangazo, na mkumbushe admin kuweka ada.
+    """
+    fee = ListingFee.objects.filter(listing=listing).first()
+    if fee is None:
+        fee = ListingFee.objects.create(
+            listing=listing,
+            seller=listing.seller,
+            amount=Decimal("0.00"),
+            rule=None,
+            percentage=Decimal("0"),
+            payment_status=ListingFee.PaymentStatus.PENDING,
+        )
+    notify_admins_fee_not_configured(
+        listing.category if listing.category_id else None
+    )
+    return fee

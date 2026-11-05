@@ -53,6 +53,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
         GET     /api/verifications/                    admin: all, user: own
         GET     /api/verifications/?status=PENDING
         GET     /api/verifications/?type=SELLER
+        GET     /api/verifications/?id_type=NIDA
         GET     /api/verifications/{id}/
         POST    /api/verifications/                    create (any authenticated)
         POST    /api/verifications/{id}/approve/       admin only
@@ -138,10 +139,13 @@ class VerificationViewSet(viewsets.GenericViewSet):
         qs = self.get_queryset()
         status_filter = request.query_params.get("status")
         type_filter = request.query_params.get("type")
+        id_type_filter = request.query_params.get("id_type")  # ✅ MPYA
         if status_filter:
             qs = qs.filter(status=status_filter.upper())
         if type_filter:
             qs = qs.filter(type=type_filter.upper())
+        if id_type_filter:
+            qs = qs.filter(id_type=id_type_filter.upper())
         page = self.paginate_queryset(qs)
         serializer = VerificationRequestSerializer(
             page if page is not None else qs,
@@ -197,6 +201,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
 
         obj = VerificationRequest.objects.create(
             type=data["type"],
+            id_type=data.get("id_type") or VerificationRequest.IDType.NIDA,
             subject=data["subject"],
             subject_id=data.get("subject_id"),
             notes=data.get("notes", ""),
@@ -213,6 +218,7 @@ class VerificationViewSet(viewsets.GenericViewSet):
             target_id=obj.id,
             params={
                 "type": obj.type,
+                "id_type": obj.id_type,
                 "subject": obj.subject,
             },
         )

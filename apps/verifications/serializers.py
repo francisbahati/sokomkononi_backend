@@ -94,12 +94,15 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
     reviewed_by_name = serializers.SerializerMethodField()
     is_both_roles = serializers.SerializerMethodField()
     current_role = serializers.SerializerMethodField()
+    id_type_display = serializers.SerializerMethodField()
 
     class Meta:
         model = VerificationRequest
         fields = [
             "id",
             "type",
+            "id_type",
+            "id_type_display",
             "status",
             "user",
             "user_name",
@@ -143,6 +146,12 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
         if not u:
             return None
         return getattr(u, "name", None) or u.email or None
+
+    def get_id_type_display(self, obj):
+        """Label ya lugha mbili kwa ajili ya UI."""
+        if not obj.id_type:
+            return None
+        return obj.get_id_type_display()
 
     def _roles(self, obj):
         """
@@ -196,9 +205,19 @@ class VerificationCreateSerializer(serializers.Serializer):
     """
     Chaguo B: mtumiaji anachagua SELLER au BUYER pekee.
     Mfumo unadetect Both automatically.
+    ✅ MPYA: mtumiaji anachagua aina ya kitambulisho (NIDA/PASSPORT/VOTER).
     """
     type = serializers.ChoiceField(
         choices=[("SELLER", "Seller"), ("BUYER", "Buyer")],
+    )
+    id_type = serializers.ChoiceField(
+        choices=[
+            ("NIDA", "Kadi ya NIDA"),
+            ("PASSPORT", "Pasipoti"),
+            ("VOTER", "Kadi ya Mpiga Kura"),
+        ],
+        required=False,
+        default="NIDA",
     )
     subject = serializers.CharField(max_length=255)
     subject_id = serializers.IntegerField(required=False, allow_null=True)

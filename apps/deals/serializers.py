@@ -246,7 +246,9 @@ class DealMessageSerializer(serializers.ModelSerializer):
     au wa admin. Ujumbe uliofichwa (`is_hidden`) hauruhusiwi kuonekana
     kwa watumiaji — hiyo ni Awamu 2.
     """
-    sender_id = serializers.IntegerField(read_only=True)
+    # ── FIX: `sender_id` haina attribute moja kwa moja kwenye model,
+    #         kwa hiyo tunatumia source="sender.id" ──
+    sender_id = serializers.IntegerField(source="sender.id", read_only=True)
     sender_name = serializers.SerializerMethodField()
     kind = serializers.CharField(read_only=True)
 

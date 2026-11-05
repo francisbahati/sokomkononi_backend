@@ -22,10 +22,24 @@ class VerificationRequest(SoftDeleteModel):
         APPROVED = "APPROVED", "Approved"
         REJECTED = "REJECTED", "Rejected"
 
+    # ✅ MPYA: Aina ya kitambulisho mtumiaji atakachopakia
+    class IDType(models.TextChoices):
+        NIDA = "NIDA", "Kadi ya NIDA"
+        PASSPORT = "PASSPORT", "Pasipoti"
+        VOTER = "VOTER", "Kadi ya Mpiga Kura"
+
     type = models.CharField(
         max_length=20,
         choices=Type.choices,
         verbose_name="Aina ya uthibitisho",
+    )
+    # ✅ MPYA
+    id_type = models.CharField(
+        max_length=20,
+        choices=IDType.choices,
+        default=IDType.NIDA,
+        blank=True,
+        verbose_name="Aina ya kitambulisho",
     )
     status = models.CharField(
         max_length=20,
@@ -126,15 +140,20 @@ class VerificationRequest(SoftDeleteModel):
                 fields=["user"],
                 name="vreq_user_idx",
             ),
+            # ✅ MPYA: index kwa filtering kwa id_type
+            models.Index(
+                fields=["id_type", "status"],
+                name="vreq_idtype_status_idx",
+            ),
         ]
 
         constraints = [
-    models.UniqueConstraint(
-        fields=["user", "type"],
-        condition=models.Q(status="PENDING", is_deleted=False), 
-        name="uniq_pending_verification_per_type",
-    ),
-]
+            models.UniqueConstraint(
+                fields=["user", "type"],
+                condition=models.Q(status="PENDING", is_deleted=False),
+                name="uniq_pending_verification_per_type",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.type} — {self.subject} ({self.status})"

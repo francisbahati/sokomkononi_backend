@@ -81,7 +81,9 @@ class AdminDealMessageSerializer(serializers.ModelSerializer):
     Ujumbe wa Deal Room kwa admin.
     Admin anaona kila kitu — pamoja na ujumbe uliofichwa.
     """
-    sender_id = serializers.IntegerField(read_only=True)
+    # ── FIX: `sender_id` haina attribute moja kwa moja kwenye model,
+    #         kwa hiyo tunatumia source="sender.id" ──
+    sender_id = serializers.IntegerField(source="sender.id", read_only=True)
     sender_name = serializers.SerializerMethodField()
     kind = serializers.CharField(read_only=True)
 

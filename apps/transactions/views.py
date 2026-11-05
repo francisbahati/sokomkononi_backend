@@ -29,6 +29,7 @@ from .serializers import (
     FinalPaymentProofSerializer,
     InspectionPeriodSerializer,
     MyTransactionSerializer,
+    MyReservationSerializer,
     ReservationSerializer,
     SellerConfirmPaymentSerializer,
     TransactionCreateSerializer,
@@ -108,6 +109,8 @@ class TransactionViewSet(viewsets.GenericViewSet):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     throttle_scope = "user"
+
+    lookup_value_regex = r"\d+"
 
     queryset = Transaction.objects.none()
 
@@ -662,6 +665,31 @@ class TransactionViewSet(viewsets.GenericViewSet):
             ).data,
             status=status.HTTP_200_OK,
         )
+
+    # ============================================================
+    # LIST MY RESERVATIONS (buyer) -> MyReservationsPage
+    # ============================================================
+    @action(detail=False, methods=["get"], url_path="reservations")
+    def reservations(self, request):
+        qs = (
+            Reservation.objects
+            .filter(transaction__buyer=request.user)
+            .select_related(
+                "transaction",
+                "transaction__listing",
+                "transaction__listing__category",
+            )
+            .order_by("-created_at")
+        )
+        page = self.paginate_queryset(qs)
+        serializer = MyReservationSerializer(
+            page if page is not None else qs,
+            many=True,
+            context={"request": request},
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     # ============================================================
     # INTERNAL HELPER

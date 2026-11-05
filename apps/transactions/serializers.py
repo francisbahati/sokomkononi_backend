@@ -340,3 +340,76 @@ class MyTransactionSerializer(serializers.ModelSerializer):
 
     def get_has_inspection(self, obj):
         return hasattr(obj, "inspection_period")
+
+
+class MyReservationSerializer(serializers.ModelSerializer):
+    """Reservation za mnunuzi, zikiwa na data ya tangazo kwa MyReservationsPage."""
+    transaction_id = serializers.IntegerField(read_only=True)
+    deal_room_id = serializers.IntegerField(
+        source="transaction.deal_room_id", read_only=True,
+    )
+    listing_id = serializers.IntegerField(
+        source="transaction.listing_id", read_only=True,
+    )
+    listing_title = serializers.CharField(
+        source="transaction.listing.title", read_only=True,
+    )
+    listing_location = serializers.SerializerMethodField()
+    listing_category = serializers.SerializerMethodField()
+    transaction_status = serializers.CharField(
+        source="transaction.status", read_only=True,
+    )
+    reservation_status = serializers.CharField(
+        source="status", read_only=True,
+    )
+    # Hali ya kuonyesha (lowercase) inayolingana na RESERVATION_STATUS ya frontend.
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Reservation
+        fields = [
+            "id", "transaction_id", "deal_room_id",
+            "listing_id", "listing_title", "listing_location",
+            "listing_category",
+            "deposit_amount", "duration_hours", "payment_status",
+            "paid_at", "starts_at", "expires_at",
+            "status", "reservation_status", "transaction_status",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_listing_location(self, obj):
+        return getattr(obj.transaction.listing, "location", "") or ""
+
+    def get_listing_category(self, obj):
+        try:
+            return obj.transaction.listing.category.slug
+        except Exception:
+            return None
+
+    def get_status(self, obj):
+        R = Reservation.Status
+        T = Transaction.Status
+        if obj.status == R.PENDING_PAYMENT:
+            return "pending_payment"
+        if obj.status == R.EXPIRED:
+            return "expired"
+        if obj.status == R.CANCELLED:
+            return "cancelled"
+        if obj.status == R.COMPLETED:
+            return "completed"
+        txn = obj.transaction
+        if txn.status == T.COMPLETED:
+            return "completed"
+        if txn.status == T.DISPUTED:
+            return "disputed"
+        if txn.status == T.CANCELLED:
+            return "cancelled"
+        if txn.status == T.INSPECTION:
+            return "reserved"
+        if txn.status == T.READY_FOR_FINAL_PAYMENT:
+            return (
+                "payment_proof_submitted"
+                if txn.final_payment_proof else "awaiting_final_payment"
+            )
+        return "active"

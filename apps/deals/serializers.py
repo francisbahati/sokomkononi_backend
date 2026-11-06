@@ -252,17 +252,21 @@ class DealMessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.IntegerField(source="sender.id", read_only=True)
     sender_name = serializers.SerializerMethodField()
     kind = serializers.CharField(read_only=True)
+    is_read = serializers.SerializerMethodField()
 
     class Meta:
         model = DealMessage
         fields = [
             "id", "sender_id", "sender_name", "text",
-            "kind", "created_at",
+            "kind", "created_at", "read_at", "is_read",
         ]
         read_only_fields = fields
 
     def get_sender_name(self, obj):
         return getattr(obj.sender, "name", "")
+
+    def get_is_read(self, obj):
+        return obj.read_at is not None
 
 
 class DealMessageCreateSerializer(serializers.Serializer):

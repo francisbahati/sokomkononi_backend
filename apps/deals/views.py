@@ -67,6 +67,34 @@ def _log(request, action, target="", target_id=None, details="", params=None):
         )
 
 
+def _mark_messages_read(deal_room, user):
+    """
+    Mshiriki (mnunuzi/muuzaji) akifungua room, ujumbe wa mwenzake
+    ambao haujasomwa unawekewa `read_at`. Admin (staff) hawaathiri
+    hali hii. Haivunji request ikishindwa.
+    """
+    try:
+        if user.is_staff:
+            return
+        if user.id not in (deal_room.buyer_id, deal_room.seller_id):
+            return
+        (
+            DealMessage.objects
+            .filter(
+                deal_room=deal_room,
+                kind=DealMessage.Kind.USER,
+                is_hidden=False,
+                read_at__isnull=True,
+            )
+            .exclude(sender=user)
+            .update(read_at=timezone.now())
+        )
+    except Exception:
+        logger.exception(
+            "Failed to mark deal messages read: %s", deal_room.pk,
+        )
+
+
 def _generate_ticket_code():
     import secrets
     return f"TKT-{secrets.token_hex(5).upper()}"
@@ -241,6 +269,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         deal_room = self.get_object()
+        _mark_messages_read(deal_room, request.user)
         serializer = self.get_serializer_class()(
             deal_room,
             context={"request": request, "deal_room": deal_room},
@@ -275,6 +304,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     )
     def messages_list(self, request, pk=None):
         deal_room = self.get_object()
+        _mark_messages_read(deal_room, request.user)
         qs = (
             DealMessage.objects
             .filter(deal_room=deal_room)

@@ -306,6 +306,16 @@ class DealMessage(models.Model):
         ),
     )
 
+    read_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Muda wa kusomwa",
+        help_text=(
+            "Mpokeaji alipofungua Deal Room na kuona ujumbe huu. "
+            "Null = bado haujasomwa."
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -411,16 +411,24 @@ def create_reservation(*, transaction, user, duration_hours=DEFAULT_RESERVATION_
         raise ValidationError("Muda wa reservation si sahihi.")
 
     # Validate against active tiers (dynamic, admin-controlled).
+    # Fee ikizimwa na hakuna tier hai, reservation ni ya BURE na inatumia
+    # muda wa chaguo-msingi (DEFAULT_RESERVATION_HOURS) — tiers hazihitajiki.
     allowed = get_allowed_reservation_hours()
-    if not allowed:
+    if allowed:
+        if duration_hours not in allowed:
+            hours_str = ", ".join(str(h) for h in sorted(allowed))
+            raise ValidationError(
+                f"Reservation inaweza kuwa saa: {hours_str}."
+            )
+    elif is_reservation_fee_enabled():
         raise ValidationError(
             "Hakuna tiers za reservation zilizo hai. "
             "Wasiliana na admin."
         )
-    if duration_hours not in allowed:
-        hours_str = ", ".join(str(h) for h in sorted(allowed))
+    elif duration_hours != DEFAULT_RESERVATION_HOURS:
         raise ValidationError(
-            f"Reservation inaweza kuwa saa: {hours_str}."
+            "Reservation ya bure ni saa "
+            f"{DEFAULT_RESERVATION_HOURS} pekee."
         )
 
     # The amount is decided here, never by the client.

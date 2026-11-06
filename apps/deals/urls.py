@@ -57,6 +57,13 @@ urlpatterns = [
         name="deal-room-messages",
     ),
 
+    # ── Mark messages as read (POST) ──
+    path(
+        "<int:pk>/mark-read/",
+        DealRoomViewSet.as_view({"post": "mark_read"}),
+        name="deal-room-mark-read",
+    ),
+
     # ── Payment proof / report ──
     path(
         "<int:pk>/payment-proof/",

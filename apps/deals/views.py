@@ -69,16 +69,17 @@ def _log(request, action, target="", target_id=None, details="", params=None):
 
 def _mark_messages_read(deal_room, user):
     """
-    Mshiriki (mnunuzi/muuzaji) akifungua room, ujumbe wa mwenzake
-    ambao haujasomwa unawekewa `read_at`. Admin (staff) hawaathiri
-    hali hii. Haivunji request ikishindwa.
+    Ujumbe wa mwenzake ambao haujasomwa unawekewa `read_at`. Inaitwa
+    na endpoint ya `mark-read` PEKEE (frontend inaiita room inapokuwa
+    wazi na inaonekana) — GET haiweki alama ya kusomwa.
+    Admin (staff) hawaathiri hali hii. Inarudisha idadi iliyowekwa.
     """
     try:
         if user.is_staff:
-            return
+            return 0
         if user.id not in (deal_room.buyer_id, deal_room.seller_id):
-            return
-        (
+            return 0
+        return (
             DealMessage.objects
             .filter(
                 deal_room=deal_room,
@@ -93,6 +94,7 @@ def _mark_messages_read(deal_room, user):
         logger.exception(
             "Failed to mark deal messages read: %s", deal_room.pk,
         )
+        return 0
 
 
 def _generate_ticket_code():
@@ -179,7 +181,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated(), IsVerifiedDealUser()]
         if self.action in [
             "retrieve", "offer", "accept_offer", "decline_offer", "cancel",
-            "messages_create", "messages_list", "report", "reopen",
+            "messages_create", "messages_list", "mark_read",
+            "report", "reopen",
         ]:
             return [
                 permissions.IsAuthenticated(),
@@ -269,7 +272,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         deal_room = self.get_object()
-        _mark_messages_read(deal_room, request.user)
         serializer = self.get_serializer_class()(
             deal_room,
             context={"request": request, "deal_room": deal_room},
@@ -304,7 +306,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     )
     def messages_list(self, request, pk=None):
         deal_room = self.get_object()
-        _mark_messages_read(deal_room, request.user)
         qs = (
             DealMessage.objects
             .filter(deal_room=deal_room)
@@ -355,6 +356,20 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             DealMessageSerializer(msg).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @extend_schema(request=None, responses={200: None})
+    @action(
+        detail=True, methods=["post"],
+        url_path="mark-read", url_name="mark-read",
+    )
+    def mark_read(self, request, pk=None):
+        """
+        Mshiriki anaashiria kuwa ameona ujumbe wa mwenzake kwenye room hii.
+        Inaruhusiwa hata room ikiwa imesimamishwa (haibadilishi mazungumzo).
+        """
+        deal_room = self.get_object()
+        marked = _mark_messages_read(deal_room, request.user)
+        return Response({"ok": True, "marked": marked})
 
     @extend_schema(responses={200: None})
     @action(

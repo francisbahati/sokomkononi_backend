@@ -243,8 +243,9 @@ class DealMessageSerializer(serializers.ModelSerializer):
     Ujumbe wa chat ndani ya Deal Room (hauhusiani na Messaging app).
 
     `kind` inarudishwa ili frontend ijue kama ni ujumbe wa mtumiaji
-    au wa admin. Ujumbe uliofichwa (`is_hidden`) hauruhusiwi kuonekana
-    kwa watumiaji — hiyo ni Awamu 2.
+    au wa admin. Ujumbe uliofichwa (`is_hidden`) haufiki kwa watumiaji:
+    views/serializers zinazowahudumia zinachuja `is_hidden=False`.
+    (Admin anaona zote kupitia `AdminDealMessageSerializer`.)
     """
     # ── FIX: `sender_id` haina attribute moja kwa moja kwenye model,
     #         kwa hiyo tunatumia source="sender.id" ──
@@ -595,11 +596,12 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     def get_messages(self, obj):
         """
         Mtumiaji anaona ujumbe wake + wa mwenzake + wa admin.
-        Ujumbe uliofichwa (is_hidden=True) haufichwi kwa mtumiaji
-        kwa sasa — hiyo ni Awamu 2.
+        Ujumbe uliofichwa (is_hidden=True) HAUONEKANI kwa mtumiaji —
+        unabaki kama ushahidi kwa admin tu.
         """
         qs = (
             obj.messages
+            .filter(is_hidden=False)
             .select_related("sender")
             .order_by("created_at")
         )

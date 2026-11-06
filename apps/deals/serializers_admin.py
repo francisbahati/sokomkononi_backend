@@ -228,7 +228,18 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
         uliofichwa (is_hidden). Ujumbe wa admin una `sender = "admin"`.
         """
         try:
-            qs = obj.messages.select_related("sender").order_by("created_at")
+            # Tumia `prefetch_related("messages", "messages__sender")` ya
+            # AdminDealRoomViewSet kama ipo (inazuia query mpya kwa kila
+            # room kwenye list). Meta.ordering = created_at.
+            prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
+                "messages"
+            )
+            if prefetched is not None:
+                qs = prefetched
+            else:
+                qs = obj.messages.select_related("sender").order_by(
+                    "created_at"
+                )
         except Exception:
             return []
         out = []

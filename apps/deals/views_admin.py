@@ -170,16 +170,17 @@ class AdminDealRoomViewSet(viewsets.GenericViewSet):
 
         # Arifa kwa pande zote mbili
         def _notify():
-            from .services.notifications import (
-                notify_deal_room_cancelled_by_admin,
-            )
-            notify_deal_room_cancelled_by_admin(
-                deal_room=deal_room,
-                reason=reason,
-                cancelled_by=request.user,
-            )
+            from .services.notifications import notify_admin_message
+            notify_admin_message(deal_room=deal_room, text=text)
 
         transaction.on_commit(lambda: _notify_safe(_notify))
+
+        # Frontend (`adminSendMessageAsync`) inasoma: id, sender_id,
+        # sender_name, text, created_at kutoka kwenye response hii.
+        return Response(
+            AdminDealMessageSerializer(msg).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     # ============================================================
     # 3. LOCK — simamisha room
@@ -389,11 +390,13 @@ class AdminDealRoomViewSet(viewsets.GenericViewSet):
             )
 
         def _notify():
-            from .services.notifications import notify_deal_room_cancelled
-            notify_deal_room_cancelled(
+            from .services.notifications import (
+                notify_deal_room_cancelled_by_admin,
+            )
+            notify_deal_room_cancelled_by_admin(
                 deal_room=deal_room,
-                cancelled_by=request.user,
                 reason=reason,
+                cancelled_by=request.user,
             )
 
         transaction.on_commit(lambda: _notify_safe(_notify))

@@ -281,6 +281,9 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             .select_related("sender")
             .order_by("created_at")
         )
+        # Ujumbe uliofichwa (is_hidden) ni ushahidi kwa admin tu.
+        if not request.user.is_staff:
+            qs = qs.filter(is_hidden=False)
         return Response(DealMessageSerializer(qs, many=True).data)
 
     @extend_schema(
@@ -792,6 +795,14 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         self.check_object_permissions(request, deal_room)
 
+        # ── MPYA: room iliyosimamishwa na admin haiwezi kughairiwa ──
+        if deal_room.admin_locked and not request.user.is_staff:
+            return _deal_error(
+                "DEAL_LOCKED",
+                "Deal Room hii imesimamishwa na admin — huwezi kuifunga "
+                "kwa sasa.",
+            )
+
         if deal_room.status not in [
             DealRoom.Status.OPEN, DealRoom.Status.NEGOTIATING,
         ]:
@@ -901,6 +912,14 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 "Deal hii ilighairiwa na msimamizi — haiwezi kufufuliwa "
                 "na mimi/mwenzako. Wasiliana na support@sokomkononi.co.tz.",
                 status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── MPYA: room iliyosimamishwa na admin haifufuliwi ──
+        if deal_room.admin_locked:
+            return _deal_error(
+                "DEAL_LOCKED",
+                "Deal Room hii imesimamishwa na admin — haiwezi kufufuliwa "
+                "kwa sasa.",
             )
 
         if request.user.id not in (deal_room.buyer_id, deal_room.seller_id):

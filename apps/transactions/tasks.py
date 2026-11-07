@@ -153,6 +153,7 @@ def warn_expiring_reservations():
             "transaction",
             "transaction__buyer",
             "transaction__listing",
+            "transaction__deal_room",
         )
     )
 
@@ -169,8 +170,8 @@ def warn_expiring_reservations():
             notification_type=(
                 Notification.NotificationType.RESERVATION_EXPIRING
             ),
-            related_object_type="Reservation",
-            related_object_id=reservation.id,
+            related_object_type="deal",
+            related_object_id=transaction.deal_room_id,
         ).exists()
 
         if already_warned:
@@ -201,9 +202,12 @@ def warn_expiring_reservations():
                     hours=hours_left,
                 ),
                 priority=Notification.Priority.HIGH,
-                related_object_type="Reservation",
-                related_object_id=reservation.id,
-                action_url=f"/transactions/{transaction.id}",
+                related_object_type="deal",
+                related_object_id=transaction.deal_room_id,
+                action_url=(
+                    f"/dashboard/buyer/deals?deal={transaction.deal_room_id}"
+                ),
+                side="buyer",
             )
 
         warned += 1
@@ -325,6 +329,7 @@ def notify_expiring_in_5_minutes():
             "transaction",
             "transaction__buyer",
             "transaction__listing",
+            "transaction__deal_room",
         )
     )
 
@@ -359,9 +364,12 @@ def notify_expiring_in_5_minutes():
                     minutes=minutes_left,
                 ),
                 priority=Notification.Priority.URGENT,
-                related_object_type="Reservation",
-                related_object_id=reservation.id,
-                action_url="/dashboard/buyer/reservations",
+                related_object_type="deal",
+                related_object_id=transaction.deal_room_id,
+                action_url=(
+                    f"/dashboard/buyer/deals?deal={transaction.deal_room_id}"
+                ),
+                side="buyer",
             )
 
         # Email
@@ -450,6 +458,7 @@ def notify_waiting_list_expiring():
                             f"/dashboard/buyer/deals"
                             f"?listing={listing.id}&action=reserve"
                         ),
+                        side="buyer",
                     )
 
                 # Email kwa waiting list buyer

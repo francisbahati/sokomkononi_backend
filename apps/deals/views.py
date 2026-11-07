@@ -315,7 +315,11 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         # Ujumbe uliofichwa (is_hidden) ni ushahidi kwa admin tu.
         if not request.user.is_staff:
             qs = qs.filter(is_hidden=False)
-        return Response(DealMessageSerializer(qs, many=True).data)
+        return Response(
+            DealMessageSerializer(
+                qs, many=True, context={"request": request}
+            ).data
+        )
 
     @extend_schema(
         request=DealMessageCreateSerializer,
@@ -345,7 +349,8 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         msg = DealMessage.objects.create(
             deal_room=deal_room,
             sender=request.user,
-            text=serializer.validated_data["text"],
+            text=serializer.validated_data.get("text", ""),
+            attachment=serializer.validated_data.get("attachment"),
             kind=DealMessage.Kind.USER,
         )
         DealRoom.objects.filter(pk=deal_room.pk).update(
@@ -353,7 +358,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
 
         return Response(
-            DealMessageSerializer(msg).data,
+            DealMessageSerializer(msg, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
 

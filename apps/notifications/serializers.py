@@ -15,6 +15,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "message",
             "priority",
             "audience",
+            "side",
             "is_read",
             "read_at",
             "related_object_type",
@@ -31,7 +32,8 @@ class NotificationSerializer(serializers.ModelSerializer):
         to route it. Only fall back to the reverse-resolved API URL
         when the stored value is empty.
         """
-        return obj.action_url or obj.resolved_action_url or None
+        # Usirudishe API URL (/api/...) — frontend haiwezi kuifungua.
+        return obj.action_url or None
 
 
 class NotificationMarkReadSerializer(serializers.Serializer):

@@ -7,6 +7,22 @@ from apps.notifications.services.notification import create_notification
 from ._lang import user_lang
 
 
+def _deal_kwargs(deal_room, recipient):
+    """
+    Frontend inafungua deals kupitia /dashboard[/buyer]/deals?deal=<id>
+    (njia ya zamani "/deals/<id>" haipo kwenye router). `side` inamwambia
+    frontend notification ni ya dashboard ipi.
+    """
+    is_buyer = recipient.id == deal_room.buyer_id
+    prefix = "/dashboard/buyer" if is_buyer else "/dashboard"
+    return {
+        "related_object_type": "DealRoom",
+        "related_object_id": deal_room.id,
+        "action_url": f"{prefix}/deals?deal={deal_room.id}",
+        "side": "buyer" if is_buyer else "seller",
+    }
+
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -27,9 +43,6 @@ def _notify_both(
 
     Arifa moja ikishindwa, nyingine inaendelea.
     """
-    if action_url is None:
-        action_url = f"/deals/{deal_room.id}"
-
     for recipient in (deal_room.buyer, deal_room.seller):
         lang = user_lang(recipient)
         try:
@@ -40,9 +53,7 @@ def _notify_both(
                     title=title_fn(lang),
                     message=message_fn(lang),
                     priority=priority,
-                    related_object_type="DealRoom",
-                    related_object_id=deal_room.id,
-                    action_url=action_url,
+                    **_deal_kwargs(deal_room, recipient),
                 )
         except Exception:
             import logging
@@ -70,9 +81,7 @@ def notify_deal_room_created(*, deal_room):
                 title=deal_room.listing.title,
             ),
             priority=Notification.Priority.NORMAL,
-            related_object_type="DealRoom",
-            related_object_id=deal_room.id,
-            action_url=f"/deals/{deal_room.id}",
+            **_deal_kwargs(deal_room, recipient),
         )
 
 
@@ -123,9 +132,7 @@ def notify_new_offer(*, deal_room, offer):
             title=title,
             message=message,
             priority=Notification.Priority.HIGH,
-            related_object_type="DealRoom",
-            related_object_id=deal_room.id,
-            action_url=f"/deals/{deal_room.id}",
+            **_deal_kwargs(deal_room, recipient),
         )
 
 
@@ -146,9 +153,7 @@ def notify_offer_accepted(*, deal_room, offer):
                     title=deal_room.listing.title,
                 ),
                 priority=Notification.Priority.URGENT,
-                related_object_type="DealRoom",
-                related_object_id=deal_room.id,
-                action_url=f"/deals/{deal_room.id}",
+                **_deal_kwargs(deal_room, recipient),
             )
 
 
@@ -168,9 +173,7 @@ def notify_offer_rejected(*, deal_room, offer):
                 title=deal_room.listing.title,
             ),
             priority=Notification.Priority.HIGH,
-            related_object_type="DealRoom",
-            related_object_id=deal_room.id,
-            action_url=f"/deals/{deal_room.id}",
+            **_deal_kwargs(deal_room, recipient),
         )
 
 
@@ -210,9 +213,7 @@ def notify_deal_room_cancelled(*, deal_room, cancelled_by, reason=""):
             title=_("Deal Room Imefungwa"),
             message=message,
             priority=Notification.Priority.HIGH,
-            related_object_type="DealRoom",
-            related_object_id=deal_room.id,
-            action_url=f"/deals/{deal_room.id}",
+            **_deal_kwargs(deal_room, recipient),
         )
 
 
@@ -248,9 +249,7 @@ def notify_deal_room_reopened(*, deal_room, reopened_by, note=""):
             title=_("Deal Room Imefufuliwa"),
             message=message,
             priority=Notification.Priority.HIGH,
-            related_object_type="DealRoom",
-            related_object_id=deal_room.id,
-            action_url=f"/deals/{deal_room.id}",
+            **_deal_kwargs(deal_room, recipient),
         )
 
 

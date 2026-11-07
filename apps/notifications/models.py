@@ -101,6 +101,11 @@ class Notification(SoftDeleteModel):
         USER = "user", "User"
         ADMIN = "admin", "Admin"
 
+    class Side(models.TextChoices):
+        BUYER = "buyer", "Buyer"
+        SELLER = "seller", "Seller"
+        BOTH = "both", "Both"
+
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -137,6 +142,14 @@ class Notification(SoftDeleteModel):
         default=Audience.USER,
         db_index=True,
         verbose_name="Watazamaji",
+    )
+
+    side = models.CharField(
+        max_length=10,
+        choices=Side.choices,
+        default=Side.BOTH,
+        db_index=True,
+        verbose_name="Upande",
     )
 
     is_read = models.BooleanField(

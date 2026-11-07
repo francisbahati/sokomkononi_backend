@@ -253,14 +253,28 @@ class DealMessageSerializer(serializers.ModelSerializer):
     sender_name = serializers.SerializerMethodField()
     kind = serializers.CharField(read_only=True)
     is_read = serializers.SerializerMethodField()
+    attachment_url = serializers.SerializerMethodField()
 
     class Meta:
         model = DealMessage
         fields = [
             "id", "sender_id", "sender_name", "text",
             "kind", "created_at", "read_at", "is_read",
+            "attachment_url",
         ]
         read_only_fields = fields
+
+    def get_attachment_url(self, obj):
+        if not obj.attachment:
+            return None
+        request = self.context.get("request")
+        try:
+            return (
+                request.build_absolute_uri(obj.attachment.url)
+                if request else obj.attachment.url
+            )
+        except Exception:
+            return None
 
     def get_sender_name(self, obj):
         return getattr(obj.sender, "name", "")
@@ -271,17 +285,24 @@ class DealMessageSerializer(serializers.ModelSerializer):
 
 class DealMessageCreateSerializer(serializers.Serializer):
     text = serializers.CharField(
-        required=True, allow_blank=False, trim_whitespace=True,
+        required=False, allow_blank=True, trim_whitespace=True,
         max_length=2000,
     )
+    attachment = serializers.ImageField(required=False, allow_null=True)
 
-    def validate_text(self, value):
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Ujumbe hauwezi kuwa tupu.")
+    def validate_attachment(self, value):
+        if value and value.size > 8 * 1024 * 1024:
+            raise serializers.ValidationError(
+                "Picha ni kubwa mno (kiwango ni MB 8)."
+            )
         return value
 
     def validate(self, attrs):
+        attrs["text"] = (attrs.get("text") or "").strip()
+        if not attrs["text"] and not attrs.get("attachment"):
+            raise serializers.ValidationError(
+                "Andika ujumbe au ambatanisha picha."
+            )
         deal_room = self.context.get("deal_room")
         request = self.context.get("request")
         if not deal_room:
@@ -555,7 +576,7 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
         return {
             "url": url,
             "data_url": url,
-            "method": "Bank/Card",
+            "method": "",
             "reference": txn.final_payment_reference or "",
             "submitted_at": txn.final_payment_uploaded_at,
             "uploaded_at": txn.final_payment_uploaded_at,
@@ -609,7 +630,9 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             .select_related("sender")
             .order_by("created_at")
         )
-        return DealMessageSerializer(qs, many=True).data
+        return DealMessageSerializer(
+            qs, many=True, context=self.context
+        ).data
 
     def get_offer_count(self, obj):
         try:

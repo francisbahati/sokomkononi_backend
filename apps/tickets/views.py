@@ -116,6 +116,7 @@ def _notify_user_of_reply(ticket, reply_text):
                 related_object_type="ticket",
                 related_object_id=ticket.id,
                 action_url=f"/dashboard/safety?ticket={ticket.id}",
+                side="both",
             )
     except Exception:
         logger.exception(
@@ -464,6 +465,7 @@ class TicketViewSet(viewsets.GenericViewSet):
                     related_object_type="ticket",
                     related_object_id=ticket.id,
                     action_url=f"/dashboard/safety?ticket={ticket.id}",
+                    side="both",
                 )
         except Exception:
             logger.exception("ticket notify failed")

@@ -287,7 +287,13 @@ class DealMessage(models.Model):
         related_name="deal_messages",
         verbose_name="Mtumaji",
     )
-    text = models.TextField(verbose_name="Ujumbe")
+    text = models.TextField(verbose_name="Ujumbe", blank=True, default="")
+    attachment = models.ImageField(
+        upload_to="deals/message-attachments/%Y/%m/",
+        null=True,
+        blank=True,
+        verbose_name="Picha iliyoambatanishwa",
+    )
 
     kind = models.CharField(
         max_length=10,

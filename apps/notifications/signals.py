@@ -93,6 +93,7 @@ def on_waitlist_change(sender, instance, created, **kwargs):
             related_object_type="listing",
             related_object_id=getattr(listing, "id", None),
             action_url="/dashboard/buyer/waiting",
+            side="buyer",
         )
 
 
@@ -145,29 +146,10 @@ def on_ticket_created(sender, instance, created, **kwargs):
 
 
 # ── Reservation events ─────────────────────────────────────
-
-@receiver(post_save, sender="transactions.Reservation")
-def on_reservation_created(sender, instance, created, **kwargs):
-    if not created:
-        return
-    try:
-        txn = instance.transaction
-        listing = txn.listing
-        seller = txn.seller
-    except Exception:
-        return
-    if seller is None:
-        return
-    _notify(
-        seller,
-        "RESERVATION_CREATED",
-        f"Reservation mpya: {listing.title}",
-        "Mnunuzi ameanza mchakato wa reservation.",
-        related_object_type="transaction",
-        related_object_id=txn.id,
-        action_url=f"/dashboard/deals?deal={txn.deal_room_id}",
-    )
-
+# NOTE: `on_reservation_created` imeondolewa kwa sababu
+# `apps.transactions.services.notifications.notify_reservation_created`
+# inashughulikia buyer + seller kwa undani zaidi. Kuwa na zote mbili
+# kulisababisha duplicate notifications kwa seller.
 
 # ── Verification events ────────────────────────────────────
 

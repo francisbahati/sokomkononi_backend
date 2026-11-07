@@ -9,6 +9,23 @@ from ..models import Transaction
 from ._lang import user_lang
 
 
+def _deal_kwargs(transaction, recipient):
+    """
+    Frontend inafungua deals kwa DEAL ROOM id (si transaction id),
+    na njia hutofautiana kwa buyer/seller. `side` inamwambia frontend
+    notification ni ya dashboard ipi.
+    """
+    is_buyer = recipient.id == transaction.buyer_id
+    prefix = "/dashboard/buyer" if is_buyer else "/dashboard"
+    deal_id = transaction.deal_room_id
+    return {
+        "related_object_type": "deal",
+        "related_object_id": deal_id,
+        "action_url": f"{prefix}/deals?deal={deal_id}",
+        "side": "buyer" if is_buyer else "seller",
+    }
+
+
 # ============================================================================
 # TRANSACTION CREATED
 # ============================================================================
@@ -32,9 +49,7 @@ def notify_transaction_created(*, transaction):
                     price=f"{transaction.agreed_price:,.2f}",
                 ),
                 priority=Notification.Priority.HIGH,
-                related_object_type="Transaction",
-                related_object_id=transaction.id,
-                action_url=f"/transactions/{transaction.id}",
+                **_deal_kwargs(transaction, recipient),
             )
 
 
@@ -78,9 +93,7 @@ def notify_buyer_decision(*, transaction):
             title=_("Uamuzi wa Mnunuzi"),
             message=message,
             priority=Notification.Priority.URGENT,
-            related_object_type="Transaction",
-            related_object_id=transaction.id,
-            action_url=f"/transactions/{transaction.id}",
+            **_deal_kwargs(transaction, recipient),
         )
 
 
@@ -111,9 +124,7 @@ def notify_payment_proof_uploaded(*, transaction):
             title=_("Ushahidi wa Malipo Umewekwa"),
             message=message,
             priority=Notification.Priority.URGENT,
-            related_object_type="Transaction",
-            related_object_id=transaction.id,
-            action_url=f"/transactions/{transaction.id}",
+            **_deal_kwargs(transaction, recipient),
         )
 
 
@@ -136,9 +147,7 @@ def notify_payment_confirmed(*, transaction):
                 "kwa Transaction #{id}."
             ).format(id=transaction.id),
             priority=Notification.Priority.HIGH,
-            related_object_type="Transaction",
-            related_object_id=transaction.id,
-            action_url=f"/transactions/{transaction.id}",
+            **_deal_kwargs(transaction, recipient),
         )
 
 
@@ -164,9 +173,7 @@ def notify_transaction_completed(*, transaction):
                     title=transaction.listing.title,
                 ),
                 priority=Notification.Priority.URGENT,
-                related_object_type="Transaction",
-                related_object_id=transaction.id,
-                action_url=f"/transactions/{transaction.id}",
+                **_deal_kwargs(transaction, recipient),
             )
 
 
@@ -209,9 +216,7 @@ def notify_transaction_cancelled(*, transaction, cancelled_by, reason):
             title=_("Transaction Imeghairiwa"),
             message=message,
             priority=Notification.Priority.HIGH,
-            related_object_type="Transaction",
-            related_object_id=transaction.id,
-            action_url=f"/transactions/{transaction.id}",
+            **_deal_kwargs(transaction, recipient),
         )
 
 
@@ -241,9 +246,7 @@ def notify_reservation_created(*, reservation):
                 deposit=f"{reservation.deposit_amount:,.2f}",
             ),
             priority=Notification.Priority.HIGH,
-            related_object_type="Reservation",
-            related_object_id=reservation.id,
-            action_url=f"/transactions/{transaction.id}",
+            **_deal_kwargs(transaction, transaction.buyer),
         )
 
     # Seller
@@ -260,9 +263,7 @@ def notify_reservation_created(*, reservation):
                 "ya tangazo '{title}'. Inasubiri malipo ya reservation."
             ).format(id=transaction.id, title=transaction.listing.title),
             priority=Notification.Priority.HIGH,
-            related_object_type="Reservation",
-            related_object_id=reservation.id,
-            action_url=f"/transactions/{transaction.id}",
+            **_deal_kwargs(transaction, transaction.seller),
         )
 
 
@@ -291,9 +292,7 @@ def notify_reservation_paid(*, reservation):
                     hours=reservation.duration_hours,
                 ),
                 priority=Notification.Priority.URGENT,
-                related_object_type="Reservation",
-                related_object_id=reservation.id,
-                action_url=f"/transactions/{transaction.id}",
+                **_deal_kwargs(transaction, recipient),
             )
 
 
@@ -322,9 +321,7 @@ def notify_reservation_expired(*, reservation):
                     title=transaction.listing.title,
                 ),
                 priority=Notification.Priority.URGENT,
-                related_object_type="Reservation",
-                related_object_id=reservation.id,
-                action_url=f"/transactions/{transaction.id}",
+                **_deal_kwargs(transaction, recipient),
             )
 
 
@@ -353,9 +350,7 @@ def notify_inspection_started(*, inspection):
                     hours=inspection.duration_hours,
                 ),
                 priority=Notification.Priority.HIGH,
-                related_object_type="InspectionPeriod",
-                related_object_id=inspection.id,
-                action_url=f"/transactions/{transaction.id}",
+                **_deal_kwargs(transaction, recipient),
             )
 
 
@@ -386,7 +381,5 @@ def notify_inspection_completed(*, inspection):
                 title=_("Inspection Imekamilika"),
                 message=message,
                 priority=Notification.Priority.HIGH,
-                related_object_type="InspectionPeriod",
-                related_object_id=inspection.id,
-                action_url=f"/transactions/{transaction.id}",
+                **_deal_kwargs(transaction, recipient),
             )

@@ -118,6 +118,7 @@ def create_notification(
     related_object_type="",
     related_object_id=None,
     action_url="",
+    side=Notification.Side.BOTH,
 ):
     """
     Create a notification (in-app, DB record).
@@ -142,6 +143,7 @@ def create_notification(
         related_object_type=related_object_type,
         related_object_id=related_object_id,
         action_url=action_url,
+        side=side,
     )
 
 

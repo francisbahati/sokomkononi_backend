@@ -21,6 +21,7 @@ from .services.revenue import (
     calculate_financial_dashboard,
     get_revenue_records,
 )
+from .services.overview_stats import calculate_overview_stats
 from .services.user_stats import calculate_user_stats
 
 
@@ -587,7 +588,7 @@ class UserStatsView(APIView):
     GET /api/finance/user-stats/
 
     Inarudisha stats za watumiaji:
-      - totalUsers (bila admin)
+      - totalUsers (pamoja na admin)
       - totalSellers (users walio na listing angalau moja)
       - totalBuyers (users walio na deal angalau moja)
       - bothRoles (wote wawili)
@@ -599,3 +600,19 @@ class UserStatsView(APIView):
     def get(self, request):
         stats = calculate_user_stats()
         return Response(stats)
+
+
+# ============================================================
+# OVERVIEW STATS — GET (admin)
+# ============================================================
+class AdminOverviewStatsView(APIView):
+    """
+    GET /api/finance/overview-stats/
+
+    Namba zote za ukurasa wa Overview kwa request moja:
+    users, listings, deals na pendingPayments.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        return Response(calculate_overview_stats())

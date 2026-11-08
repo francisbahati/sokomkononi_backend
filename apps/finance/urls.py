@@ -11,6 +11,7 @@ from .views import (
     SystemFeatureToggleViewSet,
     RevenueOverviewView,
     UserStatsView,
+    AdminOverviewStatsView,
 )
 from .views_reports import ReportsView
 from .views_success_fee import (
@@ -35,6 +36,11 @@ urlpatterns = [
     # User stats
     # ═══════════════════════════════════════════════════════════
     path("user-stats/", UserStatsView.as_view(), name="user-stats"),
+    path(
+        "overview-stats/",
+        AdminOverviewStatsView.as_view(),
+        name="overview-stats",
+    ),
 
     # ═══════════════════════════════════════════════════════════
     # Reports

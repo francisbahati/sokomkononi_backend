@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.deals.models import DealRoom
+from apps.deals.services.system_messages import post_system_message
 from django.utils.translation import gettext as _, override
 
 from ._lang import user_lang
@@ -187,6 +188,26 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
         "status", "cancelled_at", "cancellation_reason", "updated_at",
     ])
 
+    # ── Ujumbe wa mfumo kwenye chat ──
+    if decision == Transaction.BuyerDecision.READY_FOR_FINAL_PAYMENT:
+        post_system_message(
+            deal_room_id=transaction.deal_room_id, code="INSPECTION_PASSED",
+            actor=buyer, data={"amount": str(transaction.agreed_price)},
+        )
+    elif decision in {
+        Transaction.BuyerDecision.NOT_AS_DESCRIBED,
+        Transaction.BuyerDecision.REQUEST_NEGOTIATION,
+    }:
+        post_system_message(
+            deal_room_id=transaction.deal_room_id, code="DISPUTED",
+            actor=buyer, data={"decision": decision, "note": note},
+        )
+    elif decision == Transaction.BuyerDecision.CANCEL_TRANSACTION:
+        post_system_message(
+            deal_room_id=transaction.deal_room_id, code="INSPECTION_CANCELLED",
+            actor=buyer, data={"note": note},
+        )
+
     # ── Sync DealRoom.status ili ibaki baada ya refresh ──
     if decision == Transaction.BuyerDecision.READY_FOR_FINAL_PAYMENT:
         _sync_deal_room_status(
@@ -257,6 +278,13 @@ def upload_final_payment_proof(
         transaction=transaction,
         new_status=DealRoom.Status.PAYMENT_PROOF_SUBMITTED,
     )
+    post_system_message(
+        deal_room_id=transaction.deal_room_id, code="PROOF_SUBMITTED", actor=buyer,
+        data={
+            "reference": transaction.final_payment_reference,
+            "key": f"proof-{transaction.pk}-{int(transaction.final_payment_uploaded_at.timestamp())}",
+        },
+    )
 
     db_transaction.on_commit(
         lambda: notify_payment_proof_uploaded(transaction=transaction)
@@ -309,6 +337,10 @@ def reject_final_payment_proof(*, transaction, seller, reason=""):
     _sync_deal_room_status(
         transaction=transaction,
         new_status=DealRoom.Status.AWAITING_FINAL_PAYMENT,
+    )
+    post_system_message(
+        deal_room_id=transaction.deal_room_id, code="PROOF_REJECTED",
+        actor=seller, data={"reason": reason},
     )
 
     # Notification kwa mnunuzi
@@ -397,6 +429,9 @@ def seller_confirm_final_payment(*, transaction, seller):
     )
     deal_room.status = DealRoom.Status.COMPLETED
     deal_room.save(update_fields=["status", "updated_at"])
+    post_system_message(
+        deal_room_id=transaction.deal_room_id, code="COMPLETED", actor=seller,
+    )
 
     reservation = getattr(transaction, "reservation", None)
     if reservation:

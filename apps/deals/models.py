@@ -274,6 +274,7 @@ class DealMessage(models.Model):
     class Kind(models.TextChoices):
         USER = "USER", "User"
         ADMIN = "ADMIN", "Admin"
+        SYSTEM = "SYSTEM", "System"
 
     deal_room = models.ForeignKey(
         DealRoom,
@@ -300,8 +301,12 @@ class DealMessage(models.Model):
         choices=Kind.choices,
         default=Kind.USER,
         verbose_name="Aina ya ujumbe",
-        help_text="USER = mtumiaji, ADMIN = msimamizi.",
+        help_text="USER = mtumiaji, ADMIN = msimamizi, SYSTEM = mfumo.",
     )
+
+    # Ujumbe wa SYSTEM: frontend inatafsiri maandishi kwa `system_code`
+    system_code = models.CharField(max_length=40, blank=True, default="")
+    system_data = models.JSONField(default=dict, blank=True)
 
     is_hidden = models.BooleanField(
         default=False,

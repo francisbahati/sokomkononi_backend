@@ -254,13 +254,15 @@ class DealMessageSerializer(serializers.ModelSerializer):
     kind = serializers.CharField(read_only=True)
     is_read = serializers.SerializerMethodField()
     attachment_url = serializers.SerializerMethodField()
+    system_code = serializers.CharField(read_only=True)
+    system_data = serializers.JSONField(read_only=True)
 
     class Meta:
         model = DealMessage
         fields = [
             "id", "sender_id", "sender_name", "text",
             "kind", "created_at", "read_at", "is_read",
-            "attachment_url",
+            "attachment_url", "system_code", "system_data",
         ]
         read_only_fields = fields
 

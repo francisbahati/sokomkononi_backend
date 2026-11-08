@@ -6,6 +6,7 @@ from django.db import transaction as db_transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from apps.deals.services.system_messages import post_system_message
 from apps.listings.models import Listing
 from django.utils.translation import gettext as _, override
 from ._lang import user_lang
@@ -279,6 +280,14 @@ def _activate_reservation(*, reservation, transaction, payment_reference):
             deal_room.save(update_fields=["status", "updated_at"])
     except DealRoom.DoesNotExist:
         pass
+
+    # ── Ujumbe wa mfumo kwenye chat (idempotent kwa payment_reference) ──
+    post_system_message(
+        deal_room_id=transaction.deal_room_id,
+        code="RESERVATION_PAID",
+        actor=transaction.buyer,
+        data={"expires_at": expires_at.isoformat(), "key": payment_reference},
+    )
 
     # ── Inspection ina muda SAWA na reservation ──
     # (inaisha wakati mmoja na reservation; extend inaiongeza pia)

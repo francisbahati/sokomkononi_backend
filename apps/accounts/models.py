@@ -142,17 +142,19 @@ class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
 
     @property
     def can_buy(self):
+        # email_verified (si is_verified) — is_verified ni beji ya admin.
         return (
             self.is_active
-            and self.is_verified
+            and self.email_verified
             and not self.is_deleted
         )
 
     @property
     def can_sell(self):
+        # email_verified (si is_verified) — is_verified ni beji ya admin.
         return (
             self.is_active
-            and self.is_verified
+            and self.email_verified
             and not self.is_deleted
         )
 

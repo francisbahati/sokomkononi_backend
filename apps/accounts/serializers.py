@@ -114,10 +114,12 @@ class LoginSerializer(serializers.Serializer):
         if not user.is_active:
             raise serializers.ValidationError("Akaunti yako haipo hai.")
 
-        if not user.is_verified:
-            raise serializers.ValidationError(
-                "Akaunti yako haijathibitishwa."
-            )
+        # HAKUNA kizuizi cha is_verified wala email_verified hapa:
+        # - is_verified ni beji ya admin (haizuii kuingia)
+        # - email_verified haiwezi kuwa hitaji kwa sababu admin
+        #   hutumia email isiyo halisi
+        # Ruhusa ya kuweka tangazo inadhibitiwa na IsVerifiedUser
+        # kwenye views za listings (inatumia email_verified).
 
         attrs["user"] = user
         return attrs
@@ -212,6 +214,8 @@ class ProfileSerializer(serializers.ModelSerializer):
             return prefs.location or prefs.region or ""
         except Exception:
             return ""
+
+
 # ============================================================
 # ADMIN USER (list) — role inahesabiwa
 # ============================================================
@@ -283,6 +287,8 @@ class AdminUserSerializer(serializers.ModelSerializer):
         if request:
             return request.build_absolute_uri(url)
         return url
+
+
 # ============================================================
 # FORGOT PASSWORD — step 1
 # ============================================================

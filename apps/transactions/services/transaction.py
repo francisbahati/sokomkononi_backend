@@ -18,6 +18,7 @@ from ..models import InspectionPeriod, Reservation, Transaction
 from .notifications import (
     notify_buyer_decision,
     notify_payment_confirmed,
+    notify_payment_dispute_opened,
     notify_payment_proof_uploaded,
     notify_transaction_cancelled,
     notify_transaction_completed,
@@ -380,10 +381,12 @@ def reject_final_payment_proof(*, transaction, seller, reason=""):
     ])
 
     # Sync DealRoom → AWAITING_FINAL_PAYMENT (buyer apakie tena)
-    _sync_deal_room_status(
-        transaction=transaction,
-        new_status=DealRoom.Status.AWAITING_FINAL_PAYMENT,
-    )
+    # Kama majaribio yameisha, usimrudishe buyer kwenye hatua ya kupakia.
+    if not exhausted:
+        _sync_deal_room_status(
+            transaction=transaction,
+            new_status=DealRoom.Status.AWAITING_FINAL_PAYMENT,
+        )
     post_system_message(
         deal_room_id=transaction.deal_room_id, code="PROOF_REJECTED",
         actor=seller,
@@ -394,6 +397,9 @@ def reject_final_payment_proof(*, transaction, seller, reason=""):
             deal_room_id=transaction.deal_room_id, code="APPEAL_OPENED",
             actor=seller,
             data={"reason": rules.DISPUTE_PROOF_REJECTED_MAX},
+        )
+        db_transaction.on_commit(
+            lambda: notify_payment_dispute_opened(transaction=transaction)
         )
 
     # Notification kwa mnunuzi
@@ -412,7 +418,10 @@ def reject_final_payment_proof(*, transaction, seller, reason=""):
                     "Muuzaji hajapokea malipo yako ya Transaction #{id}"
                 ).format(id=transaction.pk)
                 + (f". " + _("Sababu: {reason}").format(reason=reason) if reason else ".")
-                + " " + _("Tafadhali pakia uthibitisho mpya."),
+                + (
+                    " " + _("Tafadhali pakia uthibitisho mpya.")
+                    if not exhausted else ""
+                ),
                 priority=Notification.Priority.HIGH,
                 related_object_type="Transaction",
                 related_object_id=transaction.pk,
@@ -520,7 +529,7 @@ def _fire_completion_side_effects(*, transaction, listing):
 # CANCEL TRANSACTION
 # ============================================================
 @db_transaction.atomic
-def cancel_transaction(*, transaction, user, reason):
+def cancel_transaction(*, transaction, user, reason, silent=False):
     transaction = (
         Transaction.objects
         .select_for_update(of=("self",))
@@ -584,7 +593,9 @@ def cancel_transaction(*, transaction, user, reason):
         inspection.status = InspectionPeriod.Status.CANCELLED
         inspection.save(update_fields=["status", "updated_at"])
 
-    if user.id in [transaction.buyer_id, transaction.seller_id]:
+    if not silent and user.id in [
+        transaction.buyer_id, transaction.seller_id,
+    ]:
         db_transaction.on_commit(
             lambda: notify_transaction_cancelled(
                 transaction=transaction,
@@ -708,6 +719,11 @@ def open_payment_appeal(*, transaction, user, reason=""):
             "note": reason[:500],
             "by": "buyer" if user.id == transaction.buyer_id else "seller",
         },
+    )
+    db_transaction.on_commit(
+        lambda: notify_payment_dispute_opened(
+            transaction=transaction, opened_by=user,
+        )
     )
     logger.info("Payment appeal opened tx=%s by=%s", transaction.pk, user.pk)
     return transaction

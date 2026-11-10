@@ -6,6 +6,7 @@ from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
 
 from ..models import Transaction
+from . import payment_rules as rules
 from ._lang import user_lang
 
 
@@ -380,6 +381,104 @@ def notify_inspection_completed(*, inspection):
                 ),
                 title=_("Inspection Imekamilika"),
                 message=message,
+                priority=Notification.Priority.HIGH,
+                **_deal_kwargs(transaction, recipient),
+            )
+
+
+# ============================================================================
+# PAYMENT DISPUTE / WINDOW EXPIRED
+# ============================================================================
+
+def _dispute_reason_label(reason):
+    labels = {
+        rules.DISPUTE_PAYMENT_APPEAL: _("rufaa ya malipo"),
+        rules.DISPUTE_PROOF_REJECTED_MAX: _(
+            "uthibitisho umekataliwa mara {n}"
+        ).format(n=rules.MAX_PROOF_ATTEMPTS),
+        rules.DISPUTE_SELLER_NO_RESPONSE: _(
+            "muuzaji hakujibu kwa wakati"
+        ),
+    }
+    return labels.get(reason, reason or "")
+
+
+def notify_payment_dispute_opened(*, transaction, opened_by=None):
+    """
+    Mgogoro wa malipo umefunguliwa (rufaa, majaribio yameisha, au muuzaji
+    kimya). Anayearifiwa: upande wa pili (au wote wawili kama ni mfumo)
+    pamoja na admins.
+    """
+    if opened_by is not None and opened_by.id == transaction.buyer_id:
+        recipients = [transaction.seller]
+    elif opened_by is not None and opened_by.id == transaction.seller_id:
+        recipients = [transaction.buyer]
+    else:
+        recipients = [transaction.buyer, transaction.seller]
+
+    for recipient in recipients:
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=Notification.NotificationType.GENERAL,
+                title=_("Mgogoro wa Malipo Umefunguliwa"),
+                message=_(
+                    "Transaction #{id} sasa iko kwa msimamizi kwa "
+                    "uamuzi ({reason}). Utajulishwa uamuzi ukitolewa."
+                ).format(
+                    id=transaction.id,
+                    reason=_dispute_reason_label(transaction.dispute_reason),
+                ),
+                priority=Notification.Priority.URGENT,
+                **_deal_kwargs(transaction, recipient),
+            )
+
+    try:
+        from apps.notifications.services.notification import (
+            create_notification_for_admins,
+        )
+        create_notification_for_admins(
+            notification_type=Notification.NotificationType.GENERAL,
+            title=_("Mgogoro wa malipo unasubiri uamuzi"),
+            message=_(
+                "Transaction #{id} ('{title}') iko DISPUTED: {reason}. "
+                "Tafadhali kagua uthibitisho na utatue."
+            ).format(
+                id=transaction.id,
+                title=transaction.listing.title,
+                reason=_dispute_reason_label(transaction.dispute_reason),
+            ),
+            priority=Notification.Priority.URGENT,
+            related_object_type="Transaction",
+            related_object_id=transaction.id,
+            action_url="",
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("admin dispute notify failed")
+
+
+def notify_payment_window_expired(*, transaction):
+    """Muda wa kulipa umeisha na deal imeghairiwa kiotomatiki."""
+    for recipient in (transaction.buyer, transaction.seller):
+        lang = user_lang(recipient)
+        with override(lang):
+            create_notification(
+                recipient=recipient,
+                notification_type=(
+                    Notification.NotificationType.TRANSACTION_CANCELLED
+                ),
+                title=_("Muda wa Kulipa Umeisha"),
+                message=_(
+                    "Transaction #{id} ya '{title}' imeghairiwa kwa sababu "
+                    "malipo ya mwisho hayakufanyika ndani ya saa {hours}. "
+                    "Tangazo limerudishwa sokoni."
+                ).format(
+                    id=transaction.id,
+                    title=transaction.listing.title,
+                    hours=rules.FINAL_PAYMENT_WINDOW_HOURS,
+                ),
                 priority=Notification.Priority.HIGH,
                 **_deal_kwargs(transaction, recipient),
             )

@@ -16,6 +16,10 @@ from apps.deals.services.system_messages import post_system_message
 
 from ..models import Transaction
 from . import payment_rules as rules
+from .notifications import (
+    notify_payment_dispute_opened,
+    notify_payment_window_expired,
+)
 from .transaction import cancel_transaction
 
 logger = logging.getLogger(__name__)
@@ -25,7 +29,7 @@ def _cancel_unpaid(tx_id, now):
     with db_transaction.atomic():
         tx = (
             Transaction.objects.select_for_update(of=("self",))
-            .select_related("buyer")
+            .select_related("buyer", "seller", "listing")
             .get(pk=tx_id)
         )
         # Rudia ukaguzi ndani ya lock (huenda hali imebadilika)
@@ -43,13 +47,17 @@ def _cancel_unpaid(tx_id, now):
             data={"window_hours": rules.FINAL_PAYMENT_WINDOW_HOURS,
                   "key": f"expired-{tx.pk}"},
         )
-        cancel_transaction(
+        cancelled = cancel_transaction(
             transaction=tx,
             user=tx.buyer,
             reason=(
                 "Muda wa kulipa umeisha "
                 f"(saa {rules.FINAL_PAYMENT_WINDOW_HOURS})."
             ),
+            silent=True,  # tunatuma ujumbe wetu wa "muda umeisha" badala yake
+        )
+        db_transaction.on_commit(
+            lambda: notify_payment_window_expired(transaction=cancelled)
         )
         return True
 
@@ -58,7 +66,7 @@ def _escalate_silent_seller(tx_id, now):
     with db_transaction.atomic():
         tx = (
             Transaction.objects.select_for_update(of=("self",))
-            .select_related("seller")
+            .select_related("buyer", "seller", "listing")
             .get(pk=tx_id)
         )
         if (
@@ -80,6 +88,9 @@ def _escalate_silent_seller(tx_id, now):
             actor=tx.seller,
             data={"reason": rules.DISPUTE_SELLER_NO_RESPONSE,
                   "key": f"silent-{tx.pk}-{tx.proof_attempts}"},
+        )
+        db_transaction.on_commit(
+            lambda: notify_payment_dispute_opened(transaction=tx)
         )
         return True
 

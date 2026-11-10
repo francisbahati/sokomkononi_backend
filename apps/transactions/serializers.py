@@ -77,8 +77,11 @@ class TransactionDetailSerializer(serializers.ModelSerializer):
             "final_payment_proof", "final_payment_reference",
             "final_payment_uploaded_at", "seller_confirmed_payment",
             "seller_confirmed_at", "completed_at", "cancelled_at",
-            "cancellation_reason", "dispute_resolved_by",
-            "dispute_resolution_note", "reservation", "inspection_period",
+            "cancellation_reason", "final_payment_due_at",
+            "seller_response_due_at", "proof_attempts",
+            "dispute_reason", "dispute_note", "dispute_opened_by",
+            "dispute_resolved_by", "dispute_resolution_note",
+            "reservation", "inspection_period",
             "created_at", "updated_at",
         ]
         read_only_fields = fields

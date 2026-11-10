@@ -318,6 +318,7 @@ CORS_ALLOW_HEADERS = [
     "idempotency-key",
     "x-idempotency-key",
     "x-request-id",
+    "x-client",  
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
 CORS_ALLOW_ALL_ORIGINS = False

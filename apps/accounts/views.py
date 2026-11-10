@@ -50,7 +50,7 @@ from .tokens import (
     decode_password_reset_token,
 )
 
-from .captcha import verify_captcha
+from .captcha import is_mobile_client, verify_captcha
 from .login_guard import (
     WINDOW as LOGIN_LOCK_WINDOW,
     clear_failures,
@@ -82,6 +82,7 @@ class RegisterView(APIView):
         verify_captcha(
             (request.data or {}).get("captcha_token"),
             BaseThrottle().get_ident(request),
+            is_mobile_app=is_mobile_client(request),
         )
 
         serializer = RegisterSerializer(data=request.data)
@@ -178,20 +179,26 @@ class LoginView(APIView):
         data = request.data if hasattr(request.data, "get") else {}
         identifier = str(data.get("identifier", "")).strip()
         ip = BaseThrottle().get_ident(request)
+        mobile = is_mobile_client(request)
 
         logger.info(
-            "[login] attempt ip=%s has_cookie=%s has_auth_header=%s",
+            "[login] attempt ip=%s has_cookie=%s has_auth_header=%s mobile=%s",
             ip,
             "access_token" in request.COOKIES,
             "HTTP_AUTHORIZATION" in request.META,
+            mobile,
         )
 
         # 1) Akaunti/IP imezuiwa kwa kushindwa mara nyingi
         if is_locked(identifier, ip):
             raise Throttled(wait=LOGIN_LOCK_WINDOW)
 
-        # 2) Captcha (inapita tu kama TURNSTILE_SECRET_KEY haijawekwa)
-        verify_captcha(data.get("captcha_token"), ip)
+        # 2) Captcha — App inapita, web inahitaji token
+        verify_captcha(
+            data.get("captcha_token"),
+            ip,
+            is_mobile_app=mobile,
+        )
 
         # 3) Uthibitisho wa password; hesabu kushindwa
         serializer = LoginSerializer(data=request.data)
@@ -812,6 +819,7 @@ class MeActivitiesView(APIView):
         serializer = UserActivitySerializer(activities, many=True)
         return Response(serializer.data)
 
+
 # ============================================================
 # PUBLIC STATS — GET
 # ============================================================
@@ -826,15 +834,9 @@ class PublicStatsView(APIView):
         users_count = User.all_objects.filter(is_active=True).count()
 
         # 2. Mali (Properties) — Hesabu zote ambazo hazijafutwa
-        # Tumeondoa kigezo cha status kwa muda ili kuhakikisha tunaona namba
         properties_count = Listing.objects.filter(
             is_deleted=False
         ).count()
-
-        # Kama unataka kuona ni status gani zinatumika, unaweza kuongeza hii kwa muda:
-        # from django.db.models import Count
-        # status_counts = Listing.objects.values('status').annotate(count=Count('id'))
-        # print("STATUS COUNTS:", list(status_counts))
 
         # 3. Rating
         try:

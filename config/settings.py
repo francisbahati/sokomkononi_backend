@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     "apps.audit", "apps.feedback", "apps.announcements", "apps.content", "apps.rbac",
     "apps.system_settings", "apps.bundles", "apps.credits", "apps.banners",
     "apps.leading_fees", "apps.advertisement_fees", "apps.reservation_rates",
+    "apps.newsletter",
 ]
 
 AUTHENTICATION_BACKENDS = [
@@ -384,6 +385,7 @@ REST_FRAMEWORK = {
         "contact": "5/hour",
         "refresh": "60/min",
         "verification_request": "5/hour",
+        "newsletter": "5/hour",
     },
 }
 
@@ -511,6 +513,8 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", False)
 CELERY_TASK_EAGER_PROPAGATES = True
+# Task ya price-drop iko kwenye price_drop.py (si tasks.py), kwa hiyo iingizwe wazi.
+CELERY_IMPORTS = ("apps.listings.price_drop", "apps.searches.alerts")
 
 CELERY_BEAT_SCHEDULE = {
     "purge-soft-deleted": {"task": "core.purge_soft_deleted", "schedule": crontab(hour=3, minute=0)},
@@ -546,6 +550,14 @@ CELERY_BEAT_SCHEDULE = {
     "notify-waiting-list-expiring": {
         "task": "transactions.notify_waiting_list_expiring",
         "schedule": crontab(minute="*/2"),
+    },
+    "notify-price-drops": {
+        "task": "listings.notify_price_drops",
+        "schedule": crontab(minute="*/10"),
+    },
+    "send-search-alerts": {
+        "task": "searches.send_search_alerts",
+        "schedule": crontab(minute="*/5"),
     },
 }
 

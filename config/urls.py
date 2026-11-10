@@ -43,6 +43,7 @@ urlpatterns = [
     path("api/auth/social/", SocialLoginView.as_view(), name="social-login"),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/contact/", include("apps.contact.urls")),
+    path("api/newsletter/", include("apps.newsletter.urls")),
     path("api/categories/", include("apps.categories.urls")),
     path("api/listings/", include("apps.listings.urls")),
     path(

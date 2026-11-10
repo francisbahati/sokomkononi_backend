@@ -41,6 +41,15 @@ class SavedListing(models.Model):
         blank=True,
         verbose_name="Jina wakati wa kuhifadhi",
     )
+    # Bei ya mwisho tuliyomjulisha mtumiaji kuhusu punguzo (price-drop alert).
+    # snapshot_price inabaki kuwa bei wakati wa kuhifadhi.
+    price_alerted = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Bei ya mwisho iliyoarifiwa",
+    )
 
     saved_at = models.DateTimeField(
         auto_now_add=True,

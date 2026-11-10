@@ -95,6 +95,33 @@ class Transaction(models.Model):
     cancellation_reason = models.TextField(
         blank=True, verbose_name="Sababu ya kughairi",
     )
+    # ── Muda wa malipo ya mwisho (nje ya mfumo) ──
+    final_payment_due_at = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name="Mwisho wa kulipa malipo ya mwisho",
+    )
+    seller_response_due_at = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name="Mwisho wa muuzaji kujibu uthibitisho",
+    )
+    proof_attempts = models.PositiveSmallIntegerField(
+        default=0, verbose_name="Idadi ya majaribio ya kupakia uthibitisho",
+    )
+    dispute_reason = models.CharField(
+        max_length=40, blank=True, default="",
+        verbose_name="Aina ya mgogoro/rufaa",
+    )
+    dispute_note = models.TextField(
+        blank=True, default="",
+        verbose_name="Maelezo ya mtumiaji aliyefungua rufaa",
+    )
+    dispute_opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="opened_payment_disputes",
+        verbose_name="Rufaa imefunguliwa na",
+    )
     dispute_resolved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -132,6 +159,14 @@ class Transaction(models.Model):
             models.Index(
                 fields=["status", "created_at"],
                 name="transaction_status_created_idx",
+            ),
+            models.Index(
+                fields=["status", "final_payment_due_at"],
+                name="transaction_final_due_idx",
+            ),
+            models.Index(
+                fields=["status", "seller_response_due_at"],
+                name="transaction_seller_due_idx",
             ),
         ]
 

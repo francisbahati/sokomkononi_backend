@@ -6,6 +6,8 @@ from rest_framework.exceptions import ValidationError
 
 from apps.deals.models import DealRoom
 from apps.deals.services.system_messages import post_system_message
+
+from . import payment_rules as rules
 from django.utils.translation import gettext as _, override
 
 from ._lang import user_lang
@@ -158,6 +160,7 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
 
     if decision == Transaction.BuyerDecision.READY_FOR_FINAL_PAYMENT:
         transaction.status = Transaction.Status.READY_FOR_FINAL_PAYMENT
+        transaction.final_payment_due_at = rules.final_payment_deadline(now)
         inspection = getattr(transaction, "inspection_period", None)
         if inspection and inspection.status == InspectionPeriod.Status.ACTIVE:
             inspection.status = InspectionPeriod.Status.COMPLETED
@@ -186,13 +189,19 @@ def submit_buyer_decision(*, transaction, buyer, decision, note=""):
     transaction.save(update_fields=[
         "buyer_decision", "buyer_decision_note", "buyer_decision_at",
         "status", "cancelled_at", "cancellation_reason", "updated_at",
+        "final_payment_due_at",
     ])
 
     # ── Ujumbe wa mfumo kwenye chat ──
     if decision == Transaction.BuyerDecision.READY_FOR_FINAL_PAYMENT:
         post_system_message(
             deal_room_id=transaction.deal_room_id, code="INSPECTION_PASSED",
-            actor=buyer, data={"amount": str(transaction.agreed_price)},
+            actor=buyer,
+            data={
+                "amount": str(transaction.agreed_price),
+                "due_at": transaction.final_payment_due_at.isoformat(),
+                "window_hours": rules.FINAL_PAYMENT_WINDOW_HOURS,
+            },
         )
     elif decision in {
         Transaction.BuyerDecision.NOT_AS_DESCRIBED,
@@ -265,12 +274,30 @@ def upload_final_payment_proof(
             "Tafadhali subiri muuzaji athibitishe au akatae."
         )
 
+    now = timezone.now()
+    if (transaction.proof_attempts or 0) >= rules.MAX_PROOF_ATTEMPTS:
+        raise ValidationError(
+            "Umefikia kikomo cha majaribio "
+            f"{rules.MAX_PROOF_ATTEMPTS} ya kupakia uthibitisho. "
+            "Tafadhali omba msaada kwa timu ya SokoMkononi."
+        )
+    if (
+        transaction.final_payment_due_at
+        and now > transaction.final_payment_due_at
+    ):
+        raise ValidationError(
+            "Muda wa kulipa umeisha. Deal hii itaghairiwa."
+        )
+
     transaction.final_payment_proof = proof
     transaction.final_payment_reference = (payment_reference or "").strip()
-    transaction.final_payment_uploaded_at = timezone.now()
+    transaction.final_payment_uploaded_at = now
+    transaction.proof_attempts = (transaction.proof_attempts or 0) + 1
+    transaction.seller_response_due_at = rules.seller_response_deadline(now)
     transaction.save(update_fields=[
         "final_payment_proof", "final_payment_reference",
-        "final_payment_uploaded_at", "updated_at",
+        "final_payment_uploaded_at", "proof_attempts",
+        "seller_response_due_at", "updated_at",
     ])
 
     # Sync DealRoom → PAYMENT_PROOF_SUBMITTED
@@ -282,6 +309,9 @@ def upload_final_payment_proof(
         deal_room_id=transaction.deal_room_id, code="PROOF_SUBMITTED", actor=buyer,
         data={
             "reference": transaction.final_payment_reference,
+            "attempt": transaction.proof_attempts,
+            "attempts_max": rules.MAX_PROOF_ATTEMPTS,
+            "respond_by": transaction.seller_response_due_at.isoformat(),
             "key": f"proof-{transaction.pk}-{int(transaction.final_payment_uploaded_at.timestamp())}",
         },
     )
@@ -328,9 +358,25 @@ def reject_final_payment_proof(*, transaction, seller, reason=""):
     transaction.final_payment_proof = None
     transaction.final_payment_reference = ""
     transaction.final_payment_uploaded_at = None
+    transaction.seller_response_due_at = None
+    attempts_left = max(
+        0, rules.MAX_PROOF_ATTEMPTS - (transaction.proof_attempts or 0)
+    )
+    exhausted = attempts_left == 0
+    if exhausted:
+        # Majaribio yote yametumika: rufaa kwa admin (si kitanzi bila mwisho)
+        transaction.status = Transaction.Status.DISPUTED
+        transaction.dispute_reason = rules.DISPUTE_PROOF_REJECTED_MAX
+    else:
+        # Mnunuzi apewe dirisha jipya la kulipa/kupakia tena
+        transaction.final_payment_due_at = rules.final_payment_deadline(
+            timezone.now()
+        )
     transaction.save(update_fields=[
+        "final_payment_due_at",
         "final_payment_proof", "final_payment_reference",
-        "final_payment_uploaded_at", "updated_at",
+        "final_payment_uploaded_at", "seller_response_due_at",
+        "status", "dispute_reason", "updated_at",
     ])
 
     # Sync DealRoom → AWAITING_FINAL_PAYMENT (buyer apakie tena)
@@ -340,8 +386,15 @@ def reject_final_payment_proof(*, transaction, seller, reason=""):
     )
     post_system_message(
         deal_room_id=transaction.deal_room_id, code="PROOF_REJECTED",
-        actor=seller, data={"reason": reason},
+        actor=seller,
+        data={"reason": reason, "attempts_left": attempts_left},
     )
+    if exhausted:
+        post_system_message(
+            deal_room_id=transaction.deal_room_id, code="APPEAL_OPENED",
+            actor=seller,
+            data={"reason": rules.DISPUTE_PROOF_REJECTED_MAX},
+        )
 
     # Notification kwa mnunuzi
         # Notification kwa mnunuzi
@@ -413,9 +466,10 @@ def seller_confirm_final_payment(*, transaction, seller):
     transaction.seller_confirmed_at = now
     transaction.status = Transaction.Status.COMPLETED
     transaction.completed_at = now
+    transaction.seller_response_due_at = None
     transaction.save(update_fields=[
         "seller_confirmed_payment", "seller_confirmed_at",
-        "status", "completed_at", "updated_at",
+        "status", "completed_at", "seller_response_due_at", "updated_at",
     ])
 
     listing = Listing.objects.select_for_update().get(
@@ -605,3 +659,55 @@ def release_reserved_listing(*, listing_id, admin_user, reason=""):
     listing.save(update_fields=["status", "updated_at"])
     db_transaction.on_commit(lambda: notify_waiting_buyers(listing=listing))
     return listing
+
+
+# ============================================================
+# APPEAL (rufaa) — mnunuzi au muuzaji anaomba admin aingilie kati
+# ============================================================
+@db_transaction.atomic
+def open_payment_appeal(*, transaction, user, reason=""):
+    """
+    Mgogoro wa malipo ya nje ya mfumo. Inaruhusiwa baada ya mnunuzi
+    kudai amelipa (angalau uthibitisho mmoja umepakiwa).
+    Transaction → DISPUTED; admin anaamua kupitia resolve-dispute.
+    """
+    transaction = (
+        Transaction.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "buyer", "seller")
+        .get(pk=transaction.pk)
+    )
+
+    if user.id not in (transaction.buyer_id, transaction.seller_id):
+        raise ValidationError("Rufaa inaweza kufunguliwa na mnunuzi au muuzaji pekee.")
+    if transaction.status != Transaction.Status.READY_FOR_FINAL_PAYMENT:
+        raise ValidationError("Rufaa inaruhusiwa kwenye hatua ya malipo ya mwisho pekee.")
+    if not (transaction.proof_attempts or 0):
+        raise ValidationError(
+            "Rufaa inaweza kufunguliwa baada ya uthibitisho wa malipo kupakiwa."
+        )
+
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError("Tafadhali eleza tatizo lako.")
+
+    transaction.status = Transaction.Status.DISPUTED
+    transaction.dispute_reason = rules.DISPUTE_PAYMENT_APPEAL
+    transaction.dispute_opened_by = user
+    transaction.dispute_note = reason[:500]
+    transaction.seller_response_due_at = None
+    transaction.save(update_fields=[
+        "status", "dispute_reason", "dispute_opened_by", "dispute_note",
+        "seller_response_due_at", "updated_at",
+    ])
+    post_system_message(
+        deal_room_id=transaction.deal_room_id, code="APPEAL_OPENED",
+        actor=user,
+        data={
+            "reason": rules.DISPUTE_PAYMENT_APPEAL,
+            "note": reason[:500],
+            "by": "buyer" if user.id == transaction.buyer_id else "seller",
+        },
+    )
+    logger.info("Payment appeal opened tx=%s by=%s", transaction.pk, user.pk)
+    return transaction

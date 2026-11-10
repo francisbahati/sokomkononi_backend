@@ -17,6 +17,9 @@ FALLBACK_TEXT = {
     "PROOF_REJECTED": "Muuzaji bado hajapokea malipo. / Seller has not received payment.",
     "COMPLETED": "Muamala umekamilika. / Transaction completed.",
     "DISPUTED": "Mgogoro umeripotiwa. / A dispute has been reported.",
+    "DISPUTE_RESOLVED": "Admin ametatua mgogoro. / The admin resolved the dispute.",
+    "APPEAL_OPENED": "Rufaa imefunguliwa. Timu ya SokoMkononi itaingilia kati. / An appeal was opened. The SokoMkononi team will step in.",
+    "PAYMENT_WINDOW_EXPIRED": "Muda wa kulipa umeisha, deal imeghairiwa. / Payment window expired, deal cancelled.",
     "INSPECTION_CANCELLED": "Mnunuzi ameghairi baada ya ukaguzi. / Buyer cancelled after inspection.",
 }
 

@@ -55,6 +55,7 @@ from .services.reservation import (
 from .services.transaction import (
     cancel_transaction,
     create_transaction_from_deal_room,
+    open_payment_appeal,
     reject_final_payment_proof,
     seller_confirm_final_payment,
     submit_buyer_decision,
@@ -426,6 +427,31 @@ class TransactionViewSet(viewsets.GenericViewSet):
         return Response(
             TransactionDetailSerializer(
                 updated_transaction, context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="appeal")
+    def appeal(self, request, pk=None):
+        """
+        Mnunuzi au muuzaji anaomba admin aingilie kati kuhusu malipo.
+        Body (JSON): { "reason": "..." }
+        """
+        transaction = self._get_transaction(pk)
+        reason = (request.data.get("reason") or "").strip()
+        updated = open_payment_appeal(
+            transaction=transaction, user=request.user, reason=reason,
+        )
+        _log(
+            request,
+            action="transaction.payment_appeal_opened",
+            target="Transaction",
+            target_id=updated.id,
+            params={"name": f"Transaction #{updated.id}", "reason": reason[:200]},
+        )
+        return Response(
+            TransactionDetailSerializer(
+                updated, context={"request": request},
             ).data,
             status=status.HTTP_200_OK,
         )

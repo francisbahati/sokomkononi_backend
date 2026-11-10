@@ -73,6 +73,17 @@ class AdminOfferSerializer(serializers.ModelSerializer):
         return float(obj.amount)
 
 
+def _attachment_url(msg, request=None):
+    """URL kamili ya picha iliyoambatanishwa kwenye ujumbe (au None)."""
+    if not getattr(msg, "attachment", None):
+        return None
+    try:
+        url = msg.attachment.url
+        return request.build_absolute_uri(url) if request else url
+    except Exception:
+        return None
+
+
 # ============================================================
 # MESSAGES (admin shape — inaonyesha kind + is_hidden)
 # ============================================================
@@ -86,17 +97,24 @@ class AdminDealMessageSerializer(serializers.ModelSerializer):
     sender_id = serializers.IntegerField(source="sender.id", read_only=True)
     sender_name = serializers.SerializerMethodField()
     kind = serializers.CharField(read_only=True)
+    attachment_url = serializers.SerializerMethodField()
+    system_code = serializers.CharField(read_only=True)
+    system_data = serializers.JSONField(read_only=True)
 
     class Meta:
         model = DealMessage
         fields = [
             "id", "sender_id", "sender_name", "text",
             "kind", "is_hidden", "created_at",
+            "attachment_url", "system_code", "system_data",
         ]
         read_only_fields = fields
 
     def get_sender_name(self, obj):
         return getattr(obj.sender, "name", "")
+
+    def get_attachment_url(self, obj):
+        return _attachment_url(obj, self.context.get("request"))
 
 
 # ============================================================
@@ -138,6 +156,7 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     reservationMethod = serializers.SerializerMethodField()
     reservationExpiresAt = serializers.SerializerMethodField()
     paymentProof = serializers.SerializerMethodField()
+    payment_state = serializers.SerializerMethodField()
 
     # ── MPYA: admin moderation fields ──
     admin_locked = serializers.BooleanField(read_only=True)
@@ -173,7 +192,7 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
             "currentOffer", "messages",
             "reservationFee", "reservationHours",
             "reservationMethod", "reservationExpiresAt",
-            "paymentProof",
+            "paymentProof", "payment_state",
             # ── MPYA: admin moderation ──
             "admin_locked", "locked_reason", "locked_at",
             "locked_by", "locked_by_name", "cancelled_by_admin",
@@ -245,13 +264,19 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
         out = []
         for m in qs:
             try:
-                sender = "admin" if m.kind == DealMessage.Kind.ADMIN else (
-                    "buyer" if m.sender_id == obj.buyer_id else
-                    "seller" if m.sender_id == obj.seller_id else
-                    "unknown"
-                )
+                if m.kind == DealMessage.Kind.ADMIN:
+                    sender = "admin"
+                elif m.kind == DealMessage.Kind.SYSTEM:
+                    sender = "system"
+                else:
+                    sender = (
+                        "buyer" if m.sender_id == obj.buyer_id else
+                        "seller" if m.sender_id == obj.seller_id else
+                        "unknown"
+                    )
             except Exception:
                 sender = "unknown"
+            image_url = _attachment_url(m, self.context.get("request"))
             out.append({
                 "id": m.id,
                 "sender": sender,
@@ -261,6 +286,10 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
                 "kind": m.kind,
                 "isHidden": m.is_hidden,
                 "at": m.created_at,
+                "imageUrl": image_url,
+                "attachment_url": image_url,
+                "systemCode": m.system_code or None,
+                "systemData": m.system_data or {},
             })
         return out
 
@@ -282,6 +311,12 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     def get_reservationExpiresAt(self, obj):
         r = self._reservation(obj)
         return getattr(r, "expires_at", None) if r else None
+
+    def get_payment_state(self, obj):
+        from apps.transactions.services.payment_rules import (
+            compute_payment_state,
+        )
+        return compute_payment_state(self._txn(obj), obj)
 
     def get_paymentProof(self, obj):
         txn = self._txn(obj)

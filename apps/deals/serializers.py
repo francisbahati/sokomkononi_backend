@@ -491,6 +491,7 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     latest_offer = serializers.SerializerMethodField()
     deal_room_id = serializers.IntegerField(source="id", read_only=True)
     transaction_id = serializers.SerializerMethodField()
+    payment_state = serializers.SerializerMethodField()
     payment_proof = serializers.SerializerMethodField()
     reservation_fee = serializers.SerializerMethodField()
     reservation_hours = serializers.SerializerMethodField()
@@ -523,7 +524,7 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
             "status", "agreed_price", "agreed_at",
             "reopened_at", "reopened_count",
             "offers", "messages", "offer_count", "latest_offer",
-            "transaction_id", "payment_proof",
+            "transaction_id", "payment_proof", "payment_state",
             "reservation_fee", "reservation_hours",
             "reservation_method", "reservation_expires_at",
             "can_see_contact",
@@ -562,6 +563,12 @@ class DealRoomDetailSerializer(serializers.ModelSerializer):
     def get_transaction_id(self, obj):
         txn = self._txn(obj)
         return txn.id if txn else None
+
+    def get_payment_state(self, obj):
+        from apps.transactions.services.payment_rules import (
+            compute_payment_state,
+        )
+        return compute_payment_state(self._txn(obj), obj)
 
     def get_payment_proof(self, obj):
         txn = self._txn(obj)

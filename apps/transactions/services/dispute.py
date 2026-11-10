@@ -5,6 +5,9 @@ A transaction can enter DISPUTED status from:
 
     - submit_buyer_decision (NOT_AS_DESCRIBED / REQUEST_NEGOTIATION)
     - expire_inspection_period (buyer never submitted a decision)
+    - open_payment_appeal / reject_final_payment_proof (3rd rejection) /
+      expire_overdue_payments (seller silent) — off-platform payment
+      disputes (see Transaction.dispute_reason)
 
 Only an admin can move a transaction out of DISPUTED:
 
@@ -18,6 +21,7 @@ from django.utils.translation import gettext as _, override
 from rest_framework.exceptions import ValidationError
 
 from apps.deals.models import DealRoom
+from apps.deals.services.system_messages import post_system_message
 from apps.listings.models import Listing
 from apps.notifications.models import Notification
 from apps.notifications.services.notification import create_notification
@@ -95,7 +99,21 @@ def resolve_dispute(
             admin_user=admin_user,
         )
 
+    # Muda wa malipo haufai tena baada ya uamuzi wa admin
+    transaction.final_payment_due_at = None
+    transaction.seller_response_due_at = None
     transaction.save()
+
+    post_system_message(
+        deal_room_id=transaction.deal_room_id,
+        code="DISPUTE_RESOLVED",
+        actor=admin_user,
+        data={
+            "resolution": resolution,
+            "note": note,
+            "key": f"resolved-{transaction.pk}",
+        },
+    )
     return transaction
 
 

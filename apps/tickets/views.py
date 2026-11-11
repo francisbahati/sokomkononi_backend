@@ -195,7 +195,7 @@ class TicketViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # ✅ Deal Report fields (optional)
+        # Deal Report fields (optional)
         deal_room_id = data.get("deal_room")
         reported_user_id = data.get("reported_user")
         reported_user_name = data.get("reported_user_name", "")
@@ -213,7 +213,7 @@ class TicketViewSet(viewsets.GenericViewSet):
                 user_name=request.user.name,
                 user_email=request.user.email or "",
                 sla_deadline=timezone.now() + timedelta(hours=24),
-                # ✅ Deal Report context (null kama haipo)
+                # Deal Report context (null kama haipo)
                 deal_room_id=deal_room_id or None,
                 reported_user_id=reported_user_id or None,
                 reported_user_name=reported_user_name or "",
@@ -256,7 +256,6 @@ class TicketViewSet(viewsets.GenericViewSet):
             params={"code": ticket.code, "name": ticket.subject},
         )
 
-        # ✅ Arifa kwa admin
         _notify_admins_of_new_ticket(ticket)
 
         return Response(
@@ -335,7 +334,6 @@ class TicketViewSet(viewsets.GenericViewSet):
             },
         )
 
-        # ✅ Arifa kwa mtumiaji kama admin amejibu
         if request.user.is_staff:
             _notify_user_of_reply(ticket, text)
 
@@ -401,24 +399,38 @@ class TicketViewSet(viewsets.GenericViewSet):
         )
 
     # ============================================================
-    # SET STATUS (admin only)
+    # SET STATUS — ruhusu mtumiaji reopen tu (CLOSED → OPEN)
     # ============================================================
     @extend_schema(
         request=TicketStatusSerializer,
         responses={200: TicketSerializer},
     )
-    @action(
-        detail=True, methods=["post"], url_path="status",
-        permission_classes=[IsAdminUser],
-    )
+    @action(detail=True, methods=["post"], url_path="status")
     def set_status(self, request, pk=None):
-        ticket = get_object_or_404(Ticket, pk=pk)
+        ticket = get_object_or_404(self.get_queryset(), pk=pk)
         serializer = TicketStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data["status"]
         old_status = ticket.status
 
-        if new_status == Ticket.Status.CLOSED and old_status != Ticket.Status.RESOLVED:
+        # ✅ MPYA: Mtumiaji (si staff) anaweza tu CLOSED → OPEN (reopen)
+        if not request.user.is_staff:
+            is_reopen = (
+                ticket.status == Ticket.Status.CLOSED
+                and new_status == Ticket.Status.OPEN
+            )
+            if not is_reopen:
+                return Response(
+                    {"detail": "Huwezi kubadilisha status ya ticket hii."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # Admin: CLOSED inahitaji RESOLVED kwanza
+        if (
+            request.user.is_staff
+            and new_status == Ticket.Status.CLOSED
+            and old_status != Ticket.Status.RESOLVED
+        ):
             return Response(
                 {
                     "detail": (
@@ -432,6 +444,9 @@ class TicketViewSet(viewsets.GenericViewSet):
         ticket.status = new_status
         if new_status == Ticket.Status.RESOLVED and not ticket.resolved_at:
             ticket.resolved_at = timezone.now()
+        if new_status == Ticket.Status.OPEN:
+            # Reopen: futa resolved_at ili SLA ihesabiwe upya
+            ticket.resolved_at = None
         ticket.save(update_fields=["status", "resolved_at", "updated_at"])
 
         _log(

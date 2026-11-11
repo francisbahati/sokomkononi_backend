@@ -1,3 +1,4 @@
+# apps/listings/views_duplicate.py
 from datetime import timedelta
 
 from django.utils import timezone
@@ -19,6 +20,7 @@ def check_duplicate_listing(request):
     title = (request.data.get("title") or "").strip()
     location = (request.data.get("location") or "").strip()
     price = request.data.get("price")
+    category = request.data.get("category")  # ✅ MPYA
     try:
         window_days = int(request.data.get("window_days") or 30)
     except (TypeError, ValueError):
@@ -37,6 +39,14 @@ def check_duplicate_listing(request):
         )
         .exclude(status__in=["REJECTED", "ARCHIVED"])
     )
+
+    # ✅ Chuja kwa category (muhimu ili listings za categories tofauti
+    # zisionekane kama duplicate)
+    if category:
+        if isinstance(category, str) and not category.isdigit():
+            qs = qs.filter(category__slug=category)
+        else:
+            qs = qs.filter(category_id=category)
 
     if location:
         qs = qs.filter(location__iexact=location)
@@ -59,5 +69,6 @@ def check_duplicate_listing(request):
             "price": str(match.price),
             "location": match.location or "",
             "status": match.status,
+            "category": match.category.slug if match.category else None,
         },
     })

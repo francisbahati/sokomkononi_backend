@@ -1,7 +1,7 @@
 import os
 from io import BytesIO
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
 WATERMARK_TEXT = "SokoMkononi.co.tz"
@@ -62,6 +62,10 @@ def add_watermark(image_file, text=None, position="bottom-left"):
     original_mode = img.mode
     original_format = img.format or "JPEG"
 
+    # Picha za simu zina EXIF orientation; tukihifadhi bila EXIF zinazunguka vibaya.
+    # Zungusha pikseli sasa ili watermark iwe mahali sahihi na picha ibaki wima.
+    img = ImageOps.exif_transpose(img)
+
     # Convert to RGBA for compositing
     if img.mode not in ("RGBA", "RGB"):
         img = img.convert("RGBA")
@@ -70,10 +74,20 @@ def add_watermark(image_file, text=None, position="bottom-left"):
 
     width, height = img.size
 
+    # Ukubwa wa watermark unalingana na upana wa picha (msingi: 1200px).
+    # Bila hii, picha ya 4000px ingepata watermark ndogo isiyosomeka
+    # baada ya kupunguzwa kuwa thumb/card/detail.
+    scale = max(width / 1200.0, 0.5)
+    font_size = int(WATERMARK_FONT_SIZE * scale)
+    padding = int(WATERMARK_PADDING * scale)
+    pad_x = int(WATERMARK_BADGE_PAD_X * scale)
+    pad_y = int(WATERMARK_BADGE_PAD_Y * scale)
+    radius = int(WATERMARK_BADGE_RADIUS * scale)
+
     watermark_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(watermark_layer)
 
-    font = get_font()
+    font = get_font(font_size)
 
     # ── Pima ukubwa wa maandishi ───────────────────────────
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -81,25 +95,25 @@ def add_watermark(image_file, text=None, position="bottom-left"):
     text_height = bbox[3] - bbox[1]
 
     # ── Ukubwa wa badge ────────────────────────────────────
-    badge_width = text_width + (WATERMARK_BADGE_PAD_X * 2)
-    badge_height = text_height + (WATERMARK_BADGE_PAD_Y * 2)
+    badge_width = text_width + (pad_x * 2)
+    badge_height = text_height + (pad_y * 2)
 
     # ── Chagua mahali ──────────────────────────────────────
     if position == "bottom-right":
-        badge_x = width - badge_width - WATERMARK_PADDING
-        badge_y = height - badge_height - WATERMARK_PADDING
+        badge_x = width - badge_width - padding
+        badge_y = height - badge_height - padding
     elif position == "top-left":
-        badge_x = WATERMARK_PADDING
-        badge_y = WATERMARK_PADDING
+        badge_x = padding
+        badge_y = padding
     elif position == "top-right":
-        badge_x = width - badge_width - WATERMARK_PADDING
-        badge_y = WATERMARK_PADDING
+        badge_x = width - badge_width - padding
+        badge_y = padding
     elif position == "center":
         badge_x = (width - badge_width) // 2
         badge_y = (height - badge_height) // 2
     else:  # "bottom-left" (default)
-        badge_x = WATERMARK_PADDING
-        badge_y = height - badge_height - WATERMARK_PADDING
+        badge_x = padding
+        badge_y = height - badge_height - padding
 
     # ── Chora badge ────────────────────────────────────────
     _rounded_rectangle(
@@ -110,16 +124,16 @@ def add_watermark(image_file, text=None, position="bottom-left"):
             badge_x + badge_width,
             badge_y + badge_height,
         ),
-        radius=WATERMARK_BADGE_RADIUS,
+        radius=radius,
         fill=WATERMARK_BADGE_BG,
     )
 
     # ── Chora maandishi ────────────────────────────────────
-    text_x = badge_x + WATERMARK_BADGE_PAD_X
-    text_y = badge_y + WATERMARK_BADGE_PAD_Y
+    text_x = badge_x + pad_x
+    text_y = badge_y + pad_y
 
     # Shadow
-    shadow_offset = 1
+    shadow_offset = max(1, int(scale))
     draw.text(
         (text_x + shadow_offset, text_y + shadow_offset),
         text,

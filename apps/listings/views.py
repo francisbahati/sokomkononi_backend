@@ -75,6 +75,9 @@ from .services.listing_moderation import (
 )
 
 from .views_helpers import require_int_listing_id
+from django.core.files.base import ContentFile
+# ⚠️ Rekebisha path kulingana na mahali watermark.py ilipo
+from .services.watermark import add_watermark
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
@@ -1223,6 +1226,17 @@ class ListingImageViewSet(viewsets.ModelViewSet):
             return Response(
                 {"detail": "Ordering haiwezi kuwa chini ya sifuri."},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ✅ Watermark "SokoMkononi.co.tz" kabla ya kuhifadhi. thumb/card/detail/large
+        # zinatengenezwa kutoka `image`, kwa hiyo zote zinabeba watermark.
+        # Ikishindwa, picha asili inahifadhiwa (upload isizuiliwe).
+        try:
+            marked = add_watermark(image)
+            image = ContentFile(marked.getvalue(), name=image.name)
+        except Exception:
+            logger.exception(
+                "Watermark failed for listing %s; saving original", listing.id,
             )
 
         with transaction.atomic():

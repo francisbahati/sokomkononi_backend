@@ -3,12 +3,22 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+# ⚠️ Rekebisha njia ya import kulingana na mahali captcha.py ilipo kwenye project yako
+from apps.core.captcha import is_mobile_client, verify_captcha
+
 from .models import ContactMessage
 from .serializers import (
     ContactCreateSerializer,
     ContactMessageSerializer,
     ContactReplySerializer,
 )
+
+
+def _client_ip(request):
+    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
 
 
 class ContactViewSet(viewsets.GenericViewSet):
@@ -49,6 +59,16 @@ class ContactViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     def create(self, request):
+        # Turnstile: web inahitaji token (`captcha_token`); mobile app inaruhusiwa.
+        # Inapita kimya kama TURNSTILE_SECRET_KEY haijawekwa.
+        # `captcha_token` haiko kwenye ContactCreateSerializer kwa hiyo haifiki
+        # kwenye ContactMessage.objects.create(**validated_data).
+        verify_captcha(
+            request.data.get("captcha_token"),
+            _client_ip(request),
+            is_mobile_app=is_mobile_client(request),
+        )
+
         serializer = ContactCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         ContactMessage.objects.create(**serializer.validated_data)

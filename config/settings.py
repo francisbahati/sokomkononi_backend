@@ -526,6 +526,10 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-boosts": {"task": "boosting.expire_stale_boosts", "schedule": crontab(minute="*/15")},
     "expire-stale-banners": {"task": "banners.expire_stale_banners", "schedule": crontab(minute="*/15")},
     "expire-stale-credits": {"task": "credits.expire_stale_credits", "schedule": crontab(hour=2, minute=30)},
+    "notify-expiring-credits": {
+    "task": "credits.notify_expiring_credits",
+    "schedule": crontab(hour=9, minute=0),
+    },
     "cleanup-stale-services": {"task": "credits.cleanup_stale_services", "schedule": crontab(hour=2, minute=45)},
     "refresh-pending-payouts": {"task": "payments.refresh_pending_payouts", "schedule": crontab(minute="*/10")},
     "expire-stale-leading": {"task": "leading_fees.expire_stale_leading", "schedule": crontab(minute="*/15")},

@@ -3,8 +3,7 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-# ⚠️ Rekebisha njia ya import kulingana na mahali captcha.py ilipo kwenye project yako
-from apps.core.captcha import is_mobile_client, verify_captcha
+from apps.accounts.captcha import is_mobile_client, verify_captcha
 
 from .models import ContactMessage
 from .serializers import (

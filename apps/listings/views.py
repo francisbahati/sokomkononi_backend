@@ -76,8 +76,7 @@ from .services.listing_moderation import (
 
 from .views_helpers import require_int_listing_id
 from django.core.files.base import ContentFile
-# ⚠️ Rekebisha path kulingana na mahali watermark.py ilipo
-from .services.watermark import add_watermark
+from apps.core.watermark import add_watermark
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 

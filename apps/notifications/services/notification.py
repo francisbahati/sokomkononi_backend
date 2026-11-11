@@ -5,7 +5,11 @@ Notification service — create notifications for users and admins.
 Marekebisho:
   - create_notification_for_admins: imeongezwa `action_url` param
   - create_notification: imeongezwa `action_url` param (tayari ipo)
-  - send_notification_via_channels: stub (email/SMS/push)
+  - ✅ MPYA: create_notification sasa inaita `send_notification_via_channels`
+    (email/SMS/push) kupitia `transaction.on_commit()` ili kuzuia
+    kushindwa kwa channel kuathiri DB write.
+  - ✅ MPYA: _send_via_channel("push") sasa inatumia `send_push_to_user()`
+    badala ya stub (logger.info).
 """
 from rest_framework.exceptions import PermissionDenied
 from django.utils import timezone
@@ -78,7 +82,7 @@ def _should_send_via_channel(recipient, notification_type, channel):
     kwa notification_type fulani.
 
     Chaguo B: Function hii HAITUMIKI kwenye create_notification().
-    Inatumika TU kwenye send_notification_via_channels() baadaye.
+    Inatumika TU kwenye send_notification_via_channels().
     """
     try:
         prefs = recipient.notification_preferences
@@ -121,19 +125,20 @@ def create_notification(
     side=Notification.Side.BOTH,
 ):
     """
-    Create a notification (in-app, DB record).
+    Create a notification (in-app, DB record) + send via channels.
 
     Chaguo B: Hii inaunda DB record KILA WAKATI bila kuzingatia
     prefs za mtumiaji. Mtumiaji anaona kwenye bell icon.
 
-    Prefs za mtumiaji zinaathiri TU email/SMS/push — ambazo
-    zinatumwa kupitia `send_notification_via_channels()`.
+    ✅ MPYA: Baada ya DB record kuundwa, inaita
+    `send_notification_via_channels()` kupitia `transaction.on_commit()`
+    ili kuzuia kushindwa kwa channel (email/SMS/push) kuathiri DB write.
 
     Callers that run inside an atomic block should invoke this via
     transaction.on_commit() to avoid coupling the notification write
     to the business transaction.
     """
-    return Notification.objects.create(
+    notification = Notification.objects.create(
         recipient=recipient,
         notification_type=notification_type,
         title=title,
@@ -146,9 +151,30 @@ def create_notification(
         side=side,
     )
 
+    # ✅ MPYA: Tuma kupitia channels (email, SMS, push) kama prefs zinaruhusu.
+    # Tumia on_commit ili kuzuia kushindwa kwa channel kuathiri DB write.
+    try:
+        from django.db import transaction as _tx
+        _tx.on_commit(
+            lambda: send_notification_via_channels(
+                recipient=recipient,
+                notification_type=notification_type,
+                title=title,
+                message=message,
+                action_url=action_url,
+            )
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "[notify] send_notification_via_channels failed"
+        )
+
+    return notification
+
 
 # ============================================================
-# OPTIONAL — SEND VIA CHANNELS (email/SMS/push)
+# SEND VIA CHANNELS (email/SMS/push)
 # ============================================================
 def send_notification_via_channels(
     *,
@@ -162,8 +188,6 @@ def send_notification_via_channels(
     """
     Tuma notification kupitia channels mbalimbali, ukizingatia
     prefs za mtumiaji.
-
-    Kwa sasa hii ni **stub** — ina-log tu.
     """
     results = {}
 
@@ -177,6 +201,7 @@ def send_notification_via_channels(
             recipient=recipient,
             title=title,
             message=message,
+            notification_type=notification_type,
             **kwargs,
         )
         results[channel] = sent
@@ -184,11 +209,13 @@ def send_notification_via_channels(
     return results
 
 
-def _send_via_channel(*, channel, recipient, title, message, **kwargs):
+def _send_via_channel(*, channel, recipient, title, message, notification_type=None, **kwargs):
     """
     Tuma notification via channel fulani.
 
-    Chaguo B: Hii ni stub kwa sasa — ina-log tu.
+    - email: inatumia `apps.accounts.email_service._send`
+    - sms: stub (ina-log tu)
+    - push: ✅ inatumia `apps.push.send.send_push_to_user`
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -224,11 +251,20 @@ def _send_via_channel(*, channel, recipient, title, message, **kwargs):
         return True
 
     if channel == "push":
-        logger.info(
-            "[notif:push] Would send to user %s: %s — %s",
-            recipient.id, title, message,
-        )
-        return True
+        # ✅ MPYA: tumia send_push_to_user badala ya stub
+        try:
+            from apps.push.send import send_push_to_user
+            result = send_push_to_user(
+                user=recipient,
+                title=title,
+                body=message,
+                url=kwargs.get("action_url") or "/dashboard/notifications",
+                tag=f"smk-{str(notification_type or 'notif').lower()}-{recipient.id}",
+            )
+            return result.get("sent", 0) > 0
+        except Exception:
+            logger.exception("[notif:push] send failed")
+            return False
 
     return False
 

@@ -1,6 +1,17 @@
-"""2FA + Sessions + Data Export views."""
-import json
+"""2FA + Sessions + Data Export views.
 
+Mabadiliko:
+  - ✅ DataExportView sasa inarudisha { url, filename, expires_at, size_bytes }
+    badala ya HttpResponse moja kwa moja. Faili linahifadhiwa kwenye
+    `default_storage` (local au R2) na linafutwa baada ya siku 7 kupitia
+    Celery task `accounts.cleanup_old_data_exports`.
+"""
+import json
+import secrets
+
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.http import HttpResponse
 from django.utils import timezone
 
@@ -266,15 +277,32 @@ class RevokeOtherSessionsView(APIView):
         return Response({"revoked": len(jtis)})
 
 
+# ============================================================
+# DATA EXPORT — sasa inarudisha { url } kwa download halisi
+# ============================================================
 class DataExportView(APIView):
+    """
+    POST /api/auth/me/data-export/
+
+    Inatengeneza faili la JSON na kulihifadhi kwenye `default_storage`
+    (local au R2). Inarudisha URL ya kupakua + metadata.
+
+    Faili linafutwa baada ya `DATA_EXPORT_RETENTION_DAYS` (default 7)
+    kupitia Celery task `accounts.cleanup_old_data_exports`.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         from apps.listings.models import Listing
         from apps.deals.models import DealRoom
         from apps.transactions.models import Transaction
+        from apps.bundles.models import BundlePurchase
+        from apps.saved.models import SavedListing
+        from apps.searches.models import SavedSearch
 
         user = request.user
+
+        # ✅ Tengeneza payload ya data zote za mtumiaji
         payload = {
             "user": ProfileSerializer(user).data,
             "listings": list(Listing.objects.filter(seller=user).values(
@@ -286,22 +314,66 @@ class DataExportView(APIView):
             "deals_as_seller": list(DealRoom.objects.filter(seller=user).values(
                 "id", "listing_id", "status", "created_at",
             )),
-            "transactions": list(
+            "transactions_as_buyer": list(
                 Transaction.objects.filter(buyer=user).values(
-                    "id", "status", "agreed_price",
+                    "id", "status", "agreed_price", "created_at",
                 )
-            ) + list(
+            ),
+            "transactions_as_seller": list(
                 Transaction.objects.filter(seller=user).values(
-                    "id", "status", "agreed_price",
+                    "id", "status", "agreed_price", "created_at",
+                )
+            ),
+            "bundle_purchases": list(
+                BundlePurchase.objects.filter(user=user).values(
+                    "id", "amount", "status", "created_at",
+                )
+            ),
+            "saved_listings": list(
+                SavedListing.objects.filter(user=user).values(
+                    "listing_id", "saved_at",
+                )
+            ),
+            "saved_searches": list(
+                SavedSearch.objects.filter(user=user).values(
+                    "id", "name", "query", "category_slug",
+                    "region", "min_price", "max_price",
+                    "verified_only", "created_at",
                 )
             ),
             "exported_at": timezone.now().isoformat(),
         }
-        response = HttpResponse(
-            json.dumps(payload, default=str, indent=2),
-            content_type="application/json",
+
+        # ✅ Serialize JSON
+        blob = json.dumps(payload, default=str, indent=2).encode("utf-8")
+
+        # ✅ Jina la faili: data-exports/user_<id>/sokomkononi-data-<ts>-<rand>.json
+        timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+        random_suffix = secrets.token_hex(4)
+        filename = (
+            f"data-exports/user_{user.pk}/"
+            f"sokomkononi-data-{timestamp}-{random_suffix}.json"
         )
-        response["Content-Disposition"] = (
-            f'attachment; filename="sokomkononi-data-{user.pk}.json"'
-        )
-        return response
+
+        # ✅ Hifadhi kwenye storage
+        saved_path = default_storage.save(filename, ContentFile(blob))
+
+        # ✅ Tengeneza URL
+        try:
+            url = default_storage.url(saved_path)
+            # Kama ni URL ya jamaa (relative), ifanye absolute
+            if url and not url.startswith(("http://", "https://")):
+                url = request.build_absolute_uri(url)
+        except Exception:
+            url = f"{settings.MEDIA_URL}{saved_path}"
+
+        retention_days = getattr(settings, "DATA_EXPORT_RETENTION_DAYS", 7)
+        expires_at = timezone.now() + timezone.timedelta(days=retention_days)
+
+        return Response({
+            "url": url,
+            "filename": filename.split("/")[-1],
+            "expires_at": expires_at.isoformat(),
+            "size_bytes": len(blob),
+            "retention_days": retention_days,
+        })

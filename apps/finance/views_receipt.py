@@ -2,7 +2,7 @@
 """
 Receipt download — PDF ya muamala mmoja.
 
-GET /api/finance/transactions/<int:pk>/receipt/
+GET /api/finance/transactions/<int:pk>/receipt/?type=<type>
 
 Inatafuta muamala kwenye vyanzo vyote:
   - ListingFee
@@ -15,12 +15,16 @@ Inatafuta muamala kwenye vyanzo vyote:
 ✅ Inarudisha receipt ya COMPLETED/PAID pekee.
    Muamala ambao haujakamilika haupatikani (404).
 
+✅ MPYA: query param `?type=` inaruhusu kutafuta kwenye chanzo
+   kimoja pekee — inazuia collision kati ya ListingFee #5 na
+   Transaction #5 (zote zinaweza kuwepo).
+
 Ulinzi: user anaweza kuona receipt ya muamala wake pekee.
 """
 from io import BytesIO
 
 from django.http import HttpResponse
-from django.utils import timezone 
+from django.utils import timezone
 
 from rest_framework import permissions, status
 from rest_framework.response import Response
@@ -56,152 +60,185 @@ def _map_status(raw):
 
 
 # ============================================================
+# TYPE MAP — types zinazokubalika kutoka frontend
+# ============================================================
+# Kila `type` inaelekeza kwenye chanzo kimoja.
+# `transaction` inamaanisha Transaction model (mauzo/ununuzi).
+VALID_TYPES = {
+    "listing_fee",
+    "boost",
+    "leading",
+    "advertisement",
+    "reservation",
+    "transaction",
+    "sale",
+    "purchase",
+    "success_fee",
+    "bundle_purchase",
+    "bundle",
+}
+
+
+# ============================================================
 # FIND TRANSACTION
 # ============================================================
-def _find_transaction(pk, user):
-    """Tafuta muamala COMPLETED/PAID pekee."""
+def _find_transaction(pk, user, type_filter=None):
+    """
+    Tafuta muamala COMPLETED/PAID pekee.
+
+    Kama `type_filter` imetolewa, tafuta kwenye chanzo kimoja tu.
+    Vinginevyo, tumia mfuatano wa zamani (ListingFee kwanza).
+    """
+    tf = (type_filter or "").strip().lower()
+
     # ── 1. ListingFee ──
-    try:
-        obj = (
-            ListingFee.objects
-            .select_related("listing")
-            .get(pk=pk, seller=user, payment_status="PAID")
-        )
-        return {
-            "kind": "listing_fee",
-            "ref": obj.payment_reference or f"LF-{obj.pk}",
-            "type_sw": "Ada ya Kuchapisha",
-            "type_en": "Listing Fee",
-            "title": obj.listing.title if obj.listing else "—",
-            "amount": obj.amount,
-            "status": obj.payment_status,
-            "date": obj.created_at,
-            "paid_at": obj.paid_at,
-            "method": getattr(obj, "payment_method", None),
-            "phone": getattr(obj, "phone", None),
-        }
-    except ListingFee.DoesNotExist:
-        pass
+    if not tf or tf in ("listing_fee", "listing"):
+        try:
+            obj = (
+                ListingFee.objects
+                .select_related("listing")
+                .get(pk=pk, seller=user, payment_status="PAID")
+            )
+            return {
+                "kind": "listing_fee",
+                "ref": obj.payment_reference or f"LF-{obj.pk}",
+                "type_sw": "Ada ya Kuchapisha",
+                "type_en": "Listing Fee",
+                "title": obj.listing.title if obj.listing else "—",
+                "amount": obj.amount,
+                "status": obj.payment_status,
+                "date": obj.created_at,
+                "paid_at": obj.paid_at,
+                "method": getattr(obj, "payment_method", None),
+                "phone": getattr(obj, "phone", None),
+            }
+        except ListingFee.DoesNotExist:
+            pass
 
     # ── 2. ListingBoost ──
-    try:
-        obj = (
-            ListingBoost.objects
-            .select_related("listing", "package")
-            .get(pk=pk, seller=user, payment_status="PAID")
-        )
-        return {
-            "kind": "boost",
-            "ref": obj.payment_reference or f"B-{obj.pk}",
-            "type_sw": "Ada ya Kukuza",
-            "type_en": "Boost Fee",
-            "title": obj.listing.title if obj.listing else "—",
-            "amount": obj.amount,
-            "status": obj.payment_status,
-            "date": obj.created_at,
-            "paid_at": obj.paid_at,
-            "method": getattr(obj, "payment_method", None),
-            "phone": getattr(obj, "phone", None),
-        }
-    except ListingBoost.DoesNotExist:
-        pass
+    if not tf or tf in ("boost",):
+        try:
+            obj = (
+                ListingBoost.objects
+                .select_related("listing", "package")
+                .get(pk=pk, seller=user, payment_status="PAID")
+            )
+            return {
+                "kind": "boost",
+                "ref": obj.payment_reference or f"B-{obj.pk}",
+                "type_sw": "Ada ya Kukuza",
+                "type_en": "Boost Fee",
+                "title": obj.listing.title if obj.listing else "—",
+                "amount": obj.amount,
+                "status": obj.payment_status,
+                "date": obj.created_at,
+                "paid_at": obj.paid_at,
+                "method": getattr(obj, "payment_method", None),
+                "phone": getattr(obj, "phone", None),
+            }
+        except ListingBoost.DoesNotExist:
+            pass
 
     # ── 3. Reservation ──
-    try:
-        obj = (
-            Reservation.objects
-            .select_related("transaction", "transaction__listing")
-            .get(pk=pk, transaction__buyer=user, payment_status="PAID")
-        )
-        listing = obj.transaction.listing if obj.transaction else None
-        return {
-            "kind": "reservation",
-            "ref": obj.payment_reference or f"R-{obj.pk}",
-            "type_sw": "Ada ya Uhifadhi",
-            "type_en": "Reservation Fee",
-            "title": listing.title if listing else "—",
-            "amount": obj.deposit_amount,
-            "status": obj.payment_status,
-            "date": obj.created_at,
-            "paid_at": obj.paid_at,
-            "method": getattr(obj, "payment_method", None),
-            "phone": getattr(obj, "phone", None),
-        }
-    except Reservation.DoesNotExist:
-        pass
+    if not tf or tf in ("reservation",):
+        try:
+            obj = (
+                Reservation.objects
+                .select_related("transaction", "transaction__listing")
+                .get(pk=pk, transaction__buyer=user, payment_status="PAID")
+            )
+            listing = obj.transaction.listing if obj.transaction else None
+            return {
+                "kind": "reservation",
+                "ref": obj.payment_reference or f"R-{obj.pk}",
+                "type_sw": "Ada ya Uhifadhi",
+                "type_en": "Reservation Fee",
+                "title": listing.title if listing else "—",
+                "amount": obj.deposit_amount,
+                "status": obj.payment_status,
+                "date": obj.created_at,
+                "paid_at": obj.paid_at,
+                "method": getattr(obj, "payment_method", None),
+                "phone": getattr(obj, "phone", None),
+            }
+        except Reservation.DoesNotExist:
+            pass
 
-    # ── 4. Transaction ──
-    try:
-        obj = (
-            Transaction.objects
-            .select_related("listing", "buyer", "seller")
-            .get(pk=pk, status=Transaction.Status.COMPLETED)
-        )
-        if user.id not in [obj.buyer_id, obj.seller_id]:
-            raise Transaction.DoesNotExist
+    # ── 4. Transaction (mauzo/ununuzi) ──
+    if not tf or tf in ("transaction", "sale", "purchase"):
+        try:
+            obj = (
+                Transaction.objects
+                .select_related("listing", "buyer", "seller")
+                .get(pk=pk, status=Transaction.Status.COMPLETED)
+            )
+            if user.id not in [obj.buyer_id, obj.seller_id]:
+                raise Transaction.DoesNotExist
 
-        is_seller = user.id == obj.seller_id
-        return {
-            "kind": "transaction",
-            "ref": f"TXN-{obj.pk}",
-            "type_sw": "Mauzo" if is_seller else "Ununuzi",
-            "type_en": "Sale" if is_seller else "Purchase",
-            "title": obj.listing.title if obj.listing else "—",
-            "amount": obj.agreed_price,
-            "status": obj.status,
-            "date": obj.created_at,
-            "paid_at": obj.completed_at,
-            "method": None,
-            "phone": None,
-        }
-    except Transaction.DoesNotExist:
-        pass
+            is_seller = user.id == obj.seller_id
+            return {
+                "kind": "transaction",
+                "ref": f"TXN-{obj.pk}",
+                "type_sw": "Mauzo" if is_seller else "Ununuzi",
+                "type_en": "Sale" if is_seller else "Purchase",
+                "title": obj.listing.title if obj.listing else "—",
+                "amount": obj.agreed_price,
+                "status": obj.status,
+                "date": obj.created_at,
+                "paid_at": obj.completed_at,
+                "method": None,
+                "phone": None,
+            }
+        except Transaction.DoesNotExist:
+            pass
 
     # ── 5. SuccessFeePayment ──
-    try:
-        obj = SuccessFeePayment.objects.get(
-            pk=pk,
-            user=user,
-            payment_status=SuccessFeePayment.PaymentStatus.PAID,
-        )
-        return {
-            "kind": "success_fee",
-            "ref": obj.payment_reference or f"SFE-{obj.pk}",
-            "type_sw": "Ada ya Mafanikio",
-            "type_en": "Success Fee",
-            "title": obj.purpose or "Download report",
-            "amount": obj.amount,
-            "status": obj.payment_status,
-            "date": obj.created_at,
-            "paid_at": obj.paid_at,
-            "method": None,
-            "phone": None,
-        }
-    except SuccessFeePayment.DoesNotExist:
-        pass
+    if not tf or tf in ("success_fee",):
+        try:
+            obj = SuccessFeePayment.objects.get(
+                pk=pk,
+                user=user,
+                payment_status=SuccessFeePayment.PaymentStatus.PAID,
+            )
+            return {
+                "kind": "success_fee",
+                "ref": obj.payment_reference or f"SFE-{obj.pk}",
+                "type_sw": "Ada ya Mafanikio",
+                "type_en": "Success Fee",
+                "title": obj.purpose or "Download report",
+                "amount": obj.amount,
+                "status": obj.payment_status,
+                "date": obj.created_at,
+                "paid_at": obj.paid_at,
+                "method": None,
+                "phone": None,
+            }
+        except SuccessFeePayment.DoesNotExist:
+            pass
 
     # ── 6. BundlePurchase ──
-    try:
-        obj = (
-            BundlePurchase.objects
-            .select_related("bundle")
-            .get(pk=pk, user=user, status=BundlePurchase.Status.PAID)
-        )
-        return {
-            "kind": "bundle",
-            "ref": obj.payment_reference or f"BP-{obj.pk}",
-            "type_sw": "Kifurushi",
-            "type_en": "Bundle",
-            "title": obj.bundle.code if obj.bundle else "Bundle",
-            "amount": obj.amount,
-            "status": obj.status,
-            "date": obj.created_at,
-            "paid_at": obj.paid_at,
-            "method": None,
-            "phone": None,
-        }
-    except BundlePurchase.DoesNotExist:
-        pass
+    if not tf or tf in ("bundle_purchase", "bundle"):
+        try:
+            obj = (
+                BundlePurchase.objects
+                .select_related("bundle")
+                .get(pk=pk, user=user, status=BundlePurchase.Status.PAID)
+            )
+            return {
+                "kind": "bundle",
+                "ref": obj.payment_reference or f"BP-{obj.pk}",
+                "type_sw": "Kifurushi",
+                "type_en": "Bundle",
+                "title": obj.bundle.code if obj.bundle else "Bundle",
+                "amount": obj.amount,
+                "status": obj.status,
+                "date": obj.created_at,
+                "paid_at": obj.paid_at,
+                "method": None,
+                "phone": None,
+            }
+        except BundlePurchase.DoesNotExist:
+            pass
 
     return None
 
@@ -213,7 +250,13 @@ class TransactionReceiptView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
-        # ⬇️ SYNC kabla ya receipt (manual: sync zote PENDING)
+        # ✅ MPYA: chukua `?type=` kutoka query string
+        type_filter = (request.query_params.get("type") or "").strip().lower()
+        if type_filter and type_filter not in VALID_TYPES:
+            # Type batili — puuza na tumia mfuatano wa zamani
+            type_filter = ""
+
+        # Sync kabla ya receipt (manual: sync zote PENDING)
         try:
             sync_user_pending(
                 request.user,
@@ -227,7 +270,7 @@ class TransactionReceiptView(APIView):
                 "[receipt] sync_user_pending failed"
             )
 
-        txn = _find_transaction(pk, request.user)
+        txn = _find_transaction(pk, request.user, type_filter=type_filter)
         if not txn:
             return Response(
                 {
@@ -284,9 +327,9 @@ class TransactionReceiptView(APIView):
         elements.append(Spacer(1, 0.8 * cm))
 
         amount_str = f"TZS {float(txn['amount']):,.0f}"
-        
+
         date_str = (
-            timezone.localtime(txn["date"]).strftime("%Y-%m-%d %H:%M") 
+            timezone.localtime(txn["date"]).strftime("%Y-%m-%d %H:%M")
             if txn["date"] else "—"
         )
         paid_str = (

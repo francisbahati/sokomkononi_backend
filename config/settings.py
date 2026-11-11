@@ -75,7 +75,7 @@ INSTALLED_APPS = [
     "apps.audit", "apps.feedback", "apps.announcements", "apps.content", "apps.rbac",
     "apps.system_settings", "apps.bundles", "apps.credits", "apps.banners",
     "apps.leading_fees", "apps.advertisement_fees", "apps.reservation_rates",
-    "apps.newsletter",
+    "apps.newsletter", "apps.push",
 ]
 
 AUTHENTICATION_BACKENDS = [
@@ -477,6 +477,14 @@ TRUSTED_PROXY_CIDRS = env_list("TRUSTED_PROXY_CIDRS", "")
 ADMINS = [("SokoMkononi Admin", ADMIN_EMAIL)]
 MANAGERS = ADMINS
 
+# ============================================================
+# WEB PUSH (VAPID)
+# ============================================================
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_ADMIN_EMAIL = os.environ.get(
+    "VAPID_ADMIN_EMAIL", "support@sokomkononi.co.tz"
+)
 # ---------------- SOCIAL ----------------
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 APPLE_SERVICES_ID = os.environ.get("APPLE_CLIENT_ID", "co.tz.sokomkononi.web")
@@ -542,6 +550,10 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-listings": {
         "task": "listings.expire_stale_listings",
         "schedule": crontab(hour=2, minute=0),
+    },
+    "cleanup-old-data-exports": {
+    "task": "accounts.cleanup_old_data_exports",
+    "schedule": crontab(hour=3, minute=30),
     },
     "sync-pending-fimipay-statuses": {
         "task": "payments.sync_pending_fimipay_statuses",
@@ -624,6 +636,11 @@ CSRF_COOKIE_SECURE = not DEBUG
 # ============================================================
 LISTING_FEE_ALLOW_FALLBACK = env_bool("LISTING_FEE_ALLOW_FALLBACK", False)
 LISTING_FEE_REPRICE_AFTER_HOURS = env_int("LISTING_FEE_REPRICE_AFTER_HOURS", 24)
+
+# ============================================================
+# DATA EXPORT
+# ============================================================
+DATA_EXPORT_RETENTION_DAYS = env_int("DATA_EXPORT_RETENTION_DAYS", 7)
 
 # ============================================================
 # ADMIN PATH

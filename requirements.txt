@@ -85,3 +85,6 @@ django-ratelimit>=4.1.0
 django-allauth
 google-auth
 requests
+
+# --- Web Push ---
+pywebpush==2.0.3

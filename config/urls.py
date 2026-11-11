@@ -55,6 +55,7 @@ urlpatterns = [
     path("api/transactions/", include("apps.transactions.urls")),
     path("api/finance/", include("apps.finance.urls")),
     path("api/notifications/", include("apps.notifications.urls")),
+    path("api/push/", include("apps.push.urls")),
     path("api/waiting-list/", include("apps.waiting_list.urls")),
     path("api/saved/", include("apps.saved.urls")),
     path("api/searches/", include("apps.searches.urls")),

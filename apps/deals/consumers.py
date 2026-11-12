@@ -23,27 +23,18 @@ class DealRoomConsumer(AsyncJsonWebsocketConsumer):
         self.group_name = f"deal_room_{self.room_id}"
         self._heartbeat_task = None
 
-        print(
-            f"[CONSUMER DEBUG] connect: room_id={self.room_id!r} "
-            f"user={getattr(self.user, 'id', None)!r} "
-            f"anonymous={isinstance(self.user, AnonymousUser)}"
-        )
-
         # ⚠️ MUHIMU: accept() kwanza ili code ya kufunga ifike kwa mteja.
         # Bila hii, Daphne hurudisha 403 na kivinjari kinaona 1006.
         await self.accept()
 
         # Auth
         if not self.user or isinstance(self.user, AnonymousUser):
-            print("[CONSUMER DEBUG] ❌ haijathibitishwa — close 4001")
             await self.close(code=4001)
             return
 
         # Participant check
         is_participant = await self._is_participant()
-        print(f"[CONSUMER DEBUG] is_participant={is_participant!r}")
         if not is_participant:
-            print("[CONSUMER DEBUG] ❌ si mshiriki — close 4003")
             await self.close(code=4003)
             return
 
@@ -56,13 +47,11 @@ class DealRoomConsumer(AsyncJsonWebsocketConsumer):
             "room_id": self.room_id,
             "user_id": self.user.id,
         })
-        print(f"[CONSUMER DEBUG] ✅ connected user_id={self.user.id}")
 
         # ✅ Heartbeat: kila sekunde 30, tuma "ping" kwa mteja
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def disconnect(self, code):
-        print(f"[CONSUMER DEBUG] disconnect code={code!r}")
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
             try:

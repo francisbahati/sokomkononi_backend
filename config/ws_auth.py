@@ -41,14 +41,37 @@ class JWTAuthMiddleware(BaseMiddleware):
     """
 
     async def __call__(self, scope, receive, send):
-        query_string = scope.get("query_string", b"").decode()
+        # ── DEBUG: chapisha vichwa vyote vinavyofika Daphne ──
+        headers = dict(scope.get("headers", []))
+        origin = headers.get(b"origin", b"").decode(errors="replace")
+        host = headers.get(b"host", b"").decode(errors="replace")
+        # Cloudflare / proxy vichwa vya ziada
+        x_forwarded_host = headers.get(b"x-forwarded-host", b"").decode(errors="replace")
+        x_forwarded_proto = headers.get(b"x-forwarded-proto", b"").decode(errors="replace")
+        cf_connecting_ip = headers.get(b"cf-connecting-ip", b"").decode(errors="replace")
+        user_agent = headers.get(b"user-agent", b"").decode(errors="replace")[:80]
+        path = scope.get("path", "")
+        query_string = scope.get("query_string", b"").decode(errors="replace")
+
+        print(
+            f"[WS DEBUG] path={path!r} "
+            f"query={query_string!r} "
+            f"Origin={origin!r} "
+            f"Host={host!r} "
+            f"X-Forwarded-Host={x_forwarded_host!r} "
+            f"X-Forwarded-Proto={x_forwarded_proto!r} "
+            f"CF-Connecting-IP={cf_connecting_ip!r} "
+            f"UA={user_agent!r}"
+        )
+
+        # ── Token kutoka query string ──
         query_params = parse_qs(query_string)
         token_list = query_params.get("token", [])
         token = token_list[0] if token_list else None
 
+        # ── Fallback: Authorization header ──
         if not token:
-            headers = dict(scope.get("headers", []))
-            auth_header = headers.get(b"authorization", b"").decode()
+            auth_header = headers.get(b"authorization", b"").decode(errors="replace")
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
 

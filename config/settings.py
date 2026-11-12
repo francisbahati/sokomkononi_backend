@@ -60,6 +60,8 @@ ALLOWED_HOSTS = list(dict.fromkeys(
 SITE_URL = os.environ.get("SITE_URL", "https://sokomkononi.co.tz")
 
 INSTALLED_APPS = [
+    "daphne",
+    "channels",
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
     # DRF
@@ -163,6 +165,32 @@ else:
         }
     }
 
+# ============================================================
+# DJANGO CHANNELS (WebSocket) — ✅ MPYA
+# ============================================================
+# Tunatumia Redis hiyo hiyo ya CACHE / Celery — hakuna Redis ya pili.
+_CHANNEL_REDIS_URL = os.environ.get(
+    "CHANNEL_REDIS_URL",
+    _REDIS_CACHE_URL or "redis://localhost:6379/0",
+)
+
+if _CHANNEL_REDIS_URL.startswith(("redis://", "rediss://")):
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [_CHANNEL_REDIS_URL],
+            },
+        }
+    }
+else:
+    # Dev / fallback — in-memory (haifanyi kazi multi-worker)
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
+
 LANGUAGE_CODE = os.environ.get("LANGUAGE_CODE", "sw")
 TIME_ZONE = "Africa/Dar_es_Salaam"
 USE_I18N = True
@@ -224,6 +252,7 @@ if R2_PUBLIC_ORIGIN:
     _CSP_IMG_SRC.append(R2_PUBLIC_ORIGIN)
     _CSP_MEDIA_SRC.append(R2_PUBLIC_ORIGIN)
 
+# ✅ MPYA — WebSocket wss:// imeongezwa
 _connect_src = [SELF] + [
     o for o in [
         "https://api.sokomkononi.co.tz",
@@ -232,8 +261,20 @@ _connect_src = [SELF] + [
         "https://appleid.apple.com",
         "https://cloudflareinsights.com",
         R2_PUBLIC_ORIGIN,
+        # WebSocket
+        "wss://sokomkononi.co.tz",
+        "wss://www.sokomkononi.co.tz",
+        "wss://api.sokomkononi.co.tz",
     ] if o
 ]
+
+if DEBUG:
+    _connect_src += [
+        "ws://localhost:5173",
+        "ws://127.0.0.1:5173",
+        "ws://localhost:8000",
+        "ws://127.0.0.1:8000",
+    ]
 
 # ⬅️ EXCLUDE_URL_PREFIXES ndani ya CONTENT_SECURITY_POLICY, kama LIST
 CONTENT_SECURITY_POLICY = {
@@ -318,7 +359,7 @@ CORS_ALLOW_HEADERS = [
     "idempotency-key",
     "x-idempotency-key",
     "x-request-id",
-    "x-client",  
+    "x-client",
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
 CORS_ALLOW_ALL_ORIGINS = False
@@ -351,7 +392,7 @@ TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
 
 REST_FRAMEWORK = {
     # Idadi ya proxies mbele ya app (Traefik = 1; Cloudflare + Traefik = 2).
-    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "1")),
+    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "2")),
     "URL_FORMAT_OVERRIDE": None,
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.accounts.authentication.FlexibleJWTAuthentication",
@@ -485,6 +526,7 @@ VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_ADMIN_EMAIL = os.environ.get(
     "VAPID_ADMIN_EMAIL", "support@sokomkononi.co.tz"
 )
+
 # ---------------- SOCIAL ----------------
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 APPLE_SERVICES_ID = os.environ.get("APPLE_CLIENT_ID", "co.tz.sokomkononi.web")
@@ -535,8 +577,8 @@ CELERY_BEAT_SCHEDULE = {
     "expire-stale-banners": {"task": "banners.expire_stale_banners", "schedule": crontab(minute="*/15")},
     "expire-stale-credits": {"task": "credits.expire_stale_credits", "schedule": crontab(hour=2, minute=30)},
     "notify-expiring-credits": {
-    "task": "credits.notify_expiring_credits",
-    "schedule": crontab(hour=9, minute=0),
+        "task": "credits.notify_expiring_credits",
+        "schedule": crontab(hour=9, minute=0),
     },
     "cleanup-stale-services": {"task": "credits.cleanup_stale_services", "schedule": crontab(hour=2, minute=45)},
     "refresh-pending-payouts": {"task": "payments.refresh_pending_payouts", "schedule": crontab(minute="*/10")},
@@ -552,8 +594,8 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=2, minute=0),
     },
     "cleanup-old-data-exports": {
-    "task": "accounts.cleanup_old_data_exports",
-    "schedule": crontab(hour=3, minute=30),
+        "task": "accounts.cleanup_old_data_exports",
+        "schedule": crontab(hour=3, minute=30),
     },
     "sync-pending-fimipay-statuses": {
         "task": "payments.sync_pending_fimipay_statuses",

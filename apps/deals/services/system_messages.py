@@ -5,6 +5,7 @@ from django.db import transaction as db_transaction
 from django.utils import timezone
 
 from apps.deals.models import DealMessage, DealRoom
+from apps.deals.services.ws_broadcast import broadcast_new_message
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def post_system_message(*, deal_room_id, code, actor, data=None):
                 system_data__key=key,
             ).exists():
                 return
-            DealMessage.objects.create(
+            msg = DealMessage.objects.create(
                 deal_room_id=deal_room_id,
                 sender=actor,
                 kind=DealMessage.Kind.SYSTEM,
@@ -53,7 +54,25 @@ def post_system_message(*, deal_room_id, code, actor, data=None):
             DealRoom.objects.filter(pk=deal_room_id).update(
                 updated_at=timezone.now()
             )
+
+            # ✅ MPYA: broadcast ya system message kwa wanachama wa chumba
+            broadcast_new_message(
+                room_id=deal_room_id,
+                message_data={
+                    "id": msg.id,
+                    "text": msg.text or "",
+                    "kind": msg.kind,
+                    "sender_id": msg.sender_id,
+                    "created_at": msg.created_at.isoformat(),
+                    "attachment_url": None,
+                    "offer_amount": None,
+                    "system_code": code,
+                    "system_data": data,
+                },
+            )
         except Exception:
-            logger.exception("system message failed: %s room=%s", code, deal_room_id)
+            logger.exception(
+                "system message failed: %s room=%s", code, deal_room_id,
+            )
 
     db_transaction.on_commit(_run)

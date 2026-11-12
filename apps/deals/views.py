@@ -47,6 +47,12 @@ from .services.notifications import (
     notify_offer_accepted,
     notify_offer_rejected,
 )
+from .services.ws_broadcast import (
+    broadcast_deal_update,
+    broadcast_new_message,
+    broadcast_new_offer,
+    broadcast_offer_update,
+)
 
 
 def _log(request, action, target="", target_id=None, details="", params=None):
@@ -312,7 +318,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             .select_related("sender")
             .order_by("created_at")
         )
-        # Ujumbe uliofichwa (is_hidden) ni ushahidi kwa admin tu.
         if not request.user.is_staff:
             qs = qs.filter(is_hidden=False)
         return Response(
@@ -332,7 +337,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def messages_create(self, request, pk=None):
         deal_room = self.get_object()
 
-        # ── MPYA: room iliyosimamishwa haipokei ujumbe ──
         if deal_room.admin_locked:
             return _deal_error(
                 "DEAL_LOCKED",
@@ -357,6 +361,31 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             updated_at=timezone.now()
         )
 
+        # ✅ MPYA: broadcast ya ujumbe mpya
+        attachment_url = None
+        if msg.attachment:
+            try:
+                attachment_url = request.build_absolute_uri(
+                    msg.attachment.url
+                )
+            except Exception:
+                attachment_url = None
+
+        transaction.on_commit(
+            lambda: broadcast_new_message(
+                room_id=deal_room.id,
+                message_data={
+                    "id": msg.id,
+                    "text": msg.text or "",
+                    "kind": msg.kind,
+                    "sender_id": msg.sender_id,
+                    "created_at": msg.created_at.isoformat(),
+                    "attachment_url": attachment_url,
+                    "offer_amount": None,
+                },
+            )
+        )
+
         return Response(
             DealMessageSerializer(msg, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
@@ -368,10 +397,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         url_path="mark-read", url_name="mark-read",
     )
     def mark_read(self, request, pk=None):
-        """
-        Mshiriki anaashiria kuwa ameona ujumbe wa mwenzake kwenye room hii.
-        Inaruhusiwa hata room ikiwa imesimamishwa (haibadilishi mazungumzo).
-        """
         deal_room = self.get_object()
         marked = _mark_messages_read(deal_room, request.user)
         return Response({"ok": True, "marked": marked})
@@ -409,7 +434,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         })
 
     # ============================================================
-    # REPORT — inaunda Ticket ya category=DEAL_REPORT
+    # REPORT
     # ============================================================
     @extend_schema(
         request=DealReportSerializer,
@@ -545,7 +570,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     def offer(self, request, pk=None):
         deal_room = self.get_object()
 
-        # ── MPYA: room iliyosimamishwa haipokei offers ──
         if deal_room.admin_locked:
             return _deal_error(
                 "DEAL_LOCKED",
@@ -616,6 +640,25 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         else:
             deal_room.save(update_fields=["updated_at"])
 
+        # ✅ MPYA: broadcast ya ofa mpya
+        transaction.on_commit(
+            lambda: broadcast_new_offer(
+                room_id=deal_room.id,
+                offer_data={
+                    "id": new_offer.id,
+                    "offer_amount": str(new_offer.amount),
+                    "sender_id": new_offer.offered_by_id,
+                    "created_at": new_offer.created_at.isoformat(),
+                },
+            )
+        )
+        transaction.on_commit(
+            lambda: broadcast_deal_update(
+                room_id=deal_room.id,
+                deal_data={"current_offer": str(new_offer.amount)},
+            )
+        )
+
         transaction.on_commit(
             lambda: notify_new_offer(deal_room=deal_room, offer=new_offer)
         )
@@ -652,7 +695,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         self.check_object_permissions(request, deal_room)
 
-        # ── MPYA: room iliyosimamishwa haikubali offers ──
         if deal_room.admin_locked:
             return _deal_error(
                 "DEAL_LOCKED",
@@ -778,6 +820,35 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 )
             )
 
+        # ✅ MPYA: broadcast ya offer update + deal update
+        transaction.on_commit(
+            lambda: broadcast_offer_update(
+                room_id=deal_room.id,
+                offer_data={
+                    "id": offer.id,
+                    "status": offer.status,
+                },
+            )
+        )
+        transaction.on_commit(
+            lambda: broadcast_deal_update(
+                room_id=deal_room.id,
+                deal_data={
+                    "status": deal_room.status,
+                    "agreed_price": (
+                        str(deal_room.agreed_price)
+                        if deal_room.agreed_price
+                        else None
+                    ),
+                    "agreed_at": (
+                        deal_room.agreed_at.isoformat()
+                        if deal_room.agreed_at
+                        else None
+                    ),
+                },
+            )
+        )
+
         return Response(
             DealRoomDetailSerializer(
                 deal_room,
@@ -818,6 +889,17 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         offer.save(update_fields=["status", "updated_at"])
         deal_room.save(update_fields=["updated_at"])
 
+        # ✅ MPYA: broadcast ya offer update
+        transaction.on_commit(
+            lambda: broadcast_offer_update(
+                room_id=deal_room.id,
+                offer_data={
+                    "id": offer.id,
+                    "status": offer.status,
+                },
+            )
+        )
+
         transaction.on_commit(
             lambda: notify_offer_rejected(deal_room=deal_room, offer=offer)
         )
@@ -845,7 +927,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         self.check_object_permissions(request, deal_room)
 
-        # ── MPYA: room iliyosimamishwa na admin haiwezi kughairiwa ──
         if deal_room.admin_locked and not request.user.is_staff:
             return _deal_error(
                 "DEAL_LOCKED",
@@ -876,7 +957,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
         deal_room.status = DealRoom.Status.CANCELLED
 
-        # ── MPYA: admin akighairi, weka cancelled_by_admin ili kuzuia reopen ──
         if request.user.is_staff:
             deal_room.cancelled_by_admin = True
             deal_room.save(update_fields=[
@@ -921,6 +1001,17 @@ class DealRoomViewSet(viewsets.ModelViewSet):
             )
         )
 
+        # ✅ MPYA: broadcast ya deal update
+        transaction.on_commit(
+            lambda: broadcast_deal_update(
+                room_id=deal_room.id,
+                deal_data={
+                    "status": deal_room.status,
+                    "cancelled_by_admin": deal_room.cancelled_by_admin,
+                },
+            )
+        )
+
         return Response(
             DealRoomDetailSerializer(
                 deal_room,
@@ -930,7 +1021,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
 
     # ============================================================
-    # REOPEN — fufua Deal Room iliyoghairiwa
+    # REOPEN
     # ============================================================
     @extend_schema(
         request=DealRoomReopenSerializer,
@@ -939,14 +1030,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="reopen", url_name="reopen")
     @transaction.atomic
     def reopen(self, request, pk=None):
-        """
-        Mnunuzi au muuzaji wa Deal Room iliyoghairiwa (CANCELLED) anaifufua.
-
-        - Ujumbe na historia ya offers vinabaki; hali inarudi NEGOTIATING.
-        - Deal iliyoghairiwa na admin (`cancelled_by_admin=True`)
-          HAIWEZI kufufuliwa — inahitaji support.
-        - Kikomo: settings.DEAL_REOPEN_MAX (default 3) kwa kila Deal Room.
-        """
         deal_room = get_object_or_404(
             DealRoom.objects
             .select_for_update(of=("self",))
@@ -955,7 +1038,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
         )
         self.check_object_permissions(request, deal_room)
 
-        # ── MPYA: admin alighairi — haifufuliwi na mtumiaji ──
         if deal_room.cancelled_by_admin:
             return _deal_error(
                 "CANCELLED_BY_ADMIN",
@@ -964,7 +1046,6 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                 status.HTTP_403_FORBIDDEN,
             )
 
-        # ── MPYA: room iliyosimamishwa na admin haifufuliwi ──
         if deal_room.admin_locked:
             return _deal_error(
                 "DEAL_LOCKED",
@@ -1099,6 +1180,22 @@ class DealRoomViewSet(viewsets.ModelViewSet):
 
         transaction.on_commit(
             lambda: _notify_reopened(deal_room, request.user, note)
+        )
+
+        # ✅ MPYA: broadcast ya deal update
+        transaction.on_commit(
+            lambda: broadcast_deal_update(
+                room_id=deal_room.id,
+                deal_data={
+                    "status": deal_room.status,
+                    "reopened_at": (
+                        deal_room.reopened_at.isoformat()
+                        if deal_room.reopened_at
+                        else None
+                    ),
+                    "reopened_count": deal_room.reopened_count,
+                },
+            )
         )
 
         try:

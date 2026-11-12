@@ -2,6 +2,7 @@
 # apps/transactions/views.py
 # ============================================================
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -17,6 +18,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.deals.models import DealRoom
+from apps.deals.services.ws_broadcast import broadcast_deal_update
 
 from .models import (
     InspectionPeriod,
@@ -63,8 +65,11 @@ from .services.transaction import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 # ============================================================================
-# PERMISSION
+# HELPERS
 # ============================================================================
 
 def _log(request, action, target="", target_id=None, details="", params=None):
@@ -73,8 +78,41 @@ def _log(request, action, target="", target_id=None, details="", params=None):
         log_action(request=request, action=action, target=target,
                    target_id=target_id, details=details, params=params)
     except Exception:
-        import logging; logging.getLogger(__name__).exception("audit failed: %s", action)
+        logger.exception("audit failed: %s", action)
 
+
+def _broadcast_deal_update_for_transaction(transaction, deal_data=None):
+    """
+    Broadcast ya deal update kwa room inayohusiana na transaction.
+    Inaitwa baada ya kila action inayobadilisha transaction/deal status.
+    """
+    try:
+        deal_room_id = getattr(transaction, "deal_room_id", None)
+        if not deal_room_id:
+            return
+
+        data = {"transaction_status": transaction.status}
+        if deal_data:
+            data.update(deal_data)
+
+        # Jaribu kupata deal_room status ikiwa ipo
+        try:
+            deal_room = DealRoom.objects.only("status").get(pk=deal_room_id)
+            data.setdefault("status", deal_room.status)
+        except DealRoom.DoesNotExist:
+            pass
+
+        broadcast_deal_update(room_id=deal_room_id, deal_data=data)
+    except Exception:
+        logger.exception(
+            "broadcast_deal_update_for_transaction imeshindwa (txn=%s)",
+            getattr(transaction, "id", None),
+        )
+
+
+# ============================================================================
+# PERMISSION
+# ============================================================================
 
 class IsVerifiedTransactionUser(permissions.BasePermission):
     message = (
@@ -197,6 +235,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             transaction, context={"request": request},
         )
 
+        # ✅ Broadcast ya deal update (transaction imeundwa)
+        _broadcast_deal_update_for_transaction(transaction)
+
         return Response(
             response_serializer.data,
             status=status.HTTP_201_CREATED,
@@ -234,6 +275,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             reservation, context={"request": request},
         )
 
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(transaction)
+
         return Response(
             serializer.data,
             status=status.HTTP_201_CREATED,
@@ -256,7 +300,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
         if not reservation:
             raise ValidationError("Transaction hii haina Reservation.")
 
-
         if reservation.payment_status == Reservation.PaymentStatus.PAID:
             return Response(
                 ReservationSerializer(
@@ -273,6 +316,8 @@ class TransactionViewSet(viewsets.GenericViewSet):
                 payment_reference=payment_reference,
                 user=request.user,
             )
+            # ✅ Broadcast (reservation imelipwa)
+            _broadcast_deal_update_for_transaction(transaction)
             return Response(
                 ReservationSerializer(
                     reservation, context={"request": request},
@@ -311,6 +356,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             inspection, context={"request": request},
         )
 
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(transaction)
+
         return Response(
             serializer.data,
             status=status.HTTP_201_CREATED,
@@ -332,6 +380,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             decision=serializer.validated_data["buyer_decision"],
             note=serializer.validated_data.get("buyer_decision_note", ""),
         )
+
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(updated_transaction)
 
         return Response(
             TransactionDetailSerializer(
@@ -359,6 +410,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             ),
         )
 
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(updated_transaction)
+
         return Response(
             TransactionDetailSerializer(
                 updated_transaction, context={"request": request},
@@ -381,6 +435,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             seller=request.user,
         )
 
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(updated_transaction)
+
         return Response(
             TransactionDetailSerializer(
                 updated_transaction, context={"request": request},
@@ -388,7 +445,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK,
         )
 
-        # ============================================================
+    # ============================================================
     # REJECT PAYMENT PROOF (seller) — MPYA
     # ============================================================
     @action(detail=True, methods=["post"], url_path="reject-payment-proof")
@@ -415,14 +472,19 @@ class TransactionViewSet(viewsets.GenericViewSet):
             reason=reason,
         )
 
-        # ✅ Tumia params
         _log(
             request,
             action="transaction.payment_proof_rejected",
             target="Transaction",
             target_id=updated_transaction.id,
-            params={"name": f"Transaction #{updated_transaction.id}", "reason": reason[:200]},
+            params={
+                "name": f"Transaction #{updated_transaction.id}",
+                "reason": reason[:200],
+            },
         )
+
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(updated_transaction)
 
         return Response(
             TransactionDetailSerializer(
@@ -449,6 +511,10 @@ class TransactionViewSet(viewsets.GenericViewSet):
             target_id=updated.id,
             params={"name": f"Transaction #{updated.id}", "reason": reason[:200]},
         )
+
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(updated)
+
         return Response(
             TransactionDetailSerializer(
                 updated, context={"request": request},
@@ -471,6 +537,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             user=request.user,
             reason=serializer.validated_data["cancellation_reason"],
         )
+
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(updated_transaction)
 
         return Response(
             TransactionDetailSerializer(
@@ -495,8 +564,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
             transaction=transaction, admin_user=request.user,
             resolution=resolution, note=note,
         )
-        
-        # ✅ Tumia details={"sw","en"}
+
         _log(
             request,
             action="transaction.dispute_resolved",
@@ -507,6 +575,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
                 "en": f"Dispute for Transaction #{transaction.id} resolved: resolution={resolution}, note={note[:200]}",
             },
         )
+
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(transaction)
 
         return Response(
             TransactionDetailSerializer(
@@ -529,8 +600,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
             raise ValidationError("Transaction hii haina Reservation.")
 
         reservation = expire_reservation(reservation=reservation)
-        
-        # ✅ Tumia params
+
         _log(
             request,
             action="reservation.expired",
@@ -538,6 +608,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             target_id=reservation.id,
             params={"name": f"Reservation #{reservation.id} (Transaction #{transaction.id})"},
         )
+
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(transaction)
 
         return Response(
             ReservationSerializer(
@@ -560,8 +633,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
             raise ValidationError("Transaction hii haina Inspection Period.")
 
         inspection = expire_inspection_period(inspection=inspection)
-        
-        # ✅ Tumia params
+
         _log(
             request,
             action="inspection.expired",
@@ -569,6 +641,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             target_id=inspection.id,
             params={"name": f"Inspection #{inspection.id} (Transaction #{transaction.id})"},
         )
+
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(transaction)
 
         return Response(
             InspectionPeriodSerializer(
@@ -635,8 +710,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
                 )
 
         reservation = Reservation.objects.get(pk=reservation.pk)
-        
-        # ✅ Tumia params
+
         _log(
             request,
             action="reservation.extended",
@@ -648,6 +722,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
                 "fee": str(extension.fee),
             },
         )
+
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(transaction)
 
         return Response(
             ReservationSerializer(
@@ -674,7 +751,6 @@ class TransactionViewSet(viewsets.GenericViewSet):
 
         reservation = remove_reservation_by_buyer(reservation=reservation)
 
-        # ✅ Tumia params
         _log(
             request,
             action="reservation.removed_by_buyer",
@@ -685,6 +761,9 @@ class TransactionViewSet(viewsets.GenericViewSet):
             },
         )
 
+        # ✅ Broadcast ya deal update
+        _broadcast_deal_update_for_transaction(transaction)
+
         return Response(
             ReservationSerializer(
                 reservation, context={"request": request},
@@ -693,7 +772,7 @@ class TransactionViewSet(viewsets.GenericViewSet):
         )
 
     # ============================================================
-    # LIST MY RESERVATIONS (buyer) -> MyReservationsPage
+    # LIST MY RESERVATIONS (buyer)
     # ============================================================
     @action(detail=False, methods=["get"], url_path="reservations")
     def reservations(self, request):

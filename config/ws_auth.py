@@ -24,12 +24,22 @@ def get_user_from_token(token_str):
         token = AccessToken(token_str)
         user_id = token.get("user_id")
         if not user_id:
+            print("[JWT DEBUG] ❌ token haina user_id")
             return AnonymousUser()
 
         User = get_user_model()
         user = User.objects.filter(id=user_id, is_active=True).first()
-        return user or AnonymousUser()
-    except (InvalidToken, TokenError, Exception):
+        if not user:
+            print(f"[JWT DEBUG] ❌ mtumiaji id={user_id} hajapatikana au amezimwa")
+            return AnonymousUser()
+
+        print(f"[JWT DEBUG] ✅ mtumiaji: {user.id} ({user.email})")
+        return user
+    except (InvalidToken, TokenError) as e:
+        print(f"[JWT DEBUG] ❌ token si sahihi: {type(e).__name__}: {e}")
+        return AnonymousUser()
+    except Exception as e:
+        print(f"[JWT DEBUG] ❌ hitilafu nyingine: {type(e).__name__}: {e}")
         return AnonymousUser()
 
 
@@ -41,11 +51,9 @@ class JWTAuthMiddleware(BaseMiddleware):
     """
 
     async def __call__(self, scope, receive, send):
-        # ── DEBUG: chapisha vichwa vyote vinavyofika Daphne ──
         headers = dict(scope.get("headers", []))
         origin = headers.get(b"origin", b"").decode(errors="replace")
         host = headers.get(b"host", b"").decode(errors="replace")
-        # Cloudflare / proxy vichwa vya ziada
         x_forwarded_host = headers.get(b"x-forwarded-host", b"").decode(errors="replace")
         x_forwarded_proto = headers.get(b"x-forwarded-proto", b"").decode(errors="replace")
         cf_connecting_ip = headers.get(b"cf-connecting-ip", b"").decode(errors="replace")
@@ -78,6 +86,7 @@ class JWTAuthMiddleware(BaseMiddleware):
         if token:
             scope["user"] = await get_user_from_token(token)
         else:
+            print("[WS DEBUG] ❌ hakuna token kwenye query wala header")
             scope["user"] = AnonymousUser()
 
         return await super().__call__(scope, receive, send)

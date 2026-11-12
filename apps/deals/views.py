@@ -379,6 +379,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                     "text": msg.text or "",
                     "kind": msg.kind,
                     "sender_id": msg.sender_id,
+                    "sender_name": getattr(msg.sender, "name", None) or "Mtu",
                     "created_at": msg.created_at.isoformat(),
                     "attachment_url": attachment_url,
                     "offer_amount": None,
@@ -648,6 +649,7 @@ class DealRoomViewSet(viewsets.ModelViewSet):
                     "id": new_offer.id,
                     "offer_amount": str(new_offer.amount),
                     "sender_id": new_offer.offered_by_id,
+                    "sender_name": getattr(new_offer.offered_by, "name", None) or "Mtu",
                     "created_at": new_offer.created_at.isoformat(),
                 },
             )

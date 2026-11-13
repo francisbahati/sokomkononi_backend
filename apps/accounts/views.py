@@ -16,6 +16,8 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .session_tracking import drop_session, record_session
+
 from .models import (
     NotificationPreference,
     User,
@@ -151,6 +153,7 @@ class VerifyOTPView(APIView):
         )
 
         refresh = RefreshToken.for_user(user)
+        record_session(request, refresh, user)
 
         return Response(
             {
@@ -228,6 +231,7 @@ class LoginView(APIView):
 
         logger.info("[login] success user_id=%s", user.pk)
         refresh = RefreshToken.for_user(user)
+        record_session(request, refresh, user)
 
         return Response(
             {
@@ -264,7 +268,9 @@ class LogoutView(APIView):
 
         if refresh_token:
             try:
-                RefreshToken(refresh_token).blacklist()
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+                drop_session(str(token["jti"]))
             except TokenError:
                 pass
 

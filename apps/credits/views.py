@@ -2,7 +2,10 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import UserCredit, UserService
+from django.db.models import Q
+from django.utils import timezone
+
+from .models import CreditUsage, UserCredit, UserService
 from .serializers import (
     ConsumeCreditSerializer,
     UserCreditSerializer,
@@ -16,6 +19,7 @@ class UserCreditViewSet(viewsets.GenericViewSet):
     User-scoped credit endpoints.
 
         GET  /api/credits/                 list my balances
+        GET  /api/credits/usage/           my credit usage history (latest 100)
         GET  /api/credits/services/        list my active services
         GET  /api/credits/has/<service>/   is service active for me?
         POST /api/credits/consume/         self-consume my credits
@@ -37,8 +41,23 @@ class UserCreditViewSet(viewsets.GenericViewSet):
     def list(self, request):
         self._require_user()
 
-        qs = UserCredit.objects.filter(user=request.user)
+        # Credits zilizoisha muda zisionyeshwe kama zinatumika (consume ingeshindwa na 402)
+        qs = UserCredit.objects.filter(user=request.user).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
+        )
         return Response(UserCreditSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=["get"], url_path="usage")
+    def usage(self, request):
+        """GET /api/credits/usage/?service_key=boost — historia ya matumizi."""
+        qs = CreditUsage.objects.filter(user=request.user)
+        key = (request.query_params.get("service_key") or "").strip()
+        if key:
+            qs = qs.filter(service_key=key)
+        rows = qs.values(
+            "id", "service_key", "amount", "balance_after", "reference", "created_at",
+        )[:100]
+        return Response(list(rows))
 
     @action(detail=False, methods=["get"], url_path="services")
     def my_services(self, request):
@@ -99,7 +118,12 @@ class UserCreditViewSet(viewsets.GenericViewSet):
             if cached:
                 return Response(cached, status=status.HTTP_200_OK)
 
-        ok = consume_credit(user=request.user, service_key=service_key, required=amount)
+        ok = consume_credit(
+            user=request.user,
+            service_key=service_key,
+            required=amount,
+            reference=str(request.data.get("reference") or ""),
+        )
         if not ok:
             return Response(
                 {

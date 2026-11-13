@@ -74,8 +74,8 @@ class WaitingListCreateSerializer(serializers.Serializer):
         u = req.user
         if not u.is_active:
             raise serializers.ValidationError("Akaunti haijawezeshwa.")
-        if not u.is_verified:
-            raise serializers.ValidationError("Akaunti lazima iwe imethibitishwa.")
+        if not u.email_verified:
+            raise serializers.ValidationError("Thibitisha barua pepe yako kwanza.")
         if listing.seller_id == u.id:
             raise serializers.ValidationError("Huwezi kujiunga kwenye tangazo lako.")
         if listing.status != Listing.Status.RESERVED:

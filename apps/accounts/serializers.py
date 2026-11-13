@@ -141,14 +141,14 @@ class ProfileSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id", "name", "email", "phone", "account_type",
-            "avatar", "date_joined", "is_verified", "is_staff",
+            "avatar", "date_joined", "is_verified", "email_verified", "is_staff",
             "is_superuser", "seller_status", "buyer_status",
             "role",
             "bio", "location",
             "current_role",
         ]
         read_only_fields = [
-            "id", "email", "date_joined", "is_verified",
+            "id", "email", "date_joined", "is_verified", "email_verified",
             "is_staff", "is_superuser", "seller_status", "buyer_status",
             "avatar", "role",
             "bio", "location",

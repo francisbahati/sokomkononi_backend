@@ -13,12 +13,15 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.http import HttpResponse
+from datetime import timedelta
+
 from django.utils import timezone
 
 from rest_framework import permissions, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import User, UserSession
@@ -33,6 +36,7 @@ from .totp import (
     verify_recovery_code,
     verify_totp,
 )
+from .session_tracking import record_session
 from .tokens import decode_2fa_challenge_token
 
 LOCKED_MSG = "Majaribio mengi yameshindwa. Subiri dakika 10 kisha ujaribu tena."
@@ -230,6 +234,7 @@ class TwoFactorChallengeView(APIView):
 
         clear_failures(user)
         refresh = RefreshToken.for_user(user)
+        record_session(request, refresh, user)
         return Response({
             "message": "Umeingia kwenye akaunti kwa mafanikio.",
             "access": str(refresh.access_token),
@@ -255,7 +260,16 @@ class SessionsView(APIView):
         ])
 
     def delete(self, request, pk=None):
-        UserSession.objects.filter(user=request.user, pk=pk).delete()
+        from rest_framework_simplejwt.token_blacklist.models import (
+            BlacklistedToken, OutstandingToken,
+        )
+        sess = UserSession.objects.filter(user=request.user, pk=pk).first()
+        if sess:
+            # Kufuta row pekee hakumtoi kifaa: refresh token bado ingefanya kazi.
+            # Lazima tui-blacklist ndipo kifaa kitoke kweli.
+            for token in OutstandingToken.objects.filter(jti=sess.refresh_jti):
+                BlacklistedToken.objects.get_or_create(token=token)
+            sess.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -266,15 +280,42 @@ class RevokeOtherSessionsView(APIView):
         from rest_framework_simplejwt.token_blacklist.models import (
             BlacklistedToken, OutstandingToken,
         )
-        current_jti = request.data.get("current_jti") or ""
+        # Tunahitaji kujua kifaa cha SASA ili tusikitoe. Frontend itume `refresh`
+        # (tunasoma jti yake) au `current_jti`. Bila hivyo, kataa — awali
+        # ilitoa vifaa VYOTE ikiwemo cha sasa.
+        current_jti = (request.data.get("current_jti") or "").strip()
+        if not current_jti:
+            raw_refresh = (request.data.get("refresh") or "").strip()
+            if raw_refresh:
+                try:
+                    tok = RefreshToken(raw_refresh)
+                    if str(tok.get("user_id")) == str(request.user.pk):
+                        current_jti = str(tok["jti"])
+                except TokenError:
+                    current_jti = ""
+        if not current_jti:
+            return Response(
+                {
+                    "detail": "Hatuwezi kutambua kifaa chako cha sasa. Ingia upya kisha ujaribu tena.",
+                    "code": "current_session_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         others = UserSession.objects.filter(user=request.user).exclude(
             refresh_jti=current_jti,
         )
-        jtis = list(others.values_list("refresh_jti", flat=True))
-        for token in OutstandingToken.objects.filter(jti__in=jtis):
-            BlacklistedToken.objects.get_or_create(token=token)
+        # Blacklist refresh token ZOTE zilizotolewa kwa mtumiaji huyu (isipokuwa ya sasa),
+        # si zile za UserSession pekee: kwa refresh rotation, jti ya kwenye UserSession
+        # inachakaa na kuzi-blacklist peke yake hakutoi kifaa kilichoshafanya refresh.
+        outstanding = OutstandingToken.objects.filter(
+            user=request.user, expires_at__gt=timezone.now(),
+        ).exclude(jti=current_jti)
+        revoked = 0
+        for token in outstanding:
+            _bl, created = BlacklistedToken.objects.get_or_create(token=token)
+            revoked += int(created)
         others.delete()
-        return Response({"revoked": len(jtis)})
+        return Response({"revoked": revoked})
 
 
 # ============================================================
@@ -349,7 +390,7 @@ class DataExportView(APIView):
 
         # ✅ Jina la faili: data-exports/user_<id>/sokomkononi-data-<ts>-<rand>.json
         timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
-        random_suffix = secrets.token_hex(4)
+        random_suffix = secrets.token_urlsafe(16)  # awali token_hex(4) = biti 32 tu; faili lina data binafsi
         filename = (
             f"data-exports/user_{user.pk}/"
             f"sokomkononi-data-{timestamp}-{random_suffix}.json"
@@ -368,7 +409,7 @@ class DataExportView(APIView):
             url = f"{settings.MEDIA_URL}{saved_path}"
 
         retention_days = getattr(settings, "DATA_EXPORT_RETENTION_DAYS", 7)
-        expires_at = timezone.now() + timezone.timedelta(days=retention_days)
+        expires_at = timezone.now() + timedelta(days=retention_days)
 
         return Response({
             "url": url,

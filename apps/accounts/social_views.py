@@ -15,6 +15,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .session_tracking import record_session
+from .tokens import create_2fa_challenge_token
+
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
@@ -30,8 +33,10 @@ def _claim_true(v):
     return v is True or str(v).lower() == "true"
 
 
-def _issue_jwt(user):
+def _issue_jwt(user, request=None):
     refresh = RefreshToken.for_user(user)
+    if request is not None:
+        record_session(request, refresh, user)
     return {
         "access": str(refresh.access_token),
         "refresh": str(refresh),
@@ -176,10 +181,38 @@ class SocialLoginView(APIView):
                 user.name = name
                 user.save(update_fields=["name"])
 
+        # Akaunti iliyozimwa/kupigwa marufuku isiingie kupitia Google/Apple.
+        # (LoginSerializer inakagua is_active; njia hii haikukagua.)
+        if not user.is_active:
+            return Response(
+                {"detail": "Akaunti yako haipo hai."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         # Email imethibitishwa na Google/Apple. Fanya kila login (huwarekebisha
         # pia waliokwama). is_verified (beji ya admin) HAIGUSWI.
         if not user.email_verified:
             user.email_verified = True
             user.save(update_fields=["email_verified"])
 
-        return Response(_issue_jwt(user), status=status.HTTP_200_OK)
+        # 2FA: kwa chaguo-msingi social login HAIOMBI 2FA (tabia ya sasa, haibadiliki).
+        # Weka SOCIAL_LOGIN_ENFORCES_2FA = True kwenye settings ili watumiaji wenye
+        # 2FA wapewe challenge kama password login. ONYO: frontend ya social login
+        # lazima ishughulikie `requires_2fa` kabla ya kuwasha.
+        if getattr(settings, "SOCIAL_LOGIN_ENFORCES_2FA", False):
+            totp = getattr(user, "totp", None)
+            if (
+                totp is not None
+                and totp.enabled
+                and not (user.is_staff or user.is_superuser)
+            ):
+                return Response(
+                    {
+                        "requires_2fa": True,
+                        "code_token": create_2fa_challenge_token(user),
+                        "message": "Weka nambari kutoka kwenye authenticator app.",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        return Response(_issue_jwt(user, request), status=status.HTTP_200_OK)

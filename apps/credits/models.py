@@ -86,3 +86,39 @@ class UserService(models.Model):
 
     def __str__(self):
         return f"{self.user} — {self.service_key}"
+
+
+class CreditUsage(models.Model):
+    """
+    Historia ya matumizi ya credits — inaandikwa ndani ya consume_credit().
+    Inatumiwa na GET /api/credits/usage/ (ukurasa wa Bundles → "Historia ya Matumizi").
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="credit_usages",
+        verbose_name="Mtumiaji",
+    )
+    service_key = models.CharField(max_length=50, verbose_name="Huduma")
+    amount = models.PositiveIntegerField(default=1, verbose_name="Kiasi")
+    balance_after = models.PositiveIntegerField(
+        default=0, verbose_name="Zilizobaki baada ya matumizi",
+    )
+    reference = models.CharField(
+        max_length=255, blank=True,
+        help_text="Mfano: 'transactions_report', 'listing:123'.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "credit_usages"
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Matumizi ya credit"
+        verbose_name_plural = "Matumizi ya credits"
+        indexes = [
+            models.Index(fields=["user", "-created_at"], name="cu_user_created_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user} — {self.service_key} -{self.amount}"

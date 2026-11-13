@@ -2,7 +2,10 @@ from django.urls import path
 
 from .views import PublicStatsView 
 
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
+
+from .session_tracking import rotate_session
 
 from .social_views import SocialLoginView
 from .views_2fa import (
@@ -38,6 +41,24 @@ from .views import (
 
 class ThrottledTokenRefreshView(TokenRefreshView):
     throttle_scope = "refresh"
+
+    def post(self, request, *args, **kwargs):
+        # Kwa ROTATE_REFRESH_TOKENS, jti inabadilika kila refresh — UserSession
+        # lazima ifuate, la sivyo orodha ya vifaa inachakaa.
+        old_jti = None
+        try:
+            old_jti = str(RefreshToken(request.data.get("refresh") or "")["jti"])
+        except Exception:
+            old_jti = None
+        response = super().post(request, *args, **kwargs)
+        if response.status_code == 200 and old_jti:
+            new_refresh = response.data.get("refresh") if hasattr(response, "data") else None
+            if new_refresh:
+                try:
+                    rotate_session(old_jti, str(RefreshToken(new_refresh)["jti"]))
+                except Exception:
+                    pass
+        return response
 
 
 app_name = "accounts"

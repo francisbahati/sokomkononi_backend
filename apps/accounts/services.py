@@ -447,6 +447,13 @@ def reset_user_password(user, new_password):
 
 
 def _blacklist_user_refresh_tokens(user):
+    # Token zikifutwa, safu za vifaa pia zifutwe — la sivyo orodha ya vifaa inaonyesha
+    # vifaa ambavyo tayari vimetolewa.
+    try:
+        from .models import UserSession
+        UserSession.objects.filter(user=user).delete()
+    except Exception:
+        pass
     try:
         from rest_framework_simplejwt.token_blacklist.models import (
             BlacklistedToken,

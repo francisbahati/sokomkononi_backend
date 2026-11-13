@@ -8,7 +8,7 @@ kila huduma badala ya kulipa kwa FimiPay.
 from django.db import transaction
 from django.utils import timezone
 
-from .models import UserCredit, UserService
+from .models import CreditUsage, UserCredit, UserService
 
 
 def has_service(user, service_key):
@@ -51,7 +51,7 @@ def has_credit(user, service_key, required=1):
 
 
 @transaction.atomic
-def consume_credit(*, user, service_key, required=1):
+def consume_credit(*, user, service_key, required=1, reference=""):
     """
     Consume `required` credits of `service_key` for `user`.
 
@@ -85,6 +85,14 @@ def consume_credit(*, user, service_key, required=1):
 
     credit.remaining -= required
     credit.save(update_fields=["remaining", "updated_at"])
+    # Rekodi matumizi ndani ya transaction ile ile — credit ikitumika, historia ipo.
+    CreditUsage.objects.create(
+        user=user,
+        service_key=service_key,
+        amount=required,
+        balance_after=credit.remaining,
+        reference=(reference or "")[:255],
+    )
     return True
 
 

@@ -9,6 +9,7 @@ from .serializers import (
     WaitingListEntrySerializer,
 )
 from .services.waiting_list import (
+    claim_waitlist_entry,
     join_waiting_list,
     leave_waiting_list,
 )
@@ -16,7 +17,7 @@ from .services.waiting_list import (
 
 class IsVerifiedWaitingListUser(permissions.BasePermission):
     message = (
-        "Akaunti yako lazima iwe active na imethibitishwa "
+        "Akaunti yako lazima iwe active na barua pepe imethibitishwa "
         "ili kutumia waiting list."
     )
 
@@ -27,7 +28,9 @@ class IsVerifiedWaitingListUser(permissions.BasePermission):
             user
             and user.is_authenticated
             and user.is_active
-            and user.is_verified
+            # email_verified (si is_verified): is_verified ni beji ya admin tu,
+            # na watumiaji wa kawaida hawaipati — walizuiwa wote kuona waiting list.
+            and user.email_verified
         )
 
 
@@ -152,150 +155,28 @@ class WaitingListViewSet(viewsets.GenericViewSet):
     def claim(self, request, pk=None):
         """
         Buyer claims a NOTIFIED waitlist slot and starts a reservation.
-
-        Enforces:
-          - entry.status == NOTIFIED
-          - entry.buyer == request.user
-          - respond_by (if set) has not passed
-          - listing is still LIVE
+        Mantiki yote (locks, deal room, tiers, makosa yenye `code`) iko kwenye
+        services.waiting_list.claim_waitlist_entry — view hii inaiita tu.
         """
-        from django.utils import timezone
-        from apps.transactions.models import Transaction
-        from rest_framework.exceptions import ValidationError as DRFValidationError
-        from apps.transactions.services.reservation import (
-            create_reservation,
-            get_allowed_reservation_hours,
-        )
-
         entry = self.get_queryset().filter(pk=pk).first()
         if not entry:
             return Response(
-                {"detail": "Haipatikani."},
+                {"detail": "Haipatikani.", "code": "not_found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if entry.buyer_id != request.user.id:
-            return Response(
-                {"detail": "Huna ruhusa."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if entry.status != WaitingListEntry.Status.NOTIFIED:
-            return Response(
-                {
-                    "detail": (
-                        "Nafasi yako bado haijafunguliwa. "
-                        "Subiri taarifa ya kukamilisha reservation."
-                    ),
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        respond_by = getattr(entry, "respond_by", None)
-        if respond_by and respond_by <= timezone.now():
-            return Response(
-                {"detail": "Muda wa kuchukua nafasi umepita."},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        listing = entry.listing
-        if listing.status != "LIVE":
-            return Response(
-                {"detail": "Tangazo halipo tena."},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        # Reuse an existing transaction, or create one, then start a
-        # reservation on behalf of the buyer.
-        from apps.deals.models import DealRoom
-        deal_room = (
-            DealRoom.objects
-            .filter(listing=listing, buyer=request.user)
-            .order_by("-created_at")
-            .first()
+        result = claim_waitlist_entry(
+            entry=entry,
+            user=request.user,
+            duration_hours=request.data.get("duration_hours"),
         )
-        if not deal_room:
-            return Response(
-                {
-                    "detail": (
-                        "Anzisha mazungumzo (Deal Room) na muuzaji "
-                        "kwanza ili kuweka reservation."
-                    ),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Muda: tier yoyote hai (mnunuzi anachagua). Bila chaguo -> tier
-        # ndogo kuliko zote iliyo hai.
-        allowed = sorted(get_allowed_reservation_hours())
-        if not allowed:
-            return Response(
-                {"detail": "Hakuna tiers za reservation zilizo hai."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        raw_hours = request.data.get("duration_hours")
-        if raw_hours in (None, ""):
-            duration_hours = allowed[0]
-        else:
-            try:
-                duration_hours = int(raw_hours)
-            except (TypeError, ValueError):
-                return Response(
-                    {"detail": "Muda wa reservation si sahihi."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if duration_hours not in allowed:
-                return Response(
-                    {
-                        "detail": (
-                            "Chagua muda mmoja wa saa: "
-                            + ", ".join(str(h) for h in allowed)
-                        ),
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        txn, _ = Transaction.objects.get_or_create(
-            deal_room=deal_room,
-            defaults={
-                "listing": listing,
-                "buyer": request.user,
-                "seller": listing.seller,
-                "agreed_price": deal_room.agreed_price or listing.price,
-                "status": Transaction.Status.RESERVATION_PENDING,
-            },
-        )
-
-        try:
-            reservation = create_reservation(
-                transaction=txn,
-                user=request.user,
-                duration_hours=duration_hours,
-            )
-        except DRFValidationError as exc:
-            detail = exc.detail
-            if isinstance(detail, (list, tuple)) and detail:
-                detail = str(detail[0])
-            elif isinstance(detail, dict):
-                detail = "; ".join(str(v) for v in detail.values())
-            return Response(
-                {"detail": str(detail)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Mark the waitlist entry as FULFILLED so it drops out of queue.
-        # Kama hatalipa kwa wakati, anarudishwa kwenye foleni
-        # (angalia restore_waiting_list_entry).
-        entry.status = WaitingListEntry.Status.FULFILLED
-        entry.save(update_fields=["status", "updated_at"])
-
         return Response(
             {
                 "ok": True,
-                "waiting_list_id": entry.id,
-                "transaction_id": txn.id,
-                "reservation_id": reservation.id,
-                "reservation_status": reservation.status,
+                "waiting_list_id": result["entry"].id,
+                "transaction_id": result["transaction"].id,
+                "reservation_id": result["reservation"].id,
+                "reservation_status": result["reservation"].status,
             },
             status=status.HTTP_200_OK,
         )

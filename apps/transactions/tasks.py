@@ -11,6 +11,9 @@ Drives time-based transitions:
     - ACTIVE reservations approaching their expiry trigger a
       warning notification so the buyer can act in time.
 
+    - RECONCILE: listings stuck on RESERVED with no holding transaction
+      are returned to LIVE (safety net for failed/missed expiries).
+
 MPYA:
     - notify_expiring_in_5_minutes: email + in-app 5 min kabla ya
       reservation kuexpire (buyer).
@@ -484,3 +487,73 @@ def notify_waiting_list_expiring():
         "notify_waiting_list_expiring: notified=%s", notified,
     )
     return {"notified": notified}
+
+
+# ============================================================
+# RECONCILE STUCK RESERVED LISTINGS
+# ============================================================
+@shared_task(name="transactions.reconcile_stuck_reserved_listings")
+def reconcile_stuck_reserved_listings():
+    """
+    Listing iliyo RESERVED lakini haina transaction inayoishikilia kihalali
+    (RESERVED / INSPECTION / READY_FOR_FINAL_PAYMENT / DISPUTED)
+    inarudishwa LIVE, na waiting list inaarifiwa.
+
+    Safety net: inashughulikia mali zilizokwama (mf. expire_reservation
+    ilishindwa katikati). Ni idempotent; ina grace ya dakika 10 ili
+    isigongane na malipo/uanzishaji wa reservation unaoendelea.
+    """
+    from django.db import transaction as db_transaction
+    from apps.waiting_list.services.notifications import notify_waiting_buyers
+
+    now = timezone.now()
+    holding = [
+        Transaction.Status.RESERVED,
+        Transaction.Status.INSPECTION,
+        Transaction.Status.READY_FOR_FINAL_PAYMENT,
+        Transaction.Status.DISPUTED,
+    ]
+
+    ids = list(
+        Listing.objects
+        .filter(
+            status=Listing.Status.RESERVED,
+            updated_at__lt=now - timedelta(minutes=10),
+        )
+        .exclude(transactions__status__in=holding)
+        .values_list("pk", flat=True)
+    )
+
+    reopened = 0
+    failed = 0
+
+    for pk in ids:
+        try:
+            with db_transaction.atomic():
+                listing = Listing.objects.select_for_update().get(pk=pk)
+                if listing.status != Listing.Status.RESERVED:
+                    continue
+                # Rudia ndani ya lock (huenda hali imebadilika)
+                if Transaction.objects.filter(
+                    listing=listing, status__in=holding,
+                ).exists():
+                    continue
+                listing.status = Listing.Status.LIVE
+                listing.save(update_fields=["status", "updated_at"])
+            reopened += 1
+            try:
+                notify_waiting_buyers(listing=listing)
+            except Exception:
+                logger.exception(
+                    "waiting-list notify failed for listing %s", pk
+                )
+        except Exception:
+            failed += 1
+            logger.exception("reconcile failed for listing %s", pk)
+
+    logger.info(
+        "reconcile_stuck_reserved_listings: reopened=%s failed=%s",
+        reopened,
+        failed,
+    )
+    return {"reopened": reopened, "failed": failed}

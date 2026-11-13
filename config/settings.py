@@ -569,7 +569,8 @@ CELERY_IMPORTS = ("apps.listings.price_drop", "apps.searches.alerts")
 
 CELERY_BEAT_SCHEDULE = {
     "purge-soft-deleted": {"task": "core.purge_soft_deleted", "schedule": crontab(hour=3, minute=0)},
-    "expire-stale-reservations": {"task": "transactions.expire_stale_reservations", "schedule": crontab(minute="*/15")},
+    "expire-stale-reservations": {"task": "transactions.expire_stale_reservations", "schedule": crontab(minute="*")},
+    "reconcile-stuck-reserved": {"task": "transactions.reconcile_stuck_reserved_listings", "schedule": crontab(minute="*/5")},
     "expire-unpaid-reservations": {"task": "transactions.expire_unpaid_reservations", "schedule": crontab(minute="*/10")},
     "expire-stale-inspections": {"task": "transactions.expire_stale_inspections", "schedule": crontab(minute="*/15")},
     "warn-expiring-reservations": {"task": "transactions.warn_expiring_reservations", "schedule": crontab(minute=0)},

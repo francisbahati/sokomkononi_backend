@@ -1,16 +1,12 @@
+from apps.core.permissions import IsSuperUser as IsSuperUser2FA
 from django.shortcuts import get_object_or_404
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.response import Response
 
 
-class IsSuperUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_superuser
-        )
+# Staff/superuser + 2FA (angalia apps/core/admin_2fa.py)
+IsSuperUser = IsSuperUser2FA
 
 
 from apps.core.permissions import IsAdminUser  # noqa: E402

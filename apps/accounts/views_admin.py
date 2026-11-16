@@ -10,6 +10,8 @@ from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+from apps.core.admin_2fa import IsAdminWith2FA
+
 from .models import User
 from .serializers import AdminUserSerializer
 from .services import get_user_role
@@ -18,13 +20,8 @@ from .services import get_user_role
 logger = logging.getLogger(__name__)
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminUser = IsAdminWith2FA
 
 
 class AdminUserPagination(PageNumberPagination):

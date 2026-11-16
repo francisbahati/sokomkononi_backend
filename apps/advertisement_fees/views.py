@@ -1,4 +1,6 @@
 # apps/advertisement_fees/views.py
+from apps.core.permissions import IsAdminOrReadOnly as IsAdminOrReadOnly2FA
+from apps.core.admin_2fa import IsAdminWith2FA
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -10,15 +12,8 @@ from .serializers import (
 )
 
 
-class IsAdminOrReadOnly(permissions.BasePermission):
-    def has_permission(self, request, view):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff/superuser + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminOrReadOnly = IsAdminOrReadOnly2FA
 
 
 class AdvertisementFeeConfigViewSet(viewsets.GenericViewSet):
@@ -27,7 +22,7 @@ class AdvertisementFeeConfigViewSet(viewsets.GenericViewSet):
     def get_permissions(self):
         if self.action in ["list", "retrieve"]:
             return [permissions.AllowAny()]
-        return [permissions.IsAdminUser()]
+        return [IsAdminWith2FA()]
 
     def list(self, request):
         obj = AdvertisementFeeConfig.get_solo()
@@ -47,7 +42,7 @@ class AdvertisementFeeConfigViewSet(viewsets.GenericViewSet):
         serializer.save()
         return Response(serializer.data)
 
-    @action(detail=False, methods=["post"], url_path="toggle", permission_classes=[permissions.IsAdminUser])
+    @action(detail=False, methods=["post"], url_path="toggle", permission_classes=[IsAdminWith2FA])
     def toggle(self, request):
         obj = AdvertisementFeeConfig.get_solo()
         obj.is_enabled = not obj.is_enabled

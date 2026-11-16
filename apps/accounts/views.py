@@ -214,11 +214,10 @@ class LoginView(APIView):
         user = serializer.validated_data["user"]
         clear_failures(identifier, ip)
 
-        # 2FA: password ni sahihi lakini hatutoi token kamili bado
-        # (admin/staff hawatumii 2FA)
+        # 2FA: password ni sahihi lakini hatutoi token kamili bado.
+        # Inatumika kwa watumiaji wote, admin/staff wakiwemo.
         totp = getattr(user, "totp", None)
-        is_admin_user = user.is_staff or user.is_superuser
-        if totp is not None and totp.enabled and not is_admin_user:
+        if totp is not None and totp.enabled:
             logger.info("[login] 2fa required user_id=%s", user.pk)
             return Response(
                 {

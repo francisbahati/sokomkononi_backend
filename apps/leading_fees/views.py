@@ -1,4 +1,6 @@
 # apps/leading_fees/views.py
+from apps.core.permissions import IsAdminOrReadOnly as IsAdminOrReadOnly2FA
+from apps.core.admin_2fa import IsAdminWith2FA
 from datetime import timedelta
 
 from django.shortcuts import get_object_or_404
@@ -22,15 +24,8 @@ from .serializers import (
 from .services import create_leading, initiate_leading_payment
 
 
-class IsAdminOrReadOnly(permissions.BasePermission):
-    def has_permission(self, request, view):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff/superuser + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminOrReadOnly = IsAdminOrReadOnly2FA
 
 
 class LeadingFeeConfigViewSet(viewsets.GenericViewSet):
@@ -40,7 +35,7 @@ class LeadingFeeConfigViewSet(viewsets.GenericViewSet):
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [permissions.AllowAny()]
-        return [permissions.IsAdminUser()]
+        return [IsAdminWith2FA()]
 
     def get_object(self):
         return LeadingFeeConfig.get_solo()

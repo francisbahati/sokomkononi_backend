@@ -9,6 +9,7 @@ Public DRF endpoints exposing FimiPay to SokoMkononi staff and users.
   GET  /api/payments/payouts/<id>/       retrieve one payout (staff)
   POST /api/payments/payouts/<id>/sync/  force status refresh (staff)
 """
+from apps.core.admin_2fa import IsAdminWith2FA
 import logging
 
 from django.conf import settings
@@ -140,7 +141,7 @@ def _user_owns_order(user, prefix, ref_id):
 # ============================================================
 
 @api_view(["POST"])
-@permission_classes([permissions.IsAdminUser])
+@permission_classes([IsAdminWith2FA])
 def create_order_view(request):
     serializer = CreateOrderSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -187,7 +188,7 @@ def order_status_view(request):
 # ============================================================
 
 @api_view(["GET"])
-@permission_classes([permissions.IsAdminUser])
+@permission_classes([IsAdminWith2FA])
 def transactions_view(request):
     data = fp_list_transactions()
     return Response({"count": len(data), "results": data})
@@ -225,7 +226,7 @@ class PayoutListCreateView(generics.ListAPIView):
     GET  /api/payments/payouts/    list every payout (staff)
     POST /api/payments/payouts/create/  request a payout (staff)
     """
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
     serializer_class = PayoutSerializer
     pagination_class = PageNumberPagination
 
@@ -234,7 +235,7 @@ class PayoutListCreateView(generics.ListAPIView):
 
 
 class PayoutCreateView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request):
         from django.core.cache import cache
@@ -269,7 +270,7 @@ class PayoutCreateView(APIView):
 
 
 class PayoutDetailView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def get(self, request, pk):
         payout = get_object_or_404(Payout, pk=pk)
@@ -278,7 +279,7 @@ class PayoutDetailView(APIView):
 
 class PayoutSyncView(APIView):
     """Force-refresh a payout's status from FimiPay."""
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, pk):
         payout = get_object_or_404(Payout, pk=pk)

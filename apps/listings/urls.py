@@ -8,6 +8,7 @@ from .views import (
     AdminBulkDeleteView,
     AdminBulkRejectView,
     AdminDraftListingsView,
+    AdminListingStatusCountsView,
     AdminPendingListingsView,
     AdminRejectListingView,
     BusinessDetailsViewSet,
@@ -123,6 +124,11 @@ urlpatterns = [
         "admin/pending/",
         admin_pending_listings,
         name="admin-pending-listings",
+    ),
+    path(
+        "admin/status-counts/",
+        AdminListingStatusCountsView.as_view(),
+        name="admin-status-counts",
     ),
     path(
         "admin/drafts/",

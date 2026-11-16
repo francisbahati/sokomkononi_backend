@@ -7,10 +7,16 @@ from .views import (
     AdminRejectListingView,
     AdminRequestEditListingView,
     AdminRequestPaymentListingView,
+    AdminListingStatusCountsView,
 )
 
 
 urlpatterns = [
+    path(
+        "status-counts/",
+        AdminListingStatusCountsView.as_view(),
+        name="admin-listings-status-counts",
+    ),
     path(
         "pending/",
         AdminPendingListingsView.as_view(),

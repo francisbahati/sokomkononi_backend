@@ -6,6 +6,8 @@
 #    unmark_popular/delete kwa categories nyingi kwa wakati mmoja
 #  - Audit log: category.bulk_<action> (sasa na params=)
 # ============================================================
+from apps.core.permissions import IsAdminOrReadOnly as IsAdminOrReadOnly2FA
+from apps.core.admin_2fa import IsAdminWith2FA
 import uuid
 
 from django.core.files.base import ContentFile
@@ -26,17 +28,11 @@ from apps.core.mixins import SoftDeleteViewSetMixin
 
 from .models import Category
 from .serializers import CategorySerializer
+from . import stats
 
 
-class IsAdminOrReadOnly(permissions.BasePermission):
-    def has_permission(self, request, view):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff/superuser + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminOrReadOnly = IsAdminOrReadOnly2FA
 
 
 # ============================================================
@@ -87,7 +83,8 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             self.request.user.is_authenticated
             and self.request.user.is_staff
         ):
-            return qs
+            # Staff: ongeza `listings_count` (query moja, subquery)
+            return stats.annotate_listings_count(qs)
         return qs.filter(is_active=True)
 
     def _can_restore(self, instance):
@@ -170,6 +167,23 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         cat_name = instance.name
         cat_slug = instance.slug
 
+        # Usifute category yenye listings (server-side guard)
+        n_listings = getattr(instance, "listings_count", None)
+        if n_listings is None:
+            n_listings = stats.count_for(instance.id) or 0
+        if n_listings > 0:
+            return Response(
+                {
+                    "detail": (
+                        f"Category hii ina listings {n_listings}. "
+                        "Hamisha au ondoa listings hizo kwanza."
+                    ),
+                    "code": "HAS_LISTINGS",
+                    "listings_count": n_listings,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         response = super().destroy(request, *args, **kwargs)
 
         if response.status_code in (
@@ -195,7 +209,7 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         methods=["post"],
         url_path="bulk",
         url_name="bulk",
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[IsAdminWith2FA],
     )
     def bulk(self, request):
         """
@@ -250,6 +264,7 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        skipped = []
         # ── TEKELEZA ACTION ─────────────────────────────────
         if action_name == "enable":
             qs.update(is_active=True)
@@ -260,11 +275,34 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         elif action_name == "unmark_popular":
             qs.update(is_popular=False)
         elif action_name == "delete":
-            # Soft delete — `SoftDeleteQuerySet.delete()` inarudisha
-            # (count, {label: count}) lakini `qs.update()` haifanyi
-            # hivyo. Tunatumia `delete()` ya QuerySet.
-            for cat in qs:
+            # Categories zenye listings HAZIFUTWI (server-side guard).
+            skipped = []
+            deletable = []
+            for cat in stats.annotate_listings_count(qs):
+                n = getattr(cat, "listings_count", None)
+                if n is None:
+                    n = stats.count_for(cat.id) or 0
+                if n > 0:
+                    skipped.append({"id": cat.id, "slug": cat.slug,
+                                    "listings_count": n})
+                else:
+                    deletable.append(cat)
+
+            if not deletable:
+                return Response(
+                    {
+                        "detail": "Categories zote zilizochaguliwa zina listings.",
+                        "code": "HAS_LISTINGS",
+                        "count": 0,
+                        "skipped": skipped,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            # Soft delete — `cat.delete(by=, reason=)` ya model.
+            for cat in deletable:
                 cat.delete(by=request.user, reason="bulk_delete")
+            count = len(deletable)
         else:
             return Response(
                 {"detail": f"action '{action_name}' haijulikani."},
@@ -289,7 +327,27 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
             ),
             "count": count,
             "action": action_name,
+            "skipped": skipped if action_name == "delete" else [],
         })
+
+    # ══════════════════════════════════════════════════════════
+    # STATS — takwimu za listings kwa kila category (admin)
+    # GET /api/categories/stats/?days=30
+    # ══════════════════════════════════════════════════════════
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="stats",
+        url_name="stats",
+        permission_classes=[IsAdminWith2FA],
+    )
+    def stats_view(self, request):
+        try:
+            days = int(request.query_params.get("days", 30))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 365))
+        return Response(stats.build_stats(days=days))
 
     # ══════════════════════════════════════════════════════════
     # UPLOAD IMAGE
@@ -299,7 +357,7 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         methods=["post"],
         url_path="upload-image",
         url_name="upload-image",
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[IsAdminWith2FA],
         parser_classes=[MultiPartParser, FormParser],
     )
     def upload_image(self, request):
@@ -343,7 +401,7 @@ class CategoryViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         methods=["post"],
         url_path="reorder",
         url_name="reorder",
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[IsAdminWith2FA],
     )
     def reorder(self, request):
         order = request.data.get("order") or []

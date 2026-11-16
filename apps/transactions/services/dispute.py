@@ -117,6 +117,52 @@ def resolve_dispute(
     return transaction
 
 
+@db_transaction.atomic
+def admin_cancel_transaction(*, transaction, admin_user, reason):
+    """
+    Admin anaghairi Transaction inayoendelea (reservation, inspection,
+    malipo ya mwisho, au mgogoro) — si lazima iwe DISPUTED.
+
+    Inafanya yale yale ya `_resolve_as_cancelled`: tangazo linarudi LIVE,
+    reservation na inspection zinaghairiwa, wahusika wanaarifiwa, na
+    waiting list inaarifiwa. Ada ya reservation HAIRUDISHWI hapa —
+    admin anaamua kupitia refund_deal_payments.
+    """
+    if not admin_user or not admin_user.is_authenticated or not admin_user.is_staff:
+        raise ValidationError("Ni wasimamizi pekee wanaoweza kughairi muamala.")
+
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError("Sababu ya kughairi ni lazima.")
+
+    locked = (
+        Transaction.objects
+        .select_for_update(of=("self",))
+        .select_related("listing", "deal_room", "buyer", "seller")
+        .get(pk=transaction.pk)
+    )
+
+    if locked.status in (
+        Transaction.Status.COMPLETED,
+        Transaction.Status.CANCELLED,
+    ):
+        raise ValidationError(
+            "Transaction hii tayari imekwisha (imekamilika au imeghairiwa)."
+        )
+
+    _resolve_as_cancelled(
+        transaction=locked,
+        note=reason,
+        now=timezone.now(),
+        admin_user=admin_user,
+        via_dispute=False,
+    )
+    locked.final_payment_due_at = None
+    locked.seller_response_due_at = None
+    locked.save()
+    return locked
+
+
 def _resolve_as_completed(*, transaction, note, now, admin_user=None):
     transaction.status = Transaction.Status.COMPLETED
     transaction.dispute_resolved_by = admin_user
@@ -185,13 +231,18 @@ def _resolve_as_completed(*, transaction, note, now, admin_user=None):
         db_transaction.on_commit(_send)
 
 
-def _resolve_as_cancelled(*, transaction, note, now, admin_user=None):
+def _resolve_as_cancelled(
+    *, transaction, note, now, admin_user=None, via_dispute=True,
+):
     transaction.status = Transaction.Status.CANCELLED
-    transaction.dispute_resolved_by = admin_user
-    transaction.dispute_resolution_note = note
+    if via_dispute:
+        transaction.dispute_resolved_by = admin_user
+        transaction.dispute_resolution_note = note
     transaction.cancelled_at = now
-    transaction.cancellation_reason = (
-        note or "Mgogoro umetatuliwa kwa kughairi muamala."
+    transaction.cancellation_reason = note or (
+        "Mgogoro umetatuliwa kwa kughairi muamala."
+        if via_dispute
+        else "Imeghairiwa na msimamizi."
     )
 
     listing = Listing.objects.select_for_update().get(
@@ -232,17 +283,26 @@ def _resolve_as_cancelled(*, transaction, note, now, admin_user=None):
     for recipient in (transaction.buyer, transaction.seller):
         lang = user_lang(recipient)
         with override(lang):
+            if via_dispute:
+                _title = _("Mgogoro umetatuliwa — Transaction imeghairiwa")
+                _message = _(
+                    "Mgogoro wa Transaction #{id} umetatuliwa na "
+                    "msimamizi. Transaction imeghairiwa na tangazo "
+                    "limerudishwa kwenye hali ya AVAILABLE."
+                ).format(id=transaction.id)
+            else:
+                _title = _("Transaction imeghairiwa na msimamizi")
+                _message = _(
+                    "Transaction #{id} imeghairiwa na msimamizi. "
+                    "Sababu: {reason}. Tangazo limerudishwa hewani."
+                ).format(id=transaction.id, reason=note or "—")
             create_notification(
                 recipient=recipient,
                 notification_type=(
                     Notification.NotificationType.TRANSACTION_CANCELLED
                 ),
-                title=_("Mgogoro umetatuliwa — Transaction imeghairiwa"),
-                message=_(
-                    "Mgogoro wa Transaction #{id} umetatuliwa na "
-                    "msimamizi. Transaction imeghairiwa na tangazo "
-                    "limerudishwa kwenye hali ya AVAILABLE."
-                ).format(id=transaction.id),
+                title=_title,
+                message=_message,
                 priority=Notification.Priority.URGENT,
                 related_object_type="Transaction",
                 related_object_id=transaction.id,

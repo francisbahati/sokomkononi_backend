@@ -7,6 +7,12 @@
 #  - Ondoa __import__() — tumia timezone + Q moja kwa moja
 #  - create(): sent default = False kama scheduled_for ipo
 #  - Audit logging kupitia _log() helper (sasa na params=)
+#  - Scheduling: tangazo lenye scheduled_for linaonekana kwa umma pale
+#    muda unapofika (bila cron). Flag `sent` inasawazishwa kwa staff.
+#  - create(): scheduled_for lazima iwe wakati ujao; `sent` ya mteja
+#    inapuuzwa (server inaamua)
+#  - POST /{id}/send-now/ — tuma tangazo lililopangwa sasa hivi
+#  - PATCH /{id}/ — hariri/badilisha ratiba (ambazo hazijatumwa tu)
 # ============================================================
 from django.db.models import Q
 from django.utils import timezone
@@ -19,6 +25,7 @@ from .models import Announcement
 from .serializers import (
     AnnouncementCreateSerializer,
     AnnouncementSerializer,
+    AnnouncementUpdateSerializer,
 )
 
 
@@ -44,12 +51,29 @@ def _log(request, action, target="", target_id=None, details="", params=None):
         )
 
 
+def published_q(now):
+    """
+    Imetumwa = (ina ratiba na muda umefika) AU (haina ratiba na sent=True).
+    Lazima ilingane na AnnouncementSerializer.published().
+    """
+    return Q(scheduled_for__lte=now) | Q(scheduled_for__isnull=True, sent=True)
+
+
+def sync_due(now):
+    """Sawazisha flag `sent` kwa matangazo yaliyofikia muda wake (idempotent)."""
+    return Announcement.objects.filter(
+        sent=False, scheduled_for__lte=now,
+    ).update(sent=True)
+
+
 class AnnouncementViewSet(viewsets.GenericViewSet):
     """
         GET     /api/announcements/          public: sent ones; admin: all
         GET     /api/announcements/sent/     public: sent ones (paginated)
         GET     /api/announcements/{id}/     public: detail
         POST    /api/announcements/          admin only
+        PATCH   /api/announcements/{id}/     admin only (ambazo hazijatumwa)
+        POST    /api/announcements/{id}/send-now/   admin only
         DELETE  /api/announcements/{id}/     admin only
     """
 
@@ -69,16 +93,15 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Announcement.objects.all()
+        now = timezone.now()
 
-        # Admin/staff wanaona zote
+        # Admin/staff wanaona zote (na flag `sent` inasawazishwa)
         if user.is_authenticated and user.is_staff:
+            sync_due(now)
             return qs
 
-        # Public: sent ones tu, na scheduled_for haijapita au haipo
-        now = timezone.now()
-        return qs.filter(sent=True).filter(
-            Q(scheduled_for__isnull=True) | Q(scheduled_for__lte=now)
-        )
+        # Public: zilizotumwa tu (muda wa ratiba umefika)
+        return qs.filter(published_q(now))
 
     # ------------------------------------------------------------
     # LIST
@@ -111,9 +134,7 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
     )
     def sent(self, request):
         now = timezone.now()
-        qs = Announcement.objects.filter(sent=True).filter(
-            Q(scheduled_for__isnull=True) | Q(scheduled_for__lte=now)
-        )
+        qs = Announcement.objects.filter(published_q(now))
         page = self.paginate_queryset(qs)
         serializer = AnnouncementSerializer(
             page if page is not None else qs, many=True,
@@ -130,11 +151,16 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         d = serializer.validated_data
 
-        # sent default: False kama scheduled_for ipo, True kama haipo
+        # Server inaamua: ratiba ya wakati ujao → itapangwa (sent=False);
+        # bila ratiba → inatumwa sasa. `sent` ya mteja inapuuzwa.
         scheduled = d.get("scheduled_for")
-        sent = d.get("sent")
-        if sent is None:
-            sent = not scheduled
+        if scheduled and scheduled <= timezone.now():
+            return Response(
+                {"detail": "Ratiba lazima iwe wakati ujao.",
+                 "scheduled_for": ["Ratiba lazima iwe wakati ujao."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        sent = not scheduled
 
         obj = Announcement.objects.create(
             type=d["type"],
@@ -160,6 +186,85 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
             AnnouncementSerializer(obj).data,
             status=status.HTTP_201_CREATED,
         )
+
+    # ------------------------------------------------------------
+    # PARTIAL UPDATE — admin only, ambazo hazijatumwa tu
+    # ------------------------------------------------------------
+    def partial_update(self, request, pk=None):
+        obj = self.get_object()
+        if AnnouncementSerializer.published(obj):
+            return Response(
+                {"detail": "Tangazo limeshatumwa; haliwezi kuhaririwa. Lifute na uunde jipya."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = AnnouncementUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+
+        new_sched = d.get("scheduled_for")
+        if new_sched and new_sched <= timezone.now():
+            return Response(
+                {"detail": "Ratiba lazima iwe wakati ujao.",
+                 "scheduled_for": ["Ratiba lazima iwe wakati ujao."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_sched = obj.scheduled_for
+        for field, value in d.items():
+            setattr(obj, field, value)
+        obj.save(update_fields=list(d.keys()) or None)
+
+        _log(
+            request,
+            action="announcement.updated",
+            target="Announcement",
+            target_id=obj.id,
+            details={
+                "sw": f"Tangazo '{obj.title}' limehaririwa"
+                      + (f" (ratiba mpya: {obj.scheduled_for:%Y-%m-%d %H:%M})"
+                         if new_sched and new_sched != old_sched else ""),
+                "en": f"Announcement '{obj.title}' updated"
+                      + (f" (new schedule: {obj.scheduled_for:%Y-%m-%d %H:%M})"
+                         if new_sched and new_sched != old_sched else ""),
+            },
+        )
+        return Response(AnnouncementSerializer(obj).data)
+
+    # ------------------------------------------------------------
+    # SEND NOW — tuma tangazo lililopangwa sasa hivi
+    # ------------------------------------------------------------
+    @action(detail=True, methods=["post"], url_path="send-now")
+    def send_now(self, request, pk=None):
+        obj = self.get_object()
+        if AnnouncementSerializer.published(obj):
+            return Response(
+                {"detail": "Tangazo limeshatumwa."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        now = timezone.now()
+        old_sched = obj.scheduled_for
+        # scheduled_for sasa ni "muda wa kutumwa" halisi (hakuna sent_at field).
+        obj.scheduled_for = now
+        obj.sent = True
+        obj.save(update_fields=["scheduled_for", "sent"])
+
+        _log(
+            request,
+            action="announcement.sent_now",
+            target="Announcement",
+            target_id=obj.id,
+            details={
+                "sw": f"Tangazo '{obj.title}' limetumwa sasa (lilipangwa: "
+                      f"{old_sched:%Y-%m-%d %H:%M})" if old_sched else
+                      f"Tangazo '{obj.title}' limetumwa sasa",
+                "en": f"Announcement '{obj.title}' sent now (was scheduled: "
+                      f"{old_sched:%Y-%m-%d %H:%M})" if old_sched else
+                      f"Announcement '{obj.title}' sent now",
+            },
+        )
+        return Response(AnnouncementSerializer(obj).data)
 
     # ------------------------------------------------------------
     # DESTROY — admin only

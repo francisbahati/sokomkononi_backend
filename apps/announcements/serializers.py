@@ -6,7 +6,12 @@
 #    ili views.create() iweze kuamua sent = not scheduled_for
 #    (bila hii, scheduled_for iliyowekwa ilikuwa inatumwa mara moja)
 #  - AnnouncementSerializer: typeId ni read-only mirror ya type
+#  - `is_published` + `status` (SENT | SCHEDULED | DRAFT) zinahesabiwa
+#    na server: tangazo lenye scheduled_for linahesabiwa limetumwa pale
+#    muda unapofika, bila kutegemea cron/Celery kugeuza `sent`
+#  - AnnouncementUpdateSerializer (PATCH ya matangazo yaliyopangwa)
 # ============================================================
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Announcement
@@ -27,6 +32,24 @@ class AnnouncementSerializer(serializers.ModelSerializer):
     """
 
     typeId = serializers.CharField(source="type", read_only=True)
+    is_published = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+
+    @staticmethod
+    def published(obj, now=None):
+        """Kanuni moja ya 'imetumwa' — inalingana na published_q() kwenye views."""
+        now = now or timezone.now()
+        if obj.scheduled_for:
+            return obj.scheduled_for <= now
+        return bool(obj.sent)
+
+    def get_is_published(self, obj):
+        return self.published(obj)
+
+    def get_status(self, obj):
+        if self.published(obj):
+            return "SENT"
+        return "SCHEDULED" if obj.scheduled_for else "DRAFT"
 
     class Meta:
         model = Announcement
@@ -35,6 +58,7 @@ class AnnouncementSerializer(serializers.ModelSerializer):
             "title", "title_en",
             "message", "message_en",
             "scheduled_for", "sent",
+            "is_published", "status",
             "created_by", "created_at",
         ]
         read_only_fields = ["id", "created_by", "created_at"]
@@ -61,4 +85,18 @@ class AnnouncementCreateSerializer(serializers.Serializer):
     message = serializers.CharField()
     message_en = serializers.CharField(required=False, allow_blank=True)
     scheduled_for = serializers.DateTimeField(required=False, allow_null=True)
-    sent = serializers.BooleanField(required=False)  # ⬅️ Ondoa default=True
+    # Inapokelewa kwa backwards-compat lakini INAPUUZWA: server huamua
+    # `sent` kutokana na scheduled_for (angalia views.create).
+    sent = serializers.BooleanField(required=False)
+
+
+class AnnouncementUpdateSerializer(serializers.Serializer):
+    """PATCH — matangazo ambayo bado hayajatumwa tu. Fields zote ni hiari."""
+
+    type = serializers.ChoiceField(choices=Announcement.Type.choices, required=False)
+    title = serializers.CharField(max_length=255, required=False)
+    title_en = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    message = serializers.CharField(required=False)
+    message_en = serializers.CharField(required=False, allow_blank=True)
+    # allow_null=False: kuondoa ratiba = tumia /send-now/ (au futa tangazo)
+    scheduled_for = serializers.DateTimeField(required=False)

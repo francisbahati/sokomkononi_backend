@@ -5,6 +5,7 @@ from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.admin_2fa import IsAdminWith2FA
 from apps.deals.models import DealRoom
 from apps.listings.models import Listing
 
@@ -12,13 +13,8 @@ from .models import User
 from .serializers import AdminUserSerializer, ProfileSerializer
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminUser = IsAdminWith2FA
 
 
 class AdminUserFullView(APIView):

@@ -189,6 +189,27 @@ class SocialLoginView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # Akaunti za staff/admin haziingii kwa Google/Apple: njia hii inapita
+        # nenosiri na 2FA. Wanaingia kwenye ukurasa wa admin (nenosiri + 2FA).
+        # Zima kizuizi hiki (dharura tu): ADMIN_REQUIRE_2FA = False.
+        if (user.is_staff or user.is_superuser) and getattr(
+            settings, "ADMIN_REQUIRE_2FA", True
+        ):
+            logger.warning(
+                "[social] staff login blocked user_id=%s provider=%s",
+                user.pk, provider,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "Akaunti za admin haziwezi kuingia kwa Google/Apple. "
+                        "Tumia ukurasa wa admin kuingia kwa nenosiri na 2FA."
+                    ),
+                    "code": "staff_social_login_disabled",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         # Email imethibitishwa na Google/Apple. Fanya kila login (huwarekebisha
         # pia waliokwama). is_verified (beji ya admin) HAIGUSWI.
         if not user.email_verified:
@@ -201,11 +222,7 @@ class SocialLoginView(APIView):
         # lazima ishughulikie `requires_2fa` kabla ya kuwasha.
         if getattr(settings, "SOCIAL_LOGIN_ENFORCES_2FA", False):
             totp = getattr(user, "totp", None)
-            if (
-                totp is not None
-                and totp.enabled
-                and not (user.is_staff or user.is_superuser)
-            ):
+            if totp is not None and totp.enabled:
                 return Response(
                     {
                         "requires_2fa": True,

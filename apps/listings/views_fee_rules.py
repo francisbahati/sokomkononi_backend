@@ -1,3 +1,4 @@
+from apps.core.permissions import IsAdminOrReadOnly as IsAdminOrReadOnly2FA
 from django.db import IntegrityError
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions, status as drf_status, viewsets
@@ -16,15 +17,8 @@ class FeeRulePagination(PageNumberPagination):
     max_page_size = 500
 
 
-class IsAdminOrReadOnly(permissions.BasePermission):
-    def has_permission(self, request, view):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff/superuser + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminOrReadOnly = IsAdminOrReadOnly2FA
 
 
 # ✅ Ongeza params=None kwenye signature

@@ -1,3 +1,4 @@
+from apps.core.admin_2fa import IsAdminWith2FA
 import logging
 
 from django.utils import timezone
@@ -32,7 +33,7 @@ class FeedbackViewSet(viewsets.GenericViewSet):
 
     def get_permissions(self):
         if self.action == "respond":
-            return [permissions.IsAdminUser()]
+            return [IsAdminWith2FA()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
@@ -123,7 +124,7 @@ class FeedbackViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"], url_path="respond",
-            permission_classes=[permissions.IsAdminUser])
+            permission_classes=[IsAdminWith2FA])
     def respond(self, request, pk=None):
         feedback = Feedback.objects.filter(pk=pk).first()
         if not feedback:

@@ -35,4 +35,29 @@ urlpatterns = [
         AdminDealRoomViewSet.as_view({"post": "cancel"}),
         name="admin-deals-cancel",
     ),
+    path(
+        "<int:pk>/intervene/",
+        AdminDealRoomViewSet.as_view({"post": "intervene"}),
+        name="admin-deals-intervene",
+    ),
+    path(
+        "<int:pk>/resolve-dispute/",
+        AdminDealRoomViewSet.as_view({"post": "resolve_dispute"}),
+        name="admin-deals-resolve-dispute",
+    ),
+    path(
+        "<int:pk>/refund/",
+        AdminDealRoomViewSet.as_view({"post": "refund"}),
+        name="admin-deals-refund",
+    ),
+    path(
+        "<int:pk>/expire-reservation/",
+        AdminDealRoomViewSet.as_view({"post": "expire_reservation"}),
+        name="admin-deals-expire-reservation",
+    ),
+    path(
+        "<int:pk>/expire-inspection/",
+        AdminDealRoomViewSet.as_view({"post": "expire_inspection"}),
+        name="admin-deals-expire-inspection",
+    ),
 ]

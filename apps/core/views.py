@@ -5,6 +5,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .admin_2fa import IsAdminWith2FA
 from .constants import AUDIT_PROTECTED_MODEL_NAMES  # kept for compat
 from .models import SoftDeleteModel
 
@@ -421,7 +422,7 @@ def _format_protected(e):
 
 
 class TrashOverviewView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def get(self, request):
         out = []
@@ -440,7 +441,7 @@ class TrashOverviewView(APIView):
 
 
 class TrashListView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def get(self, request, type):
         model = _resolve_model(type)
@@ -479,7 +480,7 @@ class TrashListView(APIView):
 
 
 class TrashRestoreView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, type, pk):
         model = _resolve_model(type)
@@ -504,7 +505,7 @@ class TrashRestoreView(APIView):
 
 
 class TrashPermanentDeleteView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def delete(self, request, type, pk):
         import logging
@@ -596,7 +597,7 @@ class TrashPermanentDeleteView(APIView):
 
 
 class TrashEmptyByTypeView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, type):
         import logging
@@ -662,7 +663,7 @@ class TrashEmptyByTypeView(APIView):
 
 
 class TrashEmptyAllView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request):
         import logging

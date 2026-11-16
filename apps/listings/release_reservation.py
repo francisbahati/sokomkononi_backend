@@ -11,6 +11,7 @@ Mtiririko:
 
 Idempotent: salama kuita wakati hakuna reservation hai.
 """
+from apps.core.admin_2fa import IsAdminWith2FA
 import logging
 from datetime import timedelta
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 class ReleaseReservationView(APIView):
     """Admin-only: rudisha mali hewani + endeleza waiting list."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, pk=None):
         reason = (request.data.get("reason") or "").strip()

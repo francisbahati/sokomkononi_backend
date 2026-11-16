@@ -1,3 +1,4 @@
+from apps.core.admin_2fa import IsAdminWith2FA
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -219,7 +220,7 @@ class NotificationViewSet(
         detail=False,
         methods=["get"],
         url_path="admin-feed",
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[IsAdminWith2FA],
     )
     def admin_feed(self, request):
         """GET /api/notifications/admin-feed/ — all admin-audience items."""

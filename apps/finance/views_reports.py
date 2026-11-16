@@ -1,4 +1,5 @@
 # apps/finance/views_reports.py
+from apps.core.admin_2fa import IsAdminWith2FA
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -23,13 +24,8 @@ from apps.transactions.models import Transaction
 from .services.user_stats import calculate_user_stats
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminUser = IsAdminWith2FA
 
 
 # ============================================================

@@ -62,6 +62,14 @@ _LANG_MESSAGES = {
         "sw": "Akaunti yako imesimamishwa. Tafadhali wasiliana na msaada.",
         "en": "Your account is suspended. Please contact support.",
     },
+    "admin_2fa_required": {
+        "sw": "Akaunti za admin zinahitaji 2FA. Washa 2FA kwenye Wasifu wako kisha ujaribu tena.",
+        "en": "Admin accounts require 2FA. Turn on 2FA in your Profile and try again.",
+    },
+    "admin_2fa_login_required": {
+        "sw": "Ingia tena kwa nenosiri na msimbo wa 2FA ili kuendelea.",
+        "en": "Please log in again with your password and 2FA code to continue.",
+    },
     "server_error": {
         "sw": "Hitilafu imetokea kwenye mfumo. Tafadhali jaribu tena baadaye.",
         "en": "An error occurred on the server. Please try again later.",
@@ -191,7 +199,12 @@ def handler(exc, context):
     # ── Permission yenye sababu maalum (mf. akaunti haijathibitishwa) ──
     if isinstance(exc, PermissionDenied):
         perm_code = exc.get_codes()
-        if isinstance(perm_code, str) and perm_code in ("account_not_verified", "account_inactive"):
+        if isinstance(perm_code, str) and perm_code in (
+            "account_not_verified",
+            "account_inactive",
+            "admin_2fa_required",
+            "admin_2fa_login_required",
+        ):
             env = {
                 "code": perm_code.upper(),
                 "message": _LANG_MESSAGES[perm_code][lang],

@@ -158,6 +158,16 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     paymentProof = serializers.SerializerMethodField()
     payment_state = serializers.SerializerMethodField()
 
+    # ── Transaction / reservation / refund (kwa vitendo vya admin) ──
+    transaction_id = serializers.SerializerMethodField()
+    transaction_status = serializers.SerializerMethodField()
+    inspection_status = serializers.SerializerMethodField()
+    reservation_id = serializers.SerializerMethodField()
+    reservation_status = serializers.SerializerMethodField()
+    reservation_payment_status = serializers.SerializerMethodField()
+    refundable_amount = serializers.SerializerMethodField()
+    refunds = serializers.SerializerMethodField()
+
     # ── MPYA: admin moderation fields ──
     admin_locked = serializers.BooleanField(read_only=True)
     locked_reason = serializers.CharField(read_only=True)
@@ -193,6 +203,10 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
             "reservationFee", "reservationHours",
             "reservationMethod", "reservationExpiresAt",
             "paymentProof", "payment_state",
+            # ── Transaction / reservation / refund ──
+            "transaction_id", "transaction_status", "inspection_status",
+            "reservation_id", "reservation_status",
+            "reservation_payment_status", "refundable_amount", "refunds",
             # ── MPYA: admin moderation ──
             "admin_locked", "locked_reason", "locked_at",
             "locked_by", "locked_by_name", "cancelled_by_admin",
@@ -311,6 +325,51 @@ class AdminDealRoomSerializer(serializers.ModelSerializer):
     def get_reservationExpiresAt(self, obj):
         r = self._reservation(obj)
         return getattr(r, "expires_at", None) if r else None
+
+    # ── Transaction / reservation / refund helpers ──
+    def get_transaction_id(self, obj):
+        txn = self._txn(obj)
+        return txn.id if txn else None
+
+    def get_transaction_status(self, obj):
+        txn = self._txn(obj)
+        return txn.status if txn else None
+
+    def get_inspection_status(self, obj):
+        txn = self._txn(obj)
+        insp = getattr(txn, "inspection_period", None) if txn else None
+        return insp.status if insp else None
+
+    def get_reservation_id(self, obj):
+        r = self._reservation(obj)
+        return r.id if r else None
+
+    def get_reservation_status(self, obj):
+        r = self._reservation(obj)
+        return r.status if r else None
+
+    def get_reservation_payment_status(self, obj):
+        r = self._reservation(obj)
+        return r.payment_status if r else None
+
+    def _refund_overview(self, obj):
+        # Inahesabiwa kwa detail/actions tu (context include_refunds) —
+        # list haifanyi query za ziada kwa kila row.
+        if not self.context.get("include_refunds"):
+            return None
+        cache = self.context.setdefault("_refund_cache", {})
+        if obj.pk not in cache:
+            from .services.admin_refunds import refund_overview
+            cache[obj.pk] = refund_overview(obj)
+        return cache[obj.pk]
+
+    def get_refundable_amount(self, obj):
+        ov = self._refund_overview(obj)
+        return ov["refundable_amount"] if ov else None
+
+    def get_refunds(self, obj):
+        ov = self._refund_overview(obj)
+        return ov["items"] if ov else []
 
     def get_payment_state(self, obj):
         from apps.transactions.services.payment_rules import (
@@ -469,5 +528,78 @@ class AdminDealCancelSerializer(serializers.Serializer):
         if deal_room.status == DealRoom.Status.COMPLETED:
             raise serializers.ValidationError(
                 "Deal Room iliyokamilika haiwezi kughairiwa."
+            )
+        return attrs
+
+
+class AdminDealResolveDisputeSerializer(serializers.Serializer):
+    """
+    Admin anatatua mgogoro wa transaction ya deal hii.
+    COMPLETED = mauzo yanaheshimiwa (tangazo -> SOLD).
+    CANCELLED = muamala unaghairiwa (tangazo -> LIVE).
+    """
+    resolution = serializers.CharField(required=True)
+    note = serializers.CharField(
+        required=True, allow_blank=False, trim_whitespace=True,
+        max_length=1000,
+    )
+
+    def validate_resolution(self, value):
+        value = (value or "").strip().upper()
+        if value not in {"COMPLETED", "CANCELLED"}:
+            raise serializers.ValidationError(
+                "Uamuzi lazima uwe COMPLETED au CANCELLED."
+            )
+        return value
+
+    def validate_note(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError(
+                "Maelezo ya uamuzi ni lazima."
+            )
+        return value
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        deal_room = self.context.get("deal_room")
+        if not deal_room:
+            raise serializers.ValidationError("Deal Room haijapatikana.")
+        if not request or not request.user.is_staff:
+            raise serializers.ValidationError(
+                "Ni admin pekee anayeweza kutatua mgogoro."
+            )
+        txn = getattr(deal_room, "transaction", None)
+        if not txn:
+            raise serializers.ValidationError(
+                "Deal hii haina transaction."
+            )
+        if txn.status != "DISPUTED":
+            raise serializers.ValidationError(
+                "Deal hii haina mgogoro wazi."
+            )
+        return attrs
+
+
+class AdminDealRefundSerializer(serializers.Serializer):
+    """Admin anaomba refund ya malipo ya reservation ya deal hii."""
+    reason = serializers.CharField(
+        required=True, allow_blank=False, trim_whitespace=True,
+        max_length=1000,
+    )
+
+    def validate_reason(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError(
+                "Sababu ya refund ni lazima."
+            )
+        return value
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        if not request or not request.user.is_staff:
+            raise serializers.ValidationError(
+                "Ni admin pekee anayeweza kuomba refund."
             )
         return attrs

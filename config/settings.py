@@ -394,9 +394,11 @@ REST_FRAMEWORK = {
     # Idadi ya proxies mbele ya app (Traefik = 1; Cloudflare + Traefik = 2).
     "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "2")),
     "URL_FORMAT_OVERRIDE": None,
+    # Admin2FAFlexibleJWTAuthentication = FlexibleJWTAuthentication + ulinzi wa 2FA
+    # kwa staff. DRF inatumia authenticator ya KWANZA tu inayofanikiwa, kwa hiyo
+    # ulinzi uko ndani ya class hii moja — usiongeze class ya pili ya JWT.
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "apps.accounts.authentication.FlexibleJWTAuthentication",
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.core.auth.Admin2FAFlexibleJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.DefaultPagination",
@@ -444,6 +446,22 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
 }
+
+# ---------------- ADMIN 2FA ----------------
+# Staff/superuser hawawezi kutumia API za admin bila 2FA iliyowashwa.
+# Maelezo kamili: apps/core/admin_2fa.py
+ADMIN_REQUIRE_2FA = env_bool("ADMIN_REQUIRE_2FA", True)  # False = dharura tu
+# True = staff asiye na 2FA hawezi hata kusoma (nje ya /api/auth/). Washa baada ya
+# admin wote kuwasha 2FA.
+ADMIN_2FA_GUARD_READS = env_bool("ADMIN_2FA_GUARD_READS", False)
+# True = token lazima iwe na claim `mfa` (imewekwa baada ya code ya 2FA). Admin
+# walioingia kabla yake wataingia tena mara moja.
+ADMIN_2FA_ENFORCE_TOKEN_CLAIM = env_bool("ADMIN_2FA_ENFORCE_TOKEN_CLAIM", False)
+
+# Django admin (/admin/) haina hatua ya 2FA; ifunge production:
+DJANGO_ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", True)   # pendekezo: False
+DJANGO_ADMIN_URL = os.environ.get("DJANGO_ADMIN_URL", "admin")  # pendekezo: njia ya siri
+DJANGO_ADMIN_SUPERUSER_ONLY = env_bool("DJANGO_ADMIN_SUPERUSER_ONLY", False)  # pendekezo: True
 
 # ---------------- SPECTACULAR (SWAGGER) ----------------
 SPECTACULAR_SETTINGS = {

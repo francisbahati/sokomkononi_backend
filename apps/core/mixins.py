@@ -4,6 +4,8 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
+from .admin_2fa import is_staff_with_2fa, require_admin_2fa
+
 
 class SoftDeleteViewSetMixin:
     staff_can_restore_any = True
@@ -16,7 +18,7 @@ class SoftDeleteViewSetMixin:
 
     def _can_restore(self, instance):
         user = self.request.user
-        if user.is_staff and self.staff_can_restore_any:
+        if is_staff_with_2fa(self.request) and self.staff_can_restore_any:
             return True
         owner_field = getattr(self, "owner_field", "seller")
         owner_id = getattr(instance, f"{owner_field}_id", None)
@@ -45,6 +47,7 @@ class SoftDeleteViewSetMixin:
             raise PermissionDenied(
                 "Ni wasimamizi pekee wanaoweza kuona kikapu."
             )
+        require_admin_2fa(request)
 
         qs = self.get_queryset_with_deleted().filter(is_deleted=True)
         page = self.paginate_queryset(qs)

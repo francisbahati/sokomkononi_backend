@@ -183,9 +183,48 @@ def mark_refund_completed(refund, processed_by=None, admin_note="", method=None)
         refund.pk, refund.amount_refunded,
     )
 
+    _sync_source_after_refund(refund)
+
     _notify_user_refund_completed(refund)
 
     return refund
+
+
+def _sync_source_after_refund(refund):
+    """
+    Refund ya RESERVATION/EXTENSION ikikamilika, weka chanzo chake kuwa
+    REFUNDED ili Deal Room na ripoti zionyeshe hali sahihi.
+    """
+    try:
+        now = timezone.now()
+        if refund.promotion_type == Refund.PromotionType.RESERVATION:
+            from apps.transactions.models import Reservation
+
+            Reservation.objects.filter(
+                pk=refund.promotion_id,
+                payment_status=Reservation.PaymentStatus.PAID,
+            ).update(
+                payment_status=Reservation.PaymentStatus.REFUNDED,
+                refund_reference=refund.refund_reference,
+                refunded_at=now,
+                updated_at=now,
+            )
+        elif refund.promotion_type == Refund.PromotionType.EXTENSION:
+            from apps.transactions.models import ReservationExtension
+
+            ReservationExtension.objects.filter(
+                pk=refund.promotion_id,
+                status=ReservationExtension.Status.PAID,
+            ).update(
+                status=ReservationExtension.Status.REFUNDED,
+                refund_reference=refund.refund_reference,
+                refunded_at=now,
+                updated_at=now,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to sync source after refund #%s", refund.pk,
+        )
 
 
 # ============================================================

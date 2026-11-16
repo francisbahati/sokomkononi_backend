@@ -40,11 +40,6 @@ from .session_tracking import record_session
 from .tokens import decode_2fa_challenge_token
 
 LOCKED_MSG = "Majaribio mengi yameshindwa. Subiri dakika 10 kisha ujaribu tena."
-ADMIN_MSG = "Akaunti za admin hazitumii 2FA."
-
-
-def _is_admin(user):
-    return bool(user.is_staff or user.is_superuser)
 
 
 def _qr_data_uri(text):
@@ -80,8 +75,6 @@ class TwoFactorSetupView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        if _is_admin(request.user):
-            return Response({"detail": ADMIN_MSG}, status=status.HTTP_403_FORBIDDEN)
         existing = getattr(request.user, "totp", None)
         if existing and existing.enabled:
             # Usionyeshe secret tena baada ya 2FA kuwashwa
@@ -104,8 +97,6 @@ class TwoFactorVerifyView(APIView):
 
     def post(self, request):
         user = request.user
-        if _is_admin(user):
-            return Response({"detail": ADMIN_MSG}, status=status.HTTP_403_FORBIDDEN)
         if is_locked(user):
             return Response({"detail": LOCKED_MSG}, status=status.HTTP_429_TOO_MANY_REQUESTS)
 
@@ -216,7 +207,7 @@ class TwoFactorChallengeView(APIView):
             )
 
         user = User.objects.filter(pk=user_id, is_active=True).first()
-        if not user or _is_admin(user):
+        if not user:
             return Response(
                 {"detail": "Mtumiaji haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -234,6 +225,10 @@ class TwoFactorChallengeView(APIView):
 
         clear_failures(user)
         refresh = RefreshToken.for_user(user)
+        # Alama kuwa token hii ilipita 2FA (inatumika na IsAdminWith2FA
+        # ukiwasha ADMIN_2FA_ENFORCE_TOKEN_CLAIM). Inarithiwa na access token
+        # na refresh zinazofuata.
+        refresh["mfa"] = True
         record_session(request, refresh, user)
         return Response({
             "message": "Umeingia kwenye akaunti kwa mafanikio.",

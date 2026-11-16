@@ -7,7 +7,7 @@ from django.utils.translation import gettext as _
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import ProtectedError, Q, F
+from django.db.models import Count, ProtectedError, Q, F
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -19,6 +19,7 @@ from drf_spectacular.utils import (
     extend_schema,
     extend_schema_view,
 )
+from apps.core.admin_2fa import IsAdminWith2FA
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
@@ -226,7 +227,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
         elif self.action == "create":
             permission_classes = [IsVerifiedUser]
         elif self.action == "disapprove":
-            permission_classes = [permissions.IsAdminUser]
+            permission_classes = [IsAdminWith2FA]
         elif self.action == "publish":
             permission_classes = [IsVerifiedUser, IsOwnerOrAdmin]
         else:
@@ -509,7 +510,7 @@ class ListingViewSet(SoftDeleteViewSetMixin, viewsets.ModelViewSet):
     )
     @action(
         detail=True, methods=["post"], url_path="disapprove",
-        permission_classes=[permissions.IsAdminUser],
+        permission_classes=[IsAdminWith2FA],
     )
     def disapprove(self, request, pk=None):
         listing = self.get_object()
@@ -1680,7 +1681,7 @@ class AdminPendingListingsView(GenericAPIView):
       • PENDING_APPROVAL      — mpya, haijalipwa, admin anakagua kwanza
       • PAID_PENDING_APPROVAL — imelipwa, admin anaidhinisha mwisho
     """
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
     serializer_class = AdminPendingListingSerializer
 
     def get(self, request):
@@ -1713,11 +1714,47 @@ class AdminPendingListingsView(GenericAPIView):
 
 
 # ============================================================================
+# ADMIN — STATUS COUNTS (kwa tabs za Moderation)
+# ============================================================================
+
+class AdminListingStatusCountsView(APIView):
+    """
+    GET /api/admin/listings/status-counts/
+
+    Idadi ya listings kwa kila tab ya Moderation, kwa query MOJA ya DB.
+    Funguo ni zilezile za tabs za frontend (lowercase). `pending_payment`
+    ni DRAFT + PENDING_PAYMENT (tab ya "Rasimu"); `all` ni jumla ya tabs zote
+    zinazoonyeshwa. Listings zilizofutwa (soft-delete) hazihesabiwi.
+    """
+    permission_classes = [IsAdminWith2FA]
+
+    def get(self, request):
+        S = Listing.Status
+        rows = Listing.objects.values("status").annotate(n=Count("id"))
+        raw = {r["status"]: r["n"] for r in rows}
+
+        counts = {
+            "pending_approval": raw.get(S.PENDING_APPROVAL, 0),
+            "paid_pending_approval": raw.get(S.PAID_PENDING_APPROVAL, 0),
+            "approved_pending_payment": raw.get(S.APPROVED_PENDING_PAYMENT, 0),
+            "needs_edit": raw.get(S.NEEDS_EDIT, 0),
+            "live": raw.get(S.LIVE, 0),
+            "reserved": raw.get(S.RESERVED, 0),
+            "sold": raw.get(S.SOLD, 0),
+            "expired": raw.get(S.EXPIRED, 0),
+            "pending_payment": raw.get(S.DRAFT, 0) + raw.get(S.PENDING_PAYMENT, 0),
+            "rejected": raw.get(S.REJECTED, 0),
+        }
+        counts["all"] = sum(counts.values())
+        return Response(counts, status=status.HTTP_200_OK)
+
+
+# ============================================================================
 # ADMIN — APPROVE
 # ============================================================================
 
 class AdminApproveListingView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, listing_id):
         try:
@@ -1768,7 +1805,7 @@ class AdminApproveListingView(APIView):
 # ============================================================================
 
 class AdminRejectListingView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, listing_id):
         serializer = ListingRejectionSerializer(data=request.data)
@@ -1834,7 +1871,7 @@ class AdminRequestEditListingView(APIView):
     Admin ameomba uhariri. Listing inaenda NEEDS_EDIT.
     Seller anaona notification, anarekebisha, anawasilisha tena.
     """
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, listing_id):
         reason = (request.data.get("reason") or "").strip()
@@ -1891,7 +1928,7 @@ class AdminRequestPaymentListingView(APIView):
     Admin ameona listing ni nzuri. Listing inaenda
     APPROVED_PENDING_PAYMENT. Seller analipa.
     """
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, listing_id):
         reason = (request.data.get("reason") or "").strip()
@@ -1947,7 +1984,7 @@ class AdminFinalizeApprovalView(APIView):
     Admin analidhinisha mwisho baada ya fee kulipwa.
     Listing inaenda LIVE.
     """
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request, listing_id):
         try:
@@ -1995,7 +2032,7 @@ class AdminFinalizeApprovalView(APIView):
 # ============================================================================
 
 class AdminDraftListingsView(GenericAPIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
     serializer_class = AdminPendingListingSerializer
 
     def get(self, request):
@@ -2035,7 +2072,7 @@ class AdminDraftListingsView(GenericAPIView):
 # ============================================================================
 
 class AdminBulkApproveView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request):
         ids = request.data.get("ids") or []
@@ -2065,7 +2102,7 @@ class AdminBulkApproveView(APIView):
 
 
 class AdminBulkRejectView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request):
         ids = request.data.get("ids") or []
@@ -2100,7 +2137,7 @@ class AdminBulkRejectView(APIView):
 
 
 class AdminBulkDeleteView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def post(self, request):
         ids = request.data.get("ids") or []

@@ -1,3 +1,4 @@
+from apps.core.admin_2fa import IsAdminWith2FA
 from django.core.files.storage import default_storage
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
@@ -14,13 +15,8 @@ from .serializers import (
 )
 
 
-class IsAdminUser(permissions.BasePermission):
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminUser = IsAdminWith2FA
 
 
 MODEL_MAP = {

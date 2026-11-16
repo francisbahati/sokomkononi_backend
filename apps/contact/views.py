@@ -1,3 +1,4 @@
+from apps.core.admin_2fa import IsAdminWith2FA
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -42,7 +43,7 @@ class ContactViewSet(viewsets.GenericViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [permissions.AllowAny()]
-        return [permissions.IsAdminUser()]
+        return [IsAdminWith2FA()]
 
     def get_queryset(self):
         return ContactMessage.objects.all().order_by("-created_at")

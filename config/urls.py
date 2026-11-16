@@ -16,10 +16,36 @@ from drf_spectacular.views import (
 
 from apps.core.health import health as _health, health_deep as _health_deep
 
+# ------------------------------------------------------------
+# Django admin (/admin/) — haina hatua ya 2FA (inaingia kwa session +
+# nenosiri), kwa hiyo inadhibitiwa kwa settings. Chaguo-msingi hazibadilishi
+# tabia ya sasa; mapendekezo ya production yako kwenye maelezo ya kila moja:
+#
+#   DJANGO_ADMIN_ENABLED = False         # PENDEKEZO production kama huitumii
+#   DJANGO_ADMIN_URL = "mgt-7f3k2x"      # njia ya siri badala ya "admin"
+#   DJANGO_ADMIN_SUPERUSER_ONLY = True   # staff wa kawaida wasiingie hapa
+# ------------------------------------------------------------
+_DJANGO_ADMIN_ENABLED = getattr(settings, "DJANGO_ADMIN_ENABLED", True)
+_DJANGO_ADMIN_URL = (
+    (getattr(settings, "DJANGO_ADMIN_URL", "admin") or "admin").strip("/") + "/"
+)
+
+if getattr(settings, "DJANGO_ADMIN_SUPERUSER_ONLY", False):
+    _orig_has_permission = admin.site.has_permission
+
+    def _superuser_only(request):
+        return bool(_orig_has_permission(request) and request.user.is_superuser)
+
+    admin.site.has_permission = _superuser_only
+
+_django_admin_urls = (
+    [path(_DJANGO_ADMIN_URL, admin.site.urls)] if _DJANGO_ADMIN_ENABLED else []
+)
+
 urlpatterns = [
     path("health/", _health, name="health"),
     path("health/deep/", _health_deep, name="health-deep"),
-    path("admin/", admin.site.urls),
+    *_django_admin_urls,
     path("api/admin/deals/", include("apps.deals.urls_admin")),
 
     # Schema / docs
@@ -36,7 +62,10 @@ urlpatterns = [
     # Hii inaruhusu server kuwaka bila kosa la "File not found".
     path("favicon.ico", RedirectView.as_view(url="/static/favicon.ico", permanent=False)),
 
-    path("api/", include("apps.accounts.urls")), 
+    # Njia za zamani (/api/login/, /api/2fa/... n.k.) zinabaki zikifanya kazi.
+    # Namespace tofauti inaondoa onyo la urls.W005 (accounts imejumuishwa mara
+    # mbili); `reverse("accounts:...")` inatumia nakala ya /api/auth/.
+    path("api/", include("apps.accounts.urls", namespace="accounts_root")),
 
     # Auth & apps
     path("api/stats/", include("apps.stats.urls")),

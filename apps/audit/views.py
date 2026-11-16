@@ -1,5 +1,7 @@
 # apps/audit/views.py
 
+from apps.core.permissions import IsSuperUser as IsSuperUser2FA
+from apps.core.admin_2fa import IsAdminWith2FA
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -14,14 +16,8 @@ def _request_lang(request):
     return "en" if raw.startswith("en") else "sw"
 
 
-class IsSuperUser(permissions.BasePermission):
-    """Kufuta logs — superuser pekee."""
-    def has_permission(self, request, view):
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_superuser
-        )
+# Staff/superuser + 2FA (angalia apps/core/admin_2fa.py)
+IsSuperUser = IsSuperUser2FA
 
 
 class AuditLogViewSet(viewsets.GenericViewSet):
@@ -37,7 +33,7 @@ class AuditLogViewSet(viewsets.GenericViewSet):
     def get_permissions(self):
         if self.action in ("destroy", "clear"):
             return [IsSuperUser()]
-        return [permissions.IsAdminUser()]
+        return [IsAdminWith2FA()]
 
     def get_queryset(self):
         qs = AuditLog.objects.select_related("admin_user")

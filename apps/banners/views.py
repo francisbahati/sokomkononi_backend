@@ -1,4 +1,6 @@
 # apps/banners/views.py
+from apps.core.permissions import IsAdminOrReadOnly as IsAdminOrReadOnly2FA
+from apps.core.admin_2fa import IsAdminWith2FA
 from datetime import timedelta
 
 from django.db.models import Count, Q
@@ -19,15 +21,8 @@ from .serializers import (
 )
 
 
-class IsAdminOrReadOnly(permissions.BasePermission):
-    def has_permission(self, request, view):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return bool(
-            request.user
-            and request.user.is_authenticated
-            and request.user.is_staff
-        )
+# Staff/superuser + 2FA (angalia apps/core/admin_2fa.py)
+IsAdminOrReadOnly = IsAdminOrReadOnly2FA
 
 
 class BannerAdViewSet(viewsets.ModelViewSet):
@@ -306,7 +301,7 @@ class CampaignViewSet(viewsets.ModelViewSet):
 # PROMOTIONS ANALYTICS
 # ============================================================
 class PromotionsAnalyticsView(viewsets.ViewSet):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminWith2FA]
 
     def list(self, request):
         now = timezone.now()

@@ -1,4 +1,13 @@
 # apps/banners/views.py
+#
+# Marekebisho:
+#  - Banner ni tangazo analolipia MUUZAJI. Staff hawawezi kuiwasha/kuilipia
+#    kwa niaba ya muuzaji (pay) — ni muuzaji mwenyewe tu.
+#  - create(): HAKUNA kizuizi cha is_staff. Staff aliye muuzaji anaweza
+#    kutangaza mali ZAKE kama muuzaji yeyote; services.create_banner_ad
+#    tayari inakataa mali isiyo ya mtumiaji huyo.
+#  - Staff bado wanaweza kuona, kughairi (cancel) na kuondoa (destroy)
+#    banner kwa moderation.
 from apps.core.permissions import IsAdminOrReadOnly as IsAdminOrReadOnly2FA
 from apps.core.admin_2fa import IsAdminWith2FA
 from datetime import timedelta
@@ -163,7 +172,8 @@ class BannerAdViewSet(viewsets.ModelViewSet):
                 {"detail": "Haipatikani."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        if banner.seller_id != request.user.id and not request.user.is_staff:
+        # Muuzaji pekee ndiye analipia/kuwasha banner yake (staff hapana).
+        if banner.seller_id != request.user.id:
             return Response(
                 {"detail": "Huna ruhusa."},
                 status=status.HTTP_403_FORBIDDEN,

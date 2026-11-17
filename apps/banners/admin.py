@@ -15,6 +15,11 @@ class BannerAdAdmin(admin.ModelAdmin):
     search_fields = ("listing_title", "seller_name")
     raw_id_fields = ("listing", "seller", "package")
 
+    def has_add_permission(self, request):
+        # Banner huundwa na muuzaji pekee (API + malipo). Kuunda hapa
+        # kungepita ukaguzi wa umiliki/malipo wa services.create_banner_ad.
+        return False
+
 
 @admin.register(Campaign)
 class CampaignAdmin(admin.ModelAdmin):

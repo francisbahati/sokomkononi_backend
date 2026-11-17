@@ -14,7 +14,7 @@
 #  - POST /{id}/send-now/ — tuma tangazo lililopangwa sasa hivi
 #  - PATCH /{id}/ — hariri/badilisha ratiba (ambazo hazijatumwa tu)
 #  - Tangazo likitumwa (sasa/send-now/ratiba) watumiaji wote wanapata
-#    arifa kupitia Celery (tasks.broadcast_announcement; flush_scheduled
+#    arifa (bell + push + email) kupitia Celery (tasks.broadcast_announcement; flush_scheduled
 #    iliyopo kwenye beat ni sweeper). Kufuta tangazo kunaondoa pia
 #    arifa zake za bell.
 #  - Flag `sent` inasawazishwa na tasks.flush_scheduled (si kwenye GET).

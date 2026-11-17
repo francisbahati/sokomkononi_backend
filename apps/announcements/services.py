@@ -2,21 +2,26 @@
 # apps/announcements/services.py   (FILE MPYA)
 #
 # - Kanuni ya "imetumwa" (is_published / published_q / sync_due)
-# - Utoaji wa arifa (deliver): tangazo likitumwa, watumiaji wanapata
-#   arifa. Njia inayotumika:
-#     1. `apps.notifications.services.send_announcement(announcement)`
-#        kama ipo (ya mradi wako — push/SMS/email kulingana na tasks za
-#        zamani), AU
-#     2. fallback: Notification ya ndani (bell) kwa kila mtumiaji hai.
-#   Njia moja tu hutumika kwa kila tangazo, kwa hiyo hakuna nakala.
+# - Utoaji wa arifa kwa watumiaji wote hai, njia tatu:
+#     1. Bell (Notification ya ndani) — kwa kila mtumiaji hai, bulk.
+#     2. Push  — kupitia notifications.services.notification._send_via_channel
+#     3. Email — kupitia notifications.services.notification._send_via_channel
+#   Push na email zinatumwa kwa chunks za Celery (tasks.send_channels)
+#   ili mtumiaji mmoja mwenye tatizo asivunje wengine na task isiwe ndefu.
+#
+# Prefs za mtumiaji:
+#   PROMOTION / NEW_CATEGORY  → zinaheshimu `push_promotions` / `email_promotions`
+#   MAINTENANCE / FEE_CHANGE  → matangazo ya mfumo: yanatumwa kwa wote
+#   (Bell inaundwa kila wakati, kama create_notification ya mradi.)
 #
 # Usalama wa kutuma mara moja tu:
 #  - `dispatched_at` inadaiwa (claim) kwa UPDATE ya atomic; mtu wa
 #    kwanza tu ndiye anayeendelea.
-#  - send_announcement ikishindwa: claim INABAKI (at-most-once, kama
-#    flush_scheduled ya zamani) — hatujui ilituma kwa nani kabla ya kuanguka.
-#  - Fallback ya bell ikishindwa: claim inarudishwa; retry inaruka
-#    walioshapata, kwa hiyo hakuna nakala.
+#  - Bell: hitilafu ikitokea, claim inarudishwa; retry inaruka walioshapata
+#    bell (hakuna nakala).
+#  - Push/email zinatumwa kwa watumiaji WAPYA wa bell tu na kamwe
+#    hazirudiwi (at-most-once): hatuna jedwali la delivery, na kurudia
+#    kungetuma email/push mbili.
 # ============================================================
 import logging
 from datetime import timedelta
@@ -30,10 +35,18 @@ from .models import Announcement
 
 logger = logging.getLogger(__name__)
 
-_warned_no_sender = False
-
 RELATED_TYPE = "announcement"
 BATCH_SIZE = 500
+CHANNEL_CHUNK = 200
+CHANNELS = ("push", "email")
+
+# Aina ya tangazo → category ya prefs (None = tangazo la mfumo, tuma kwa wote)
+PREF_CATEGORY = {
+    Announcement.Type.PROMOTION: "promotions",
+    Announcement.Type.NEW_CATEGORY: "promotions",
+    Announcement.Type.FEE_CHANGE: None,
+    Announcement.Type.MAINTENANCE: None,
+}
 
 # Sweeper (dispatch_pending) inashughulikia matangazo ya saa 24 zilizopita
 # tu. Inalinda dhidi ya kutuma arifa za matangazo ya zamani kwa bahati
@@ -65,7 +78,7 @@ def sync_due(now):
 
 
 # ------------------------------------------------------------
-# FAN-OUT
+# MAUDHUI
 # ------------------------------------------------------------
 def _lang_field(User):
     """Jina la field ya lugha kwenye User model, kama ipo."""
@@ -82,8 +95,29 @@ def _content_for(obj, lang):
     return obj.title, obj.message
 
 
+def _channel_allowed(user, ann_type, channel):
+    """Prefs za mtumiaji (kama _should_send_via_channel ya notifications)."""
+    category = PREF_CATEGORY.get(ann_type)
+    if category is None:
+        return True  # tangazo la mfumo
+    try:
+        prefs = user.notification_preferences
+    except Exception:
+        return True
+    field = f"{channel}_{category}"
+    if not hasattr(prefs, field):
+        return True
+    return bool(getattr(prefs, field))
+
+
+# ------------------------------------------------------------
+# BELL (bulk, idempotent kwa kila mpokeaji)
+# ------------------------------------------------------------
 def _fan_out(obj):
-    """Unda Notification kwa kila mtumiaji hai. Inarudisha idadi mpya."""
+    """
+    Unda Notification ya ndani kwa kila mtumiaji hai.
+    Inarudisha ids za watumiaji WAPYA (walioundiwa sasa).
+    """
     from apps.notifications.models import Notification
 
     User = get_user_model()
@@ -95,6 +129,8 @@ def _fan_out(obj):
         if obj.type == Announcement.Type.MAINTENANCE
         else Notification.Priority.NORMAL
     )
+
+    new_ids = []
 
     def flush(batch):
         ids = [row[0] for row in batch]
@@ -124,44 +160,93 @@ def _fan_out(obj):
                     action_url="",
                 )
             )
+            new_ids.append(row[0])
         if rows:
             Notification.objects.bulk_create(rows, batch_size=BATCH_SIZE)
-        return len(rows)
 
-    created = 0
     batch = []
     users = User.objects.filter(is_active=True).order_by("id").values_list(*fields)
     for row in users.iterator(chunk_size=2000):
         batch.append(row)
         if len(batch) >= BATCH_SIZE:
-            created += flush(batch)
+            flush(batch)
             batch = []
     if batch:
-        created += flush(batch)
-    return created
+        flush(batch)
+    return new_ids
 
 
-def _external_sender():
-    """`send_announcement` ya mradi (apps.notifications.services), au None."""
-    global _warned_no_sender
+# ------------------------------------------------------------
+# PUSH + EMAIL (chunk moja, inaitwa na tasks.send_channels)
+# ------------------------------------------------------------
+def deliver_channels(announcement_id, user_ids):
+    """
+    Tuma push na email kwa watumiaji wa chunk hii, ukizingatia prefs.
+    Kila mtumiaji/channel ina try/except yake — hitilafu moja haivunji wengine.
+    Inarudisha {"push": n, "email": n, "skipped": n, "errors": n}.
+    """
+    from apps.notifications.services.notification import _send_via_channel
+
     try:
-        from apps.notifications.services import send_announcement
-        return send_announcement
-    except ImportError:
-        if not _warned_no_sender:
-            logger.warning(
-                "apps.notifications.services.send_announcement haipatikani — "
-                "natumia fallback ya bell (in-app) kwa matangazo.",
-                exc_info=True,
-            )
-            _warned_no_sender = True
-        return None
+        obj = Announcement.objects.get(pk=announcement_id)
+    except Announcement.DoesNotExist:
+        return {"push": 0, "email": 0, "skipped": 0, "errors": 0, "missing": True}
+
+    User = get_user_model()
+    lang_field = _lang_field(User)
+    users = (
+        User.objects.filter(pk__in=list(user_ids), is_active=True)
+        .select_related("notification_preferences")
+    )
+
+    stats = {"push": 0, "email": 0, "skipped": 0, "errors": 0}
+    for user in users:
+        title, message = _content_for(obj, getattr(user, lang_field, None) if lang_field else None)
+        for channel in CHANNELS:
+            if not _channel_allowed(user, obj.type, channel):
+                stats["skipped"] += 1
+                continue
+            try:
+                ok = _send_via_channel(
+                    channel=channel,
+                    recipient=user,
+                    title=title,
+                    message=message,
+                    # tag ya push inatokana na hii → kila tangazo lina tag yake,
+                    # matangazo hayafutani kwenye kifaa
+                    notification_type=f"announcement-{obj.id}",
+                    action_url="",
+                )
+                if ok:
+                    stats[channel] += 1
+                else:
+                    stats["skipped"] += 1  # hana email/token ya push, n.k.
+            except Exception:
+                stats["errors"] += 1
+                logger.exception(
+                    "announcement %s: %s failed for user %s", obj.id, channel, user.pk,
+                )
+    return stats
 
 
+def _enqueue_channels(announcement_id, user_ids):
+    """Gawanya kwa chunks na uzipeleke kwenye Celery. Inarudisha idadi ya chunks."""
+    from .tasks import send_announcement_channels
+
+    chunks = 0
+    for i in range(0, len(user_ids), CHANNEL_CHUNK):
+        send_announcement_channels.delay(announcement_id, user_ids[i:i + CHANNEL_CHUNK])
+        chunks += 1
+    return chunks
+
+
+# ------------------------------------------------------------
+# DISPATCH
+# ------------------------------------------------------------
 def dispatch_announcement(announcement_id):
     """
-    Tuma arifa za tangazo kwa watumiaji — mara moja tu.
-    Inarudisha {"status": "sent"|"skipped"|"error", ...}.
+    Tuma tangazo kwa watumiaji (bell + push + email) — mara moja tu.
+    Inarudisha {"status": "sent"|"skipped", ...}.
     """
     now = timezone.now()
 
@@ -178,33 +263,35 @@ def dispatch_announcement(announcement_id):
         Announcement.objects.filter(pk=announcement_id).update(dispatched_at=None)
         return {"status": "skipped", "reason": "not_due"}
 
-    sender = _external_sender()
-    if sender is not None:
-        try:
-            sender(obj)
-        except Exception:
-            # At-most-once: claim inabaki (angalia maelezo juu ya faili).
-            logger.exception(
-                "send_announcement failed: announcement id=%s", announcement_id,
-            )
-            return {"status": "error", "via": "send_announcement"}
-        return {"status": "sent", "via": "send_announcement"}
-
     try:
-        created = _fan_out(obj)
+        new_ids = _fan_out(obj)
     except Exception:
+        # Rudisha claim ili retry ianze upya (walioshapata bell wanarukwa).
         Announcement.objects.filter(pk=announcement_id).update(dispatched_at=None)
-        logger.exception("announcement fan-out failed: id=%s", announcement_id)
+        logger.exception("announcement bell fan-out failed: id=%s", announcement_id)
         raise
-    logger.info("announcement %s dispatched in-app: %s", announcement_id, created)
-    return {"status": "sent", "via": "in_app", "created": created}
+
+    # Bell zimekamilika. Push/email — at-most-once, hazirudishi claim.
+    chunks = 0
+    try:
+        chunks = _enqueue_channels(announcement_id, new_ids)
+    except Exception:
+        logger.exception(
+            "announcement %s: could not enqueue push/email chunks", announcement_id,
+        )
+
+    logger.info(
+        "announcement %s dispatched: %s bell, %s channel chunks",
+        announcement_id, len(new_ids), chunks,
+    )
+    return {"status": "sent", "created": len(new_ids), "chunks": chunks}
 
 
 def dispatch_pending(now=None):
     """
-    Sweeper: tuma arifa za matangazo yaliyofikia muda wake (ratiba) au
-    ambayo trigger ya moja kwa moja ilishindwa. Inaitwa na
-    tasks.flush_scheduled (Celery beat, kila dakika).
+    Sweeper: tuma matangazo yaliyofikia muda wake (ratiba) au ambayo
+    trigger ya moja kwa moja ilishindwa. Inaitwa na tasks.flush_scheduled
+    (Celery beat, kila dakika).
     """
     now = now or timezone.now()
     cutoff = now - DISPATCH_WINDOW
@@ -221,5 +308,5 @@ def dispatch_pending(now=None):
         try:
             results[announcement_id] = dispatch_announcement(announcement_id)
         except Exception:
-            results[announcement_id] = {"status": "error", "via": "in_app"}
+            results[announcement_id] = {"status": "error"}
     return results

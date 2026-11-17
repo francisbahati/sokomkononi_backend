@@ -14,13 +14,19 @@
 #    flush_scheduled pia inachukua matangazo ya papo hapo ambayo
 #    trigger yake ilishindwa. Jina la task na beat schedule HAVIBADILIKI.
 #  - MPYA: broadcast_announcement — trigger ya papo hapo (create/send-now)
+#  - MPYA: send_announcement_channels — push + email kwa chunk ya watumiaji
 # ============================================================
 import logging
 
 from celery import shared_task
 from django.utils import timezone
 
-from .services import dispatch_announcement, dispatch_pending, sync_due
+from .services import (
+    deliver_channels,
+    dispatch_announcement,
+    dispatch_pending,
+    sync_due,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,3 +65,15 @@ def broadcast_announcement(self, announcement_id):
         return dispatch_announcement(announcement_id)
     except Exception as exc:
         raise self.retry(exc=exc, countdown=60)
+
+
+@shared_task(name="announcements.send_channels")
+def send_announcement_channels(announcement_id, user_ids):
+    """
+    Push + email kwa chunk ya watumiaji (iliyoundwa na dispatch_announcement).
+    Haina retry kwa makusudi: kurudia kungetuma push/email mbili kwa
+    waliokwisha kupata. Makosa ya mtumiaji mmoja yanalogiwa tu.
+    """
+    stats = deliver_channels(announcement_id, user_ids)
+    logger.info("announcements.send_channels #%s: %s", announcement_id, stats)
+    return stats

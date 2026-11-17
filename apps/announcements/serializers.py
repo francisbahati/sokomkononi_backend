@@ -11,10 +11,10 @@
 #    muda unapofika, bila kutegemea cron/Celery kugeuza `sent`
 #  - AnnouncementUpdateSerializer (PATCH ya matangazo yaliyopangwa)
 # ============================================================
-from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Announcement
+from .services import is_published
 
 
 class AnnouncementSerializer(serializers.ModelSerializer):
@@ -37,11 +37,8 @@ class AnnouncementSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def published(obj, now=None):
-        """Kanuni moja ya 'imetumwa' — inalingana na published_q() kwenye views."""
-        now = now or timezone.now()
-        if obj.scheduled_for:
-            return obj.scheduled_for <= now
-        return bool(obj.sent)
+        """Kanuni moja ya 'imetumwa' — iko kwenye services.is_published."""
+        return is_published(obj, now)
 
     def get_is_published(self, obj):
         return self.published(obj)
@@ -58,10 +55,10 @@ class AnnouncementSerializer(serializers.ModelSerializer):
             "title", "title_en",
             "message", "message_en",
             "scheduled_for", "sent",
-            "is_published", "status",
+            "is_published", "status", "dispatched_at",
             "created_by", "created_at",
         ]
-        read_only_fields = ["id", "created_by", "created_at"]
+        read_only_fields = ["id", "created_by", "created_at", "dispatched_at"]
 
 
 class AnnouncementCreateSerializer(serializers.Serializer):

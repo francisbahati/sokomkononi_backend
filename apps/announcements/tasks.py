@@ -9,13 +9,18 @@
 #    apps.notifications.services.send_announcement)
 #  - Inarudisha idadi ya announcements zilizotumwa
 #  - Ina-log kila kosa la notification bila kuvunja task
+#  - MPYA: utoaji wa arifa unapitia services.dispatch_announcement
+#    (claim ya `dispatched_at`) ili tangazo lisitume mara mbili, na
+#    flush_scheduled pia inachukua matangazo ya papo hapo ambayo
+#    trigger yake ilishindwa. Jina la task na beat schedule HAVIBADILIKI.
+#  - MPYA: broadcast_announcement — trigger ya papo hapo (create/send-now)
 # ============================================================
 import logging
 
 from celery import shared_task
 from django.utils import timezone
 
-from .models import Announcement
+from .services import dispatch_announcement, dispatch_pending, sync_due
 
 logger = logging.getLogger(__name__)
 
@@ -23,41 +28,34 @@ logger = logging.getLogger(__name__)
 @shared_task(name="announcements.flush_scheduled")
 def flush_scheduled():
     """
-    Flip `sent=True` kwa announcements zilizopangwa (scheduled_for <= now),
-    na tuma notifications kwa kila moja.
+    1. Flip `sent=True` kwa announcements zilizopangwa (scheduled_for <= now).
+    2. Tuma notifications kwa kila tangazo lililotumwa lakini bado
+       halijafikishiwa watumiaji (claim ya dispatched_at inazuia nakala).
 
     Inaitwa na Celery Beat kila dakika (angalia settings.CELERY_BEAT_SCHEDULE).
     """
     now = timezone.now()
 
-    pending = Announcement.objects.filter(
-        sent=False,
-        scheduled_for__isnull=False,
-        scheduled_for__lte=now,
-    ).order_by("scheduled_for")
+    flipped = sync_due(now)
+    results = dispatch_pending(now)
 
-    count = 0
-    failed = 0
-
-    for ann in pending:
-        # 1. Flip sent=True kwanza ili tusitume mara mbili
-        ann.sent = True
-        ann.save(update_fields=["sent"])
-        count += 1
-
-        # 2. Tuma notification
-        try:
-            from apps.notifications.services import send_announcement
-            send_announcement(ann)
-        except Exception:
-            failed += 1
-            logger.exception(
-                "announcements.flush_scheduled: notification failed for #%s",
-                ann.id,
-            )
+    sent = sum(1 for r in results.values() if r.get("status") == "sent")
+    failed = sum(1 for r in results.values() if r.get("status") == "error")
 
     logger.info(
-        "announcements.flush_scheduled: %s sent, %s notification failures",
-        count, failed,
+        "announcements.flush_scheduled: %s flipped, %s notified, %s notification failures",
+        flipped, sent, failed,
     )
-    return {"sent": count, "failed": failed}
+    return {"flipped": flipped, "sent": sent, "failed": failed}
+
+
+@shared_task(name="announcements.broadcast", bind=True, max_retries=3)
+def broadcast_announcement(self, announcement_id):
+    """
+    Trigger ya papo hapo (tangazo bila ratiba, au "Tuma Sasa").
+    Ikishindwa kuanza (Celery/broker), flush_scheduled itaichukua.
+    """
+    try:
+        return dispatch_announcement(announcement_id)
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=60)

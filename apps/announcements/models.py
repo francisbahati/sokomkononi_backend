@@ -22,6 +22,10 @@ class Announcement(models.Model):
     scheduled_for = models.DateTimeField(null=True, blank=True)
     sent = models.BooleanField(default=False)
 
+    # Wakati arifa (bell) za tangazo hili zilipotumwa kwa watumiaji wote.
+    # NULL = bado hazijatumwa. Inazuia kutuma mara mbili (angalia services.py).
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

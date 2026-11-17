@@ -13,8 +13,15 @@
 #    inapuuzwa (server inaamua)
 #  - POST /{id}/send-now/ — tuma tangazo lililopangwa sasa hivi
 #  - PATCH /{id}/ — hariri/badilisha ratiba (ambazo hazijatumwa tu)
+#  - Tangazo likitumwa (sasa/send-now/ratiba) watumiaji wote wanapata
+#    arifa kupitia Celery (tasks.broadcast_announcement; flush_scheduled
+#    iliyopo kwenye beat ni sweeper). Kufuta tangazo kunaondoa pia
+#    arifa zake za bell.
+#  - Flag `sent` inasawazishwa na tasks.flush_scheduled (si kwenye GET).
 # ============================================================
-from django.db.models import Q
+import logging
+
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -27,6 +34,9 @@ from .serializers import (
     AnnouncementSerializer,
     AnnouncementUpdateSerializer,
 )
+from .services import RELATED_TYPE, published_q
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -51,19 +61,22 @@ def _log(request, action, target="", target_id=None, details="", params=None):
         )
 
 
-def published_q(now):
+def _enqueue_broadcast(announcement_id):
     """
-    Imetumwa = (ina ratiba na muda umefika) AU (haina ratiba na sent=True).
-    Lazima ilingane na AnnouncementSerializer.published().
+    Tuma arifa kwa watumiaji baada ya transaction kukamilika. Kama Celery
+    haipatikani, flush_scheduled (beat) italichukua.
     """
-    return Q(scheduled_for__lte=now) | Q(scheduled_for__isnull=True, sent=True)
+    def _go():
+        try:
+            from .tasks import broadcast_announcement
+            broadcast_announcement.delay(announcement_id)
+        except Exception:
+            logger.exception(
+                "Could not enqueue announcement broadcast id=%s "
+                "(flush_scheduled itajaribu tena)", announcement_id,
+            )
 
-
-def sync_due(now):
-    """Sawazisha flag `sent` kwa matangazo yaliyofikia muda wake (idempotent)."""
-    return Announcement.objects.filter(
-        sent=False, scheduled_for__lte=now,
-    ).update(sent=True)
+    transaction.on_commit(_go)
 
 
 class AnnouncementViewSet(viewsets.GenericViewSet):
@@ -95,9 +108,8 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
         qs = Announcement.objects.all()
         now = timezone.now()
 
-        # Admin/staff wanaona zote (na flag `sent` inasawazishwa)
+        # Admin/staff wanaona zote
         if user.is_authenticated and user.is_staff:
-            sync_due(now)
             return qs
 
         # Public: zilizotumwa tu (muda wa ratiba umefika)
@@ -182,6 +194,9 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
             params={"name": obj.title},
         )
 
+        if sent:
+            _enqueue_broadcast(obj.id)
+
         return Response(
             AnnouncementSerializer(obj).data,
             status=status.HTTP_201_CREATED,
@@ -249,6 +264,7 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
         obj.scheduled_for = now
         obj.sent = True
         obj.save(update_fields=["scheduled_for", "sent"])
+        _enqueue_broadcast(obj.id)
 
         _log(
             request,
@@ -274,6 +290,15 @@ class AnnouncementViewSet(viewsets.GenericViewSet):
 
         obj_id = obj.id
         obj_title = obj.title
+
+        # Ondoa arifa za tangazo hili kwenye bell za watumiaji
+        try:
+            from apps.notifications.models import Notification
+            Notification.all_objects.filter(
+                related_object_type=RELATED_TYPE, related_object_id=obj_id,
+            ).hard_delete()
+        except Exception:
+            logger.exception("Failed to remove notifications for announcement %s", obj_id)
 
         obj.delete()
 

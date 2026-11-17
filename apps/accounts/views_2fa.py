@@ -242,7 +242,11 @@ class SessionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        rows = UserSession.objects.filter(user=request.user)
+        # Frontend inatuma jti ya refresh token ya kifaa cha SASA (`?current_jti=`)
+        # ili tuweke alama `is_current`. jti si siri (refresh token yenyewe ndiyo
+        # siri); kwa hiyo kuituma hakuhatarishi chochote.
+        current_jti = (request.query_params.get("current_jti") or "").strip()
+        rows = UserSession.objects.filter(user=request.user).order_by("-last_seen")
         return Response([
             {
                 "id": s.pk,
@@ -250,6 +254,7 @@ class SessionsView(APIView):
                 "ip_address": s.ip_address,
                 "last_seen": s.last_seen,
                 "created_at": s.created_at,
+                "is_current": bool(current_jti) and s.refresh_jti == current_jti,
             }
             for s in rows
         ])

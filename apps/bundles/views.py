@@ -5,6 +5,8 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.core.admin_2fa import is_staff_with_2fa
+
 from .models import Bundle, BundlePurchase
 from .serializers import (
     BundlePurchaseCreateSerializer,
@@ -12,10 +14,32 @@ from .serializers import (
     BundleSerializer,
 )
 from .services import create_purchase, initiate_purchase_payment
+from .stats import aggregate_purchase_rows
 
 
 # Staff/superuser + 2FA (angalia apps/core/admin_2fa.py)
 IsAdminOrReadOnly = IsAdminOrReadOnly2FA
+
+
+def _attach_purchase_stats(items):
+    """
+    Ongeza kwa kila bundle: purchasesCount, creditsIssued, creditsIssuedByService
+    (manunuzi YALIYOLIPWA tu). Query MOJA kwa bundles zote kwenye ukurasa.
+    """
+    ids = [i.get("id") for i in items if i.get("id") is not None]
+    rows = (
+        BundlePurchase.objects
+        .filter(bundle_id__in=ids, status=BundlePurchase.Status.PAID)
+        .values_list("bundle_id", "credits_snapshot")
+        .iterator()
+    )
+    stats = aggregate_purchase_rows(rows)
+    for item in items:
+        s = stats.get(item.get("id"))
+        item["purchasesCount"] = s["purchases"] if s else 0
+        item["creditsIssued"] = s["creditsTotal"] if s else 0
+        item["creditsIssuedByService"] = s["creditsByService"] if s else {}
+    return items
 
 
 class BundleViewSet(viewsets.ModelViewSet):
@@ -24,7 +48,7 @@ class BundleViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Bundle.objects.all()
-        if self.request.user.is_authenticated and self.request.user.is_staff:
+        if is_staff_with_2fa(self.request):
             return qs
         return qs.filter(active=True)
 
@@ -34,12 +58,15 @@ class BundleViewSet(viewsets.ModelViewSet):
         if type_filter:
             qs = qs.filter(type=type_filter.upper())
         page = self.paginate_queryset(qs)
-        serializer = BundleSerializer(
-            page if page is not None else qs, many=True,
+        data = list(
+            BundleSerializer(page if page is not None else qs, many=True).data
         )
+        # Takwimu za manunuzi ni za admin tu (zenye 2FA); watumiaji hawazioni.
+        if is_staff_with_2fa(request):
+            _attach_purchase_stats(data)
         if page is not None:
-            return self.get_paginated_response(serializer.data)
-        return Response(serializer.data)
+            return self.get_paginated_response(data)
+        return Response(data)
 
     def destroy(self, request, *args, **kwargs):
         from django.db.models import ProtectedError
@@ -62,7 +89,7 @@ class BundlePurchaseViewSet(viewsets.GenericViewSet):
 
     def get_queryset(self):
         qs = BundlePurchase.objects.select_related("bundle")
-        if self.request.user.is_staff:
+        if is_staff_with_2fa(self.request):
             return qs
         return qs.filter(user=self.request.user)
 
@@ -94,7 +121,7 @@ class BundlePurchaseViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["post"], url_path="pay")
     def pay(self, request, pk=None):
         purchase = self.get_object()
-        if purchase.user_id != request.user.id and not request.user.is_staff:
+        if purchase.user_id != request.user.id and not is_staff_with_2fa(request):
             return Response({"detail": "Huna ruhusa."}, status=status.HTTP_403_FORBIDDEN)
 
         # Credits path — canonical contract across every pay endpoint.

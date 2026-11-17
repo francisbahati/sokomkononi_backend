@@ -17,13 +17,7 @@ from drf_spectacular.views import (
 from apps.core.health import health as _health, health_deep as _health_deep
 
 # ------------------------------------------------------------
-# Django admin (/admin/) — haina hatua ya 2FA (inaingia kwa session +
-# nenosiri), kwa hiyo inadhibitiwa kwa settings. Chaguo-msingi hazibadilishi
-# tabia ya sasa; mapendekezo ya production yako kwenye maelezo ya kila moja:
-#
-#   DJANGO_ADMIN_ENABLED = False         # PENDEKEZO production kama huitumii
-#   DJANGO_ADMIN_URL = "mgt-7f3k2x"      # njia ya siri badala ya "admin"
-#   DJANGO_ADMIN_SUPERUSER_ONLY = True   # staff wa kawaida wasiingie hapa
+
 # ------------------------------------------------------------
 _DJANGO_ADMIN_ENABLED = getattr(settings, "DJANGO_ADMIN_ENABLED", True)
 _DJANGO_ADMIN_URL = (
@@ -102,6 +96,7 @@ urlpatterns = [
     path("api/admin/users/", include("apps.accounts.urls_admin")),
     path("api/admin/reports/", include("apps.finance.urls_admin_reports")),
     path("api/admin/content/", include("apps.content.urls_admin")),
+    path("api/admin/bundles/", include("apps.bundles.urls_admin")),
 
     path(
         "api/admin/promotions/",

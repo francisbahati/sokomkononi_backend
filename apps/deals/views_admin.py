@@ -456,7 +456,23 @@ class AdminDealRoomViewSet(viewsets.GenericViewSet):
 
         transaction.on_commit(lambda: _notify_safe(_notify))
 
-        return self._detail_response(request, deal_room.pk)
+        # Kughairi tayari kumehifadhiwa. Kosa la kutengeneza jibu (mf. muhtasari
+        # wa refund) lisigeuke 500 — rudisha jibu la msingi na ulogi kosa.
+        try:
+            return self._detail_response(request, deal_room.pk)
+        except Exception:
+            logger.exception(
+                "cancel: detail response failed (room=%s)", deal_room.pk,
+            )
+            return Response(
+                {
+                    "id": deal_room.pk,
+                    "status": DealRoom.Status.CANCELLED,
+                    "cancelled_by_admin": True,
+                    "cancelledByAdmin": True,
+                },
+                status=status.HTTP_200_OK,
+            )
 
     # ============================================================
     # 6. RESOLVE-DISPUTE — tatua mgogoro wa transaction

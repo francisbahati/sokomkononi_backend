@@ -15,6 +15,8 @@ Only an admin can move a transaction out of DISPUTED:
     - CANCELLED: deal is cancelled; listing -> AVAILABLE
 """
 
+import logging
+
 from django.db import transaction as db_transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _, override
@@ -34,6 +36,19 @@ RESOLUTION_COMPLETED = "COMPLETED"
 RESOLUTION_CANCELLED = "CANCELLED"
 
 VALID_RESOLUTIONS = {RESOLUTION_COMPLETED, RESOLUTION_CANCELLED}
+
+logger = logging.getLogger(__name__)
+
+
+def _lock_listing(listing_id):
+    """
+    Funga Listing kwa update — pamoja na iliyo kwenye kikapu (soft-deleted).
+    `Listing.objects` inaficha zilizofutwa, na muamala unaweza kuwa na tangazo
+    lililofutwa (mf. muuzaji/admin alilifuta) — hapo `.get()` ilitupa
+    DoesNotExist na kughairi kulishindikana kwa 500.
+    """
+    manager = getattr(Listing, "all_objects", Listing.objects)
+    return manager.select_for_update().get(pk=listing_id)
 
 
 @db_transaction.atomic
@@ -177,9 +192,7 @@ def _resolve_as_completed(*, transaction, note, now, admin_user=None):
         else note_text
     )
 
-    listing = Listing.objects.select_for_update().get(
-        pk=transaction.listing_id
-    )
+    listing = _lock_listing(transaction.listing_id)
     listing.status = Listing.Status.SOLD
     listing.save(update_fields=["status", "updated_at"])
 
@@ -245,11 +258,10 @@ def _resolve_as_cancelled(
         else "Imeghairiwa na msimamizi."
     )
 
-    listing = Listing.objects.select_for_update().get(
-        pk=transaction.listing_id
-    )
+    listing = _lock_listing(transaction.listing_id)
     listing_reopened = False
-    if listing.status in [
+    # Tangazo lililo kwenye kikapu haliirudishwi hewani kwa kughairi muamala.
+    if not getattr(listing, "is_deleted", False) and listing.status in [
         Listing.Status.RESERVED,
         Listing.Status.SOLD,
     ]:
@@ -296,19 +308,39 @@ def _resolve_as_cancelled(
                     "Transaction #{id} imeghairiwa na msimamizi. "
                     "Sababu: {reason}. Tangazo limerudishwa hewani."
                 ).format(id=transaction.id, reason=note or "—")
-            create_notification(
-                recipient=recipient,
-                notification_type=(
-                    Notification.NotificationType.TRANSACTION_CANCELLED
-                ),
-                title=_title,
-                message=_message,
-                priority=Notification.Priority.URGENT,
-                related_object_type="Transaction",
-                related_object_id=transaction.id,
-                action_url=f"/transactions/{transaction.id}",
-            )
+            # Arifa isivunje kughairi: savepoint kila mpokeaji, kosa linalogiwa tu.
+            try:
+                with db_transaction.atomic():
+                    create_notification(
+                        recipient=recipient,
+                        notification_type=(
+                            Notification.NotificationType.TRANSACTION_CANCELLED
+                        ),
+                        title=_title,
+                        message=_message,
+                        priority=Notification.Priority.URGENT,
+                        related_object_type="Transaction",
+                        related_object_id=transaction.id,
+                        action_url=f"/transactions/{transaction.id}",
+                    )
+            except Exception:
+                logger.exception(
+                    "cancel notification failed: txn=%s recipient=%s",
+                    transaction.id, getattr(recipient, "pk", None),
+                )
 
     if listing_reopened:
-        from apps.waiting_list.services.notifications import notify_waiting_buyers
-        db_transaction.on_commit(lambda: notify_waiting_buyers(listing=listing))
+        # Import + wito ndani ya callback salama: kosa hapa (baada ya commit)
+        # lisigeuke 500 wakati kughairi tayari kumehifadhiwa.
+        def _notify_waiting():
+            try:
+                from apps.waiting_list.services.notifications import (
+                    notify_waiting_buyers,
+                )
+                notify_waiting_buyers(listing=listing)
+            except Exception:
+                logger.exception(
+                    "waiting-list notification failed: listing=%s", listing.pk,
+                )
+
+        db_transaction.on_commit(_notify_waiting)

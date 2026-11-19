@@ -94,86 +94,73 @@ _LISTING_RELATED_TABLES = [
 ]
 
 
+def _cleanup_exec(cur, label, sql, params, removed, log):
+    """
+    Endesha DELETE moja ndani ya SAVEPOINT. Postgres inakataa kila amri
+    baada ya kosa la kwanza ndani ya muamala ("current transaction is
+    aborted...") — savepoint inarudisha kosa moja tu, si muamala mzima.
+    """
+    try:
+        with transaction.atomic():
+            cur.execute(sql, params)
+            count = cur.rowcount
+        if count > 0:
+            removed.append(f"{label}({count})")
+    except Exception as e:
+        log.warning("[trash] cleanup %s skipped: %s", label, e)
+
+
 def _cleanup_listing_relations(listing_id):
     import logging
     log = logging.getLogger(__name__)
     removed = []
+    lid = [listing_id]
 
     with connection.cursor() as cur:
-        try:
-            cur.execute("""
-                DELETE FROM messages
-                WHERE conversation_id IN (
-                    SELECT id FROM conversations WHERE listing_id = %s
-                )
-            """, [listing_id])
-            if cur.rowcount > 0:
-                removed.append(f"messages({cur.rowcount})")
-        except Exception as e:
-            log.debug("[trash] messages cleanup skipped: %s", e)
+        _cleanup_exec(cur, "messages", """
+            DELETE FROM messages
+            WHERE conversation_id IN (
+                SELECT id FROM conversations WHERE listing_id = %s
+            )
+        """, lid, removed, log)
 
         for child in ("reservations", "inspection_periods"):
-            try:
-                cur.execute(f"""
-                    DELETE FROM {child}
-                    WHERE transaction_id IN (
-                        SELECT id FROM transactions WHERE listing_id = %s
-                    )
-                """, [listing_id])
-                if cur.rowcount > 0:
-                    removed.append(f"{child}({cur.rowcount})")
-            except Exception as e:
-                log.debug("[trash] %s cleanup skipped: %s", child, e)
+            _cleanup_exec(cur, child, f"""
+                DELETE FROM {child}
+                WHERE transaction_id IN (
+                    SELECT id FROM transactions WHERE listing_id = %s
+                )
+            """, lid, removed, log)
 
         for child in ("deal_messages", "negotiation_offers", "tickets"):
-            try:
-                cur.execute(f"""
-                    DELETE FROM {child}
-                    WHERE deal_room_id IN (
-                        SELECT id FROM deal_rooms WHERE listing_id = %s
-                    )
-                """, [listing_id])
-                if cur.rowcount > 0:
-                    removed.append(f"{child}({cur.rowcount})")
-            except Exception as e:
-                log.debug("[trash] %s cleanup skipped: %s", child, e)
+            _cleanup_exec(cur, child, f"""
+                DELETE FROM {child}
+                WHERE deal_room_id IN (
+                    SELECT id FROM deal_rooms WHERE listing_id = %s
+                )
+            """, lid, removed, log)
 
         for table in _LISTING_RELATED_TABLES:
-            try:
-                cur.execute(
-                    f'DELETE FROM "{table}" WHERE listing_id = %s',
-                    [listing_id],
-                )
-                if cur.rowcount > 0:
-                    removed.append(f"{table}({cur.rowcount})")
-            except Exception as e:
-                log.debug("[trash] cleanup %s skipped: %s", table, e)
+            _cleanup_exec(
+                cur, table,
+                f'DELETE FROM "{table}" WHERE listing_id = %s',
+                lid, removed, log,
+            )
 
-        try:
-            cur.execute("DELETE FROM transactions WHERE listing_id = %s", [listing_id])
-            if cur.rowcount > 0:
-                removed.append(f"transactions({cur.rowcount})")
-        except Exception as e:
-            log.debug("[trash] transactions cleanup skipped: %s", e)
-
-        try:
-            cur.execute("DELETE FROM deal_rooms WHERE listing_id = %s", [listing_id])
-            if cur.rowcount > 0:
-                removed.append(f"deal_rooms({cur.rowcount})")
-        except Exception as e:
-            log.debug("[trash] deal_rooms cleanup skipped: %s", e)
-
-        try:
-            cur.execute("DELETE FROM conversations WHERE listing_id = %s", [listing_id])
-            if cur.rowcount > 0:
-                removed.append(f"conversations({cur.rowcount})")
-        except Exception as e:
-            log.debug("[trash] conversations cleanup skipped: %s", e)
+        _cleanup_exec(cur, "transactions",
+                      "DELETE FROM transactions WHERE listing_id = %s",
+                      lid, removed, log)
+        _cleanup_exec(cur, "deal_rooms",
+                      "DELETE FROM deal_rooms WHERE listing_id = %s",
+                      lid, removed, log)
+        _cleanup_exec(cur, "conversations",
+                      "DELETE FROM conversations WHERE listing_id = %s",
+                      lid, removed, log)
 
     return removed
 
 
-def _create_refunds_for_listing(listing, admin_user):
+def _create_refunds_for_listing_inner(listing, admin_user):
     import logging
     log = logging.getLogger(__name__)
     created = []
@@ -279,8 +266,26 @@ def _create_refunds_for_listing(listing, admin_user):
 
     except Exception as e:
         log.exception("[trash] refund creation failed: %s", e)
+        raise
 
     return created
+
+
+def _create_refunds_for_listing(listing, admin_user):
+    """
+    Refund zinaundwa ndani ya SAVEPOINT: kosa la DB hapa lisiharibu muamala
+    wa kufuta (Postgres ingekataa amri zote zinazofuata). Ikishindwa, refund
+    za tangazo hili hazijaundwa (zote au hakuna) — kosa linalogiwa.
+    """
+    import logging
+    try:
+        with transaction.atomic():
+            return _create_refunds_for_listing_inner(listing, admin_user)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "[trash] refunds NOT created for listing %s", listing.pk,
+        )
+        return []
 
 
 def _cascade_protected(obj, max_depth=5):
